@@ -1,0 +1,11 @@
+[functions.admin-create-catalog-item]
+verify_jwt = false
+
+[functions.admin-upsert-mini-erp-config]
+verify_jwt = false
+
+[functions.admin-upsert-category-budget-owners]
+verify_jwt = false
+
+[functions.validate-access-code]
+verify_jwt = false
