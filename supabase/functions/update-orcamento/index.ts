@@ -1,3 +1,6 @@
+//* eslint-disable @typescript-eslint/no-explicit-any */
+// deno-lint-ignore-file
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -28,11 +31,6 @@ serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-      return new Response(
-        JSON.stringify({ error: "Forbidden: insufficient role" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -46,7 +44,7 @@ serve(async (req: Request) => {
 
     // perform updates using service role (bypass RLS)
     const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
-    const resultados: any[] = [];
+    const resultados: unknown[] = [];
 
     for (const orc of orcamentos) {
       if (!orc.centro_custo_id || typeof orc.valor_aprovado !== "number") {

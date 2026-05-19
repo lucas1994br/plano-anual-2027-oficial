@@ -61,7 +61,7 @@ const Index = () => {
         <div className="px-6 py-8 text-center text-muted-foreground">Nenhum item encontrado na categoria selecionada.</div>
       ) : (
         <PlanTable items={filteredItems} onUpdateQtdEstimada={handleUpdateQtdEstimada} onUpdateUnidade={handleUpdateUnidade} onUpdateObservacao={handleUpdateObservacao} onUpdatePrioridade={handleUpdatePrioridade} />
-      )
+      )}
     </div>
   );
 };

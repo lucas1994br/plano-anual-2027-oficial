@@ -6,11 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { AdminBudgetControl } from "@/components/features/admin/AdminBudgetControl";
 import { AdminCatalogItemControl } from "@/components/features/admin/AdminCatalogItemControl";
+import { AdminServicosControl } from "@/components/features/admin/AdminServicosControl";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "@/lib/services";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -23,6 +23,14 @@ interface Periodo {
   inicio: string;
   fim: string;
   ativo: boolean;
+}
+
+interface Diretoria {
+  id: string;
+  sigla: string;
+  nome: string;
+  totalItens: number;
+  totalGerencias: number;
 }
 
 const AdminPanel = () => {
@@ -40,8 +48,8 @@ const AdminPanel = () => {
     queryKey: ["todos-periodos"],
     queryFn: getTodosPeriodos,
     enabled: authenticated,
-    staleTime: 0, // Força sempre refetch
-    gcTime: 0, // Não cachea
+    staleTime: 0,
+    gcTime: 0,
   });
 
   const [novoPeriodo, setNovoPeriodo] = useState({ nome: "", inicio: "", fim: "" });
@@ -50,7 +58,6 @@ const AdminPanel = () => {
   const [editForm, setEditForm] = useState({ nome: "", inicio: "", fim: "" });
   const [isUpdatingPeriodo, setIsUpdatingPeriodo] = useState(false);
 
-  // Refetch ao entrar no painel admin
   useEffect(() => {
     if (authenticated) {
       queryClient.refetchQueries({ queryKey: ["todos-periodos"] });
@@ -80,18 +87,17 @@ const AdminPanel = () => {
         fim: novoPeriodo.fim,
       });
       setNovoPeriodo({ nome: "", inicio: "", fim: "" });
-      queryClient.clear();
-      setTimeout(() => {
-        window.location.reload();
-      }, 300);
+      await refetchPeriodos();
+      toast.success("Período criado com sucesso!");
     } catch (error) {
       console.error("Erro ao criar período:", error);
       toast.error("Erro ao criar período.");
+    } finally {
       setIsCreatingPeriodo(false);
     }
   };
 
-  const handleStartEditPeriodo = (periodo: any) => {
+  const handleStartEditPeriodo = (periodo: Periodo) => {
     setEditingPeriodoId(periodo.id);
     setEditForm({
       nome: periodo.nome,
@@ -114,11 +120,8 @@ const AdminPanel = () => {
     setIsUpdatingPeriodo(true);
     try {
       await updatePeriodo(editingPeriodoId, editForm);
-      
-      // Invalidar e refetch
-      queryClient.invalidateQueries({ queryKey: ["todos-periodos"] });
+      await queryClient.invalidateQueries({ queryKey: ["todos-periodos"] });
       await refetchPeriodos();
-      
       setEditingPeriodoId(null);
       toast.success("Período atualizado com sucesso!");
     } catch (error) {
@@ -130,25 +133,13 @@ const AdminPanel = () => {
     }
   };
 
-  const handleTogglePeriodo = async (id: string, ativo: boolean) => {
-    try {
-      await updatePeriodo(id, { ativo: !ativo });
-      queryClient.invalidateQueries({ queryKey: ["todos-periodos"] });
-      toast.success("Status do período atualizado.");
-    } catch (error) {
-      console.error("Erro ao atualizar período:", error);
-      toast.error("Erro ao atualizar período.");
-    }
-  };
-
   const handleCleanupPeriodos = async () => {
     try {
       await cleanupDuplicatePeriodos();
       toast.success("Períodos limpos! Recarregando...");
-      // Aguarda um pouco e depois recarrega completamente
       setTimeout(() => {
         queryClient.clear();
-        window.location.reload();
+        globalThis.location.reload();
       }, 1000);
     } catch (error) {
       console.error("Erro ao limpar períodos:", error);
@@ -169,6 +160,9 @@ const AdminPanel = () => {
       />
     );
   }
+
+  const periodoAtivo = periodos.find((p: Periodo) => p.ativo);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
       <div
@@ -182,271 +176,261 @@ const AdminPanel = () => {
         />
       </div>
       <div className="relative z-10">
-      <div className="px-6 py-3 bg-card border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Button>
-          <Badge variant="outline" className="text-xs gap-1">
-            <Shield className="h-3 w-3" /> Administrador
-          </Badge>
-        </div>
-      </div>
-
-      {/* Header */}
-      <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
-        <div className="max-w-5xl mx-auto flex items-center gap-4">
-          <div className="bg-white/20 p-3 rounded-lg">
-            <Shield className="h-8 w-8 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-white">Painel Administrativo</h1>
-            <p className="text-white/80 text-sm">Controle de períodos, acessos e configurações do PAC 2027</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto px-6 py-6">
-        <Tabs defaultValue="periodos" className="w-full">
-          <TabsList className="mb-5">
-            <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
-            <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
-            <TabsTrigger value="catalogo">Itens</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="periodos" className="space-y-6">
-            {/* Período Ativo */}
-            <Card className="p-6 card-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-primary" />
-              Período Ativo
-            </h2>
-            <div className="flex gap-2">
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => {
-                  refetchPeriodos();
-                  queryClient.refetchQueries({ queryKey: ["diretorias-detalhes"] });
-                  toast.success("Dados recarregados!");
-                }}
-                className="gap-1"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Atualizar
-              </Button>
-              {periodos.length > 1 && (
-                <Button 
-                  size="sm" 
-                  variant="destructive"
-                  onClick={async () => {
-                    try {
-                      await cleanupDuplicatePeriodos();
-                      await refetchPeriodos();
-                      toast.success("Períodos duplicados removidos!");
-                    } catch (error) {
-                      console.error("Erro ao limpar:", error);
-                      const message = error instanceof Error ? error.message : "Erro ao limpar períodos duplicados.";
-                      toast.error(message);
-                    }
-                  }}
-                >
-                  Limpar {periodos.length} períodos
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {isLoadingPeriodos ? (
-            <div className="text-center text-muted-foreground py-4">Carregando período...</div>
-          ) : periodos.length === 0 ? (
-            <div className="text-center text-muted-foreground py-4">Nenhum período ativo.</div>
-          ) : (
-            <>
-              {periodos.find((p: any) => p.ativo) && (
-                <div className="p-4 rounded-lg border-2 border-success/20 bg-success/5">
-                  {editingPeriodoId === periodos.find((p: any) => p.ativo)?.id ? (
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="edit-nome" className="text-sm">Nome do Período</Label>
-                        <Input
-                          id="edit-nome"
-                          value={editForm.nome}
-                          onChange={(e) => setEditForm({ ...editForm, nome: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <Label htmlFor="edit-inicio" className="text-sm">Data Início</Label>
-                          <Input
-                            id="edit-inicio"
-                            type="date"
-                            value={editForm.inicio}
-                            onChange={(e) => setEditForm({ ...editForm, inicio: e.target.value })}
-                            className="mt-1"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="edit-fim" className="text-sm">Data Fim</Label>
-                          <Input
-                            id="edit-fim"
-                            type="date"
-                            value={editForm.fim}
-                            onChange={(e) => setEditForm({ ...editForm, fim: e.target.value })}
-                            className="mt-1"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button 
-                          size="sm"
-                          onClick={handleSaveEditPeriodo}
-                          disabled={isUpdatingPeriodo}
-                          className="gap-2"
-                        >
-                          <Save className="h-4 w-4" />
-                          {isUpdatingPeriodo ? "Salvando..." : "Salvar"}
-                        </Button>
-                        <Button 
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setEditingPeriodoId(null)}
-                        >
-                          Cancelar
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold text-lg text-foreground">{periodos.find((p: any) => p.ativo)?.nome}</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          <Clock className="h-4 w-4 inline mr-2" />
-                          {format(new Date(periodos.find((p: any) => p.ativo).inicio + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })} até{" "}
-                          {format(new Date(periodos.find((p: any) => p.ativo).fim + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-success text-success-foreground">Ativo</Badge>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleStartEditPeriodo(periodos.find((p: any) => p.ativo))}
-                        >
-                          Editar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-            </Card>
-
-            {/* Adicionar Novo Período */}
-            <Card className="p-6 card-shadow">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
-            <Plus className="h-5 w-5 text-primary" />
-            Adicionar Novo Período
-          </h2>
-          
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="add-nome">Nome do Período</Label>
-              <Input
-                id="add-nome"
-                placeholder="Ex: PAC 2028 - Preenchimento Anual"
-                value={novoPeriodo.nome}
-                onChange={(e) => setNovoPeriodo({ ...novoPeriodo, nome: e.target.value })}
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="add-inicio">Data de Início</Label>
-                <Input
-                  id="add-inicio"
-                  type="date"
-                  value={novoPeriodo.inicio}
-                  onChange={(e) => setNovoPeriodo({ ...novoPeriodo, inicio: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="add-fim">Data de Término</Label>
-                <Input
-                  id="add-fim"
-                  type="date"
-                  value={novoPeriodo.fim}
-                  onChange={(e) => setNovoPeriodo({ ...novoPeriodo, fim: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={handleAddPeriodo}
-              disabled={isCreatingPeriodo || !novoPeriodo.nome || !novoPeriodo.inicio || !novoPeriodo.fim}
-              className="w-full"
-            >
-              {isCreatingPeriodo ? "Criando..." : "Criar Período"}
+        <div className="px-6 py-3 bg-card border-b">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
             </Button>
+            <Badge variant="outline" className="text-xs gap-1">
+              <Shield className="h-3 w-3" /> Administrador
+            </Badge>
           </div>
-            </Card>
+        </div>
 
-            {/* Visão Geral das Diretorias */}
-            <Card className="p-6 card-shadow">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
-            <Users className="h-5 w-5 text-primary" />
-            Visão Geral das Diretorias
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {isLoadingDiretorias ? (
-              <div className="col-span-full text-center text-muted-foreground">Carregando diretorias...</div>
-            ) : diretorias.length === 0 ? (
-              <div className="col-span-full text-center text-muted-foreground">Nenhuma diretoria encontrada.</div>
-            ) : (
-              diretorias.map((dir: any) => (
-                <div key={dir.sigla} className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md transition-shadow">
-                  <span className="text-2xl">📋</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
-                    <div className="flex gap-3 mt-2 text-xs font-medium">
-                      <span className="text-primary">{dir.totalItens} itens</span>
-                      <span className="text-blue-600">{dir.totalGerencias} gerências</span>
-                    </div>
+        <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
+          <div className="max-w-5xl mx-auto flex items-center gap-4">
+            <div className="bg-white/20 p-3 rounded-lg">
+              <Shield className="h-8 w-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">Painel Administrativo</h1>
+              <p className="text-white/80 text-sm">Controle de períodos, acessos e configurações do PAC 2027</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-5xl mx-auto px-6 py-6">
+          <Tabs defaultValue="periodos" className="w-full">
+            <TabsList className="mb-5">
+              <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
+              <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
+              <TabsTrigger value="catalogo">Itens</TabsTrigger>
+              <TabsTrigger value="servicos">Serviços</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="periodos" className="space-y-6">
+              <Card className="p-6 card-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    Período Ativo
+                  </h2>
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => {
+                        refetchPeriodos();
+                        queryClient.refetchQueries({ queryKey: ["diretorias-detalhes"] });
+                        toast.success("Dados recarregados!");
+                      }}
+                      className="gap-1"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Atualizar
+                    </Button>
+                    {periodos.length > 1 && (
+                      <Button 
+                        size="sm" 
+                        variant="destructive"
+                        onClick={handleCleanupPeriodos}
+                      >
+                        Limpar {periodos.length} períodos
+                      </Button>
+                    )}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-            </Card>
-          </TabsContent>
 
-          <TabsContent value="orcamento">
-            <AdminBudgetControl
-              diretorias={diretorias.map((dir: any) => ({
-                id: dir.id,
-                sigla: dir.sigla,
-                nome: dir.nome,
-              }))}
-            />
-          </TabsContent>
+                {isLoadingPeriodos ? (
+                  <div className="text-center text-muted-foreground py-4">Carregando período...</div>
+                ) : periodos.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-4">Nenhum período ativo.</div>
+                ) : (
+                  <>
+                    {periodoAtivo && (
+                      <div className="p-4 rounded-lg border-2 border-success/20 bg-success/5">
+                        {editingPeriodoId === periodoAtivo.id ? (
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="edit-nome" className="text-sm">Nome do Período</Label>
+                              <Input
+                                id="edit-nome"
+                                value={editForm.nome}
+                                onChange={(e) => setEditForm({ ...editForm, nome: e.target.value })}
+                                className="mt-1"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <Label htmlFor="edit-inicio" className="text-sm">Data Início</Label>
+                                <Input
+                                  id="edit-inicio"
+                                  type="date"
+                                  value={editForm.inicio}
+                                  onChange={(e) => setEditForm({ ...editForm, inicio: e.target.value })}
+                                  className="mt-1"
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="edit-fim" className="text-sm">Data Fim</Label>
+                                <Input
+                                  id="edit-fim"
+                                  type="date"
+                                  value={editForm.fim}
+                                  onChange={(e) => setEditForm({ ...editForm, fim: e.target.value })}
+                                  className="mt-1"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button 
+                                size="sm"
+                                onClick={handleSaveEditPeriodo}
+                                disabled={isUpdatingPeriodo}
+                                className="gap-2"
+                              >
+                                <Save className="h-4 w-4" />
+                                {isUpdatingPeriodo ? "Salvando..." : "Salvar"}
+                              </Button>
+                              <Button 
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingPeriodoId(null)}
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-semibold text-lg text-foreground">{periodoAtivo.nome}</p>
+                              <p className="text-sm text-muted-foreground mt-2">
+                                <Clock className="h-4 w-4 inline mr-2" />
+                                {format(new Date(periodoAtivo.inicio + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })} até{" "}
+                                {format(new Date(periodoAtivo.fim + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-success text-success-foreground">Ativo</Badge>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleStartEditPeriodo(periodoAtivo)}
+                              >
+                                Editar
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </Card>
 
-          <TabsContent value="catalogo">
-            <AdminCatalogItemControl />
-          </TabsContent>
-        </Tabs>
-      </div>
+              <Card className="p-6 card-shadow">
+                <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
+                  <Plus className="h-5 w-5 text-primary" />
+                  Adicionar Novo Período
+                </h2>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="add-nome">Nome do Período</Label>
+                    <Input
+                      id="add-nome"
+                      placeholder="Ex: PAC 2028 - Preenchimento Anual"
+                      value={novoPeriodo.nome}
+                      onChange={(e) => setNovoPeriodo({ ...novoPeriodo, nome: e.target.value })}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="add-inicio">Data de Início</Label>
+                      <Input
+                        id="add-inicio"
+                        type="date"
+                        value={novoPeriodo.inicio}
+                        onChange={(e) => setNovoPeriodo({ ...novoPeriodo, inicio: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="add-fim">Data de Término</Label>
+                      <Input
+                        id="add-fim"
+                        type="date"
+                        value={novoPeriodo.fim}
+                        onChange={(e) => setNovoPeriodo({ ...novoPeriodo, fim: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={handleAddPeriodo}
+                    disabled={isCreatingPeriodo || !novoPeriodo.nome || !novoPeriodo.inicio || !novoPeriodo.fim}
+                    className="w-full"
+                  >
+                    {isCreatingPeriodo ? "Criando..." : "Criar Período"}
+                  </Button>
+                </div>
+              </Card>
+
+              <Card className="p-6 card-shadow">
+                <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
+                  <Users className="h-5 w-5 text-primary" />
+                  Visão Geral das Diretorias
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {isLoadingDiretorias ? (
+                    <div className="col-span-full text-center text-muted-foreground">Carregando diretorias...</div>
+                  ) : diretorias.length === 0 ? (
+                    <div className="col-span-full text-center text-muted-foreground">Nenhuma diretoria encontrada.</div>
+                  ) : (
+                    diretorias.map((dir: Diretoria) => (
+                      <div key={dir.sigla} className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md transition-shadow">
+                        <span className="text-2xl">📋</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
+                          <div className="flex gap-3 mt-2 text-xs font-medium">
+                            <span className="text-primary">{dir.totalItens} itens</span>
+                            <span className="text-blue-600">{dir.totalGerencias} gerências</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="orcamento">
+              <AdminBudgetControl
+                diretorias={diretorias.map((dir: Diretoria) => ({
+                  id: dir.id,
+                  sigla: dir.sigla,
+                  nome: dir.nome,
+                }))}
+              />
+            </TabsContent>
+
+            <TabsContent value="catalogo">
+              <AdminCatalogItemControl />
+            </TabsContent>
+
+            <TabsContent value="servicos">
+              <AdminServicosControl />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </div>
   );
 };
 
 export default AdminPanel;
-

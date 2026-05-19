@@ -1,17 +1,19 @@
+
+
 import { useEffect, useMemo, useState } from "react";
 import { Save, Waypoints, Wallet, Building2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button.tsx";
+import { Card } from "@/components/ui/card.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Label } from "@/components/ui/label.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select.tsx";
 import {
   Table,
   TableBody,
@@ -19,23 +21,23 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/ui/table.tsx";
 import {
   getAdminMiniErpConfigDb,
   getCategoryBudgetOwnerRules,
   getGerenciasByDiretoria,
   saveAdminMiniErpConfigDb,
   saveCategoryBudgetOwnerRules,
-} from "@/lib/services";
+} from "@/lib/services.ts";
 import {
   AdminBudgetConfig,
   DEFAULT_BUDGET_OWNER,
   RoutingRule,
   loadAdminBudgetConfig,
   saveAdminBudgetConfig,
-} from "@/lib/adminBudgetConfig";
-import { CATEGORIAS_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata";
-import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode";
+} from "@/lib/adminBudgetConfig.ts";
+import { CATEGORIAS_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata.ts";
+import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -261,7 +263,7 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
       queryClient.invalidateQueries({ queryKey: ["category-budget-owners-db"] });
       toast.success("Configurações de orçamento e fluxo salvas no Admin e no banco.");
     } catch (error: unknown) {
-      const rawMessage = String(error?.message || "");
+      const rawMessage = String(error instanceof Error ? error.message : "");
       const message = rawMessage.includes("Sessão admin não encontrada") || rawMessage.includes("Sessao admin nao encontrada")
         ? "Sessão admin expirada. Entre novamente no painel admin."
         : "Não foi possível salvar as regras orçamentárias no banco.";

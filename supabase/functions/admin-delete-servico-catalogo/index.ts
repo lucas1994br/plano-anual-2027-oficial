@@ -24,10 +24,10 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { accessCode, item } = await req.json();
+    const { accessCode, servicoId } = await req.json();
 
-    if (!accessCode || !item) {
-      return new Response(JSON.stringify({ error: "Missing accessCode or item" }), {
+    if (!accessCode || !servicoId) {
+      return new Response(JSON.stringify({ error: "Missing accessCode or servicoId" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -54,9 +54,7 @@ serve(async (req: Request) => {
       .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
       .maybeSingle();
 
-    if (accessError) {
-      throw accessError;
-    }
+    if (accessError) throw accessError;
 
     if (!accessRow) {
       return new Response(JSON.stringify({ error: "Codigo admin invalido." }), {
@@ -72,73 +70,31 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: itemCatalogo, error: itemError } = await supabase
-      .from("itens_catalogo")
-      .insert([
-        {
-          codigo: Number(item.codigo),
-          descricao: String(item.descricao).trim(),
-          categoria: String(item.categoria).trim(),
-          unidade: String(item.unidade).trim().toUpperCase(),
-          valor_unitario: Number(item.valorUnitario),
-        },
-      ])
-      .select("*")
-      .single();
-
-    if (itemError) {
-      throw itemError;
-    }
-
-    const { data: periodoAtivo, error: periodoError } = await supabase
-      .from("periodos")
+    // Verificar se o serviço existe
+    const { data: servico, error: fetchError } = await supabase
+      .from("servicos_catalogo")
       .select("id")
-      .eq("ativo", true)
-      .order("fim", { ascending: false })
-      .limit(1)
+      .eq("id", servicoId)
       .maybeSingle();
 
-    if (periodoError) {
-      throw periodoError;
+    if (fetchError) throw fetchError;
+
+    if (!servico) {
+      return new Response(JSON.stringify({ error: "Serviço não encontrado" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    if (periodoAtivo) {
-      const { data: gerencias, error: gerenciasError } = await supabase
-        .from("gerencias")
-        .select("id, diretoria_id")
-        .eq("ativa", true);
+    // Admin pode deletar qualquer serviço do catálogo
+    const { error: deleteError } = await supabase
+      .from("servicos_catalogo")
+      .delete()
+      .eq("id", servicoId);
 
-      if (gerenciasError) {
-        throw gerenciasError;
-      }
+    if (deleteError) throw deleteError;
 
-      if (gerencias && gerencias.length > 0) {
-        const solicitacoes = gerencias.map((gerencia: { id: string; diretoria_id: string }) => ({
-          periodo_id: periodoAtivo.id,
-          diretoria_id: gerencia.diretoria_id,
-          gerencia_id: gerencia.id,
-          item_id: itemCatalogo.id,
-          codigo: itemCatalogo.codigo,
-          descricao: itemCatalogo.descricao,
-          categoria: itemCatalogo.categoria,
-          unidade: itemCatalogo.unidade,
-          qtd_estimada: 0,
-          valor_unitario: itemCatalogo.valor_unitario,
-          prioridade: "Baixa",
-          status: "rascunho",
-        }));
-
-        const { error: solicitacoesError } = await supabase
-          .from("solicitacoes")
-          .insert(solicitacoes);
-
-        if (solicitacoesError) {
-          throw solicitacoesError;
-        }
-      }
-    }
-
-    return new Response(JSON.stringify({ success: true, item: itemCatalogo }), {
+    return new Response(JSON.stringify({ success: true, message: "Serviço deletado com sucesso" }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

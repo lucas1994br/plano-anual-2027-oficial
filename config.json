@@ -1,0 +1,14 @@
+{
+  "models": [
+    {
+      "title": "DeepSeek R1",
+      "provider": "ollama",
+      "model": "deepseek-r1:1.5b"
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "DeepSeek Coder",
+    "provider": "ollama",
+    "model": "deepseek-coder:1.3b"
+  }
+}

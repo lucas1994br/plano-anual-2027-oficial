@@ -7,6 +7,7 @@ import { differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getDiretorias, getPeriodosAtivos } from "@/lib/services";
 import { useQuery } from "@tanstack/react-query";
+import { Diretoria } from "@/types/plan";
 import { DIRETORIAS } from "@/data/diretorias";
 
 const PERFIS = [
@@ -80,7 +81,7 @@ const Home = () => {
     []
   );
 
-  const { data: diretoriasDb = [], isFetching: fetchingDiretorias } = useQuery({
+  const { data: diretoriasDb = [], isFetching: fetchingDiretorias } = useQuery<Diretoria[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
     placeholderData: diretoriasFallback,
@@ -201,7 +202,7 @@ const Home = () => {
               >
                 <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-4">
                   <div className="flex items-center justify-between">
-                    {renderDiretoriaIcon(dir.sigla, (dir as any).icone)}
+                    {renderDiretoriaIcon(dir.sigla, dir.icone)}
                     <Badge className="bg-white/20 text-white border-none text-lg font-bold">
                       {dir.sigla}
                     </Badge>

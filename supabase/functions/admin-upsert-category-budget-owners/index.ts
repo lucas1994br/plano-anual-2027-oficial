@@ -1,3 +1,6 @@
+//* eslint-disable @typescript-eslint/no-explicit-any */
+// deno-lint-ignore-file
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
@@ -86,6 +89,7 @@ serve(async (req: Request) => {
     // Validate that diretoria IDs actually exist in DB before upserting (avoids FK violations from stale localStorage)
     const { data: diretorias, error: diretoriasError } = await supabase.from("diretorias").select("id");
     if (diretoriasError) throw diretoriasError;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const validDiretoriaIds = new Set((diretorias || []).map((d: any) => d.id));
     const validEntries = entries.filter(([, id]) => validDiretoriaIds.has(id));
 

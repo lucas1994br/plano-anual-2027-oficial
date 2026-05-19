@@ -86,6 +86,7 @@ const GerenciaPanel = () => {
   const [categoria, setCategoria] = useState("");
   const [prioridade, setPrioridade] = useState("todas");
   const [showOnlyZerados, setShowOnlyZerados] = useState(false);
+  const [showOnlySent, setShowOnlySent] = useState(false);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectedServicos, setSelectedServicos] = useState<Set<string>>(new Set());
@@ -233,9 +234,10 @@ const GerenciaPanel = () => {
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
       const matchesComQuantidade = !showOnlyComQuantidade || item.qtdEstimada > 0;
-      return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade;
+      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status);
+      return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
-  }, [items, searchTerm, categoria, prioridade, showOnlyZerados, showOnlyComQuantidade]);
+  }, [items, searchTerm, categoria, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
   const categoriasDisponiveis = useMemo(() => {
     const unique = Array.from(new Set(items.map((item) => item.categoria))).filter(Boolean);
@@ -245,7 +247,7 @@ const GerenciaPanel = () => {
   // Resetar página quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1);
-  }, [categoria, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade]);
+  }, [categoria, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
   // Calcular paginação
   const paginationData = useMemo(() => {
@@ -334,8 +336,8 @@ const GerenciaPanel = () => {
     [queryClient, solicitacoesQueryKey],
   );
 
-  const handleUpdateQtdEstimada = async (codigo: number, qtdEstimada: number) => {
-    const item = items.find((i) => i.codigo === codigo);
+  const handleUpdateQtdEstimada = async (id: string, qtdEstimada: number) => {
+    const item = items.find((i) => i.id === id);
     // Permite edicao apenas se o item estiver em rascunho
     if (!item?.id || item.status !== "rascunho") return;
 
@@ -347,8 +349,8 @@ const GerenciaPanel = () => {
     }
   };
 
-  const handleUpdateUnidade = async (codigo: number, unidade: string) => {
-    const item = items.find((i) => i.codigo === codigo);
+  const handleUpdateUnidade = async (id: string, unidade: string) => {
+    const item = items.find((i) => i.id === id);
     if (!item?.id || item.status !== "rascunho") return;
 
     patchSolicitacaoInCache(item.id, { unidade });
@@ -359,8 +361,8 @@ const GerenciaPanel = () => {
     }
   };
 
-  const handleUpdateObservacao = async (codigo: number, observacao: string) => {
-    const item = items.find((i) => i.codigo === codigo);
+  const handleUpdateObservacao = async (id: string, observacao: string) => {
+    const item = items.find((i) => i.id === id);
     if (!item?.id || item.status !== "rascunho") return;
 
     patchSolicitacaoInCache(item.id, { observacao });
@@ -371,8 +373,8 @@ const GerenciaPanel = () => {
     }
   };
 
-  const handleUpdatePrioridade = async (codigo: number, prioridade: PlanItem["prioridade"]) => {
-    const item = items.find((i) => i.codigo === codigo);
+  const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
+    const item = items.find((i) => i.id === id);
     if (!item?.id || item.status !== "rascunho") return;
 
     patchSolicitacaoInCache(item.id, { prioridade });
@@ -388,7 +390,7 @@ const GerenciaPanel = () => {
 
     try {
       await deleteSolicitacao(itemId);
-      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
       toast({ title: "Item excluído", description: "O item foi removido com sucesso." });
     } catch (error) {
       toast({ title: "Erro", description: "Não foi possível excluir o item.", variant: "destructive" });
@@ -1116,18 +1118,16 @@ const GerenciaPanel = () => {
             )}
 
             {/* Botão Novo Serviço — na parte de baixo */}
-            {!isAllSent && (
-              <div className="mt-4 flex justify-center">
-                <Button
-                  variant="outline"
-                  className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
-                  onClick={() => setNovoServicoOpen(true)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Adicionar Novo Serviço
-                </Button>
-              </div>
-            )}
+            <div className="mt-4 flex justify-center">
+              <Button
+                variant="outline"
+                className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
+                onClick={() => setNovoServicoOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Adicionar Novo Serviço
+              </Button>
+            </div>
           </div>
 
           {/* Dialog Novo Serviço */}
@@ -1401,10 +1401,29 @@ const GerenciaPanel = () => {
           onClick={() => {
             const next = !showOnlyComQuantidade;
             setShowOnlyComQuantidade(next);
-            if (next) setShowOnlyZerados(false);
+            if (next) {
+              setShowOnlyZerados(false);
+              setShowOnlySent(false);
+            }
           }}
         >
           {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+        </Button>
+        <Button
+          variant={showOnlySent ? "default" : "outline"}
+          size="sm"
+          className="gap-2"
+          onClick={() => {
+            const next = !showOnlySent;
+            setShowOnlySent(next);
+            if (next) {
+              setShowOnlyZerados(false);
+              setShowOnlyComQuantidade(false);
+            }
+          }}
+        >
+          <Send className="h-4 w-4" />
+          {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
         </Button>
       </div>
 
@@ -1417,23 +1436,130 @@ const GerenciaPanel = () => {
         onPrioridadeChange={setPrioridade}
         categorias={categoriasDisponiveis}
       />
-      { filteredItems.length === 0 ? (
+      {/* Resultados da busca — só mostra quando o usuário digitar algo */}
+      {searchTerm.trim() === "" ? (
+        <div className="px-6 py-12 text-center">
+          <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
+            <span className="text-5xl">🔍</span>
+            <p className="text-base font-medium">Digite o código ou descrição para buscar itens</p>
+            <p className="text-sm">Sua gerência possui {items.length} solicitações planejadas</p>
+          </div>
+        </div>
+      ) : filteredItems.length === 0 ? (
         <div className="px-6 py-8 text-center text-muted-foreground">
-          Nenhum item encontrado na categoria selecionada.
+          Nenhum item encontrado para &ldquo;{searchTerm}&rdquo;.
         </div>
       ) : (
-        <>
-          <PlanTable
-            items={paginationData.paginatedItems}
-            onUpdateQtdEstimada={handleUpdateQtdEstimada}
-            onUpdateUnidade={handleUpdateUnidade}
-            onUpdateObservacao={handleUpdateObservacao}
-            onUpdatePrioridade={handleUpdatePrioridade}
-            onDeleteItem={handleDeleteItem}
-          />
-          
+        <div className="px-6 pb-6">
+          <div className="bg-card rounded-lg border overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-sm font-semibold text-foreground">
+                {filteredItems.length} item(ns) encontrado(s)
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                Total: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+                  filteredItems.reduce((acc, i) => acc + i.qtdEstimada * i.valorUnitario, 0)
+                )}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-muted/50 border-b">
+                  <tr>
+                    <th className="p-3 text-left text-xs font-medium text-muted-foreground w-16">Código</th>
+                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Descrição</th>
+                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Unid.</th>
+                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Quantidade</th>
+                    <th className="p-3 text-right text-xs font-medium text-muted-foreground w-28">Valor Unit.</th>
+                    <th className="p-3 text-right text-xs font-medium text-muted-foreground w-28">Total Item</th>
+                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-28">Prioridade</th>
+                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Gerência</th>
+                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-28">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginationData.paginatedItems.map((item, idx) => {
+                    const readOnly = item.status !== "rascunho";
+                    return (
+                      <tr key={item.id ?? `item-${item.codigo}-${idx}`} className={`border-b hover:bg-muted/30 ${idx % 2 === 0 ? "bg-background" : "bg-muted/10"}`}>
+                        <td className="p-3 text-sm font-mono text-primary">{item.codigo}</td>
+                        <td className="p-3 text-sm">
+                          <p className="font-medium">{item.descricao}</p>
+                          <p className="text-xs text-primary">{item.categoria}</p>
+                          {item.observacao && (
+                            <p className="text-xs text-success mt-1">💬 {item.observacao}</p>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <Badge variant="outline" className="text-xs">{item.unidade}</Badge>
+                        </td>
+                        <td className="p-3 text-center">
+                          {readOnly ? (
+                            <span className="text-sm">{item.qtdEstimada}</span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
+                              onBlur={(e) => handleUpdateQtdEstimada(item.id!, Number(e.target.value) || 0)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
+                            />
+                          )}
+                        </td>
+                        <td className="p-3 text-right text-sm">
+                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
+                        </td>
+                        <td className="p-3 text-right text-sm font-semibold text-primary">
+                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
+                        </td>
+                        <td className="p-3 text-center">
+                          {readOnly ? (
+                            <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
+                          ) : (
+                            <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.id!, v as PlanItem["prioridade"])}>
+                              <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
+                                <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Baixa">Baixa</SelectItem>
+                                <SelectItem value="Média">Média</SelectItem>
+                                <SelectItem value="Alta">Alta</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <Badge variant="outline">{item.gerencia}</Badge>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-1">
+                            {(item.status === "rascunho" || item.status === "rejeitado" || item.status === "enviado" || item.status === "em_analise") && item.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive"
+                                title="Excluir item"
+                                onClick={() => handleDeleteItem(item.id!)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Badge variant={item.status === "enviado" || item.status === "em_analise" ? "secondary" : item.status === "aprovado" ? "success" : "outline"} className="text-xs">
+                              {item.status === "rascunho" ? "Rascunho" : item.status === "enviado" ? "Enviado" : item.status === "aprovado" ? "Aprovado" : item.status}
+                            </Badge>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {paginationData.totalPages > 1 && (
-            <div className="px-6 py-6">
+            <div className="py-6">
               <Pagination>
                 <PaginationContent>
                   <PaginationItem>
@@ -1442,52 +1568,33 @@ const GerenciaPanel = () => {
                       className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                     />
                   </PaginationItem>
-
                   {currentPage > 1 && (
                     <PaginationItem>
-                      <PaginationLink
-                        onClick={() => setCurrentPage(currentPage - 1)}
-                        className="cursor-pointer"
-                      >
+                      <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
                         {currentPage - 1}
                       </PaginationLink>
                     </PaginationItem>
                   )}
-
                   <PaginationItem>
-                    <PaginationLink isActive>
-                      {currentPage}
-                    </PaginationLink>
+                    <PaginationLink isActive>{currentPage}</PaginationLink>
                   </PaginationItem>
-
                   {currentPage < paginationData.totalPages && (
                     <PaginationItem>
-                      <PaginationLink
-                        onClick={() => setCurrentPage(currentPage + 1)}
-                        className="cursor-pointer"
-                      >
+                      <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
                         {currentPage + 1}
                       </PaginationLink>
                     </PaginationItem>
                   )}
-
                   {currentPage < paginationData.totalPages - 1 && (
-                    <PaginationItem>
-                      <PaginationEllipsis />
-                    </PaginationItem>
+                    <PaginationItem><PaginationEllipsis /></PaginationItem>
                   )}
-
                   {currentPage < paginationData.totalPages - 1 && (
                     <PaginationItem>
-                      <PaginationLink
-                        onClick={() => setCurrentPage(paginationData.totalPages)}
-                        className="cursor-pointer"
-                      >
+                      <PaginationLink onClick={() => setCurrentPage(paginationData.totalPages)} className="cursor-pointer">
                         {paginationData.totalPages}
                       </PaginationLink>
                     </PaginationItem>
                   )}
-
                   <PaginationItem>
                     <PaginationNext
                       onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
@@ -1501,7 +1608,7 @@ const GerenciaPanel = () => {
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
 
 
@@ -1548,4 +1655,3 @@ const GerenciaPanel = () => {
 };
 
 export default GerenciaPanel;
-

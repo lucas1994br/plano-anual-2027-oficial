@@ -47,10 +47,10 @@ export interface ServicoItem {
   unidade: string;
   qtd_estimada: number;
   prioridade: string;
-  codigo: any;
-  descricao: any;
-  diretoria_id: any;
-  categoria: any;
+  codigo: string;
+  descricao: string;
+  diretoria_id: string;
+  categoria: string;
   id?: string;
   item: number;
   tipoContratacao: string;

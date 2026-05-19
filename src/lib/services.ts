@@ -1,6 +1,6 @@
-import { supabase } from "./supabaseClient";
-import { PlanItem, SolicitacaoStatus } from "@/types/plan";
-import { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig";
+import { supabase } from "./supabaseClient.ts";
+import { PlanItem, SolicitacaoStatus, ServicoItem, Diretoria } from "@/types/plan.ts";
+import { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig.ts";
 
 const SUPABASE_PAGE_SIZE = 1000;
 const DIRETORIAS_CACHE_KEY = "pac2027:diretorias";
@@ -138,19 +138,19 @@ export async function getDiretoriasComDetalhes() {
       const { data: gerencias } = await supabase
         .from("gerencias")
         .select("*")
-        .eq("diretoria_id", dir.id)
+        .eq("diretoria_id", (dir as { id: string }).id)
         .eq("ativa", true);
 
       const { count: totalItens, error: errSolicitacoes } = await supabase
         .from("solicitacoes")
         .select("id", { count: "exact", head: true })
-        .eq("diretoria_id", dir.id)
+        .eq("diretoria_id", (dir as { id: string }).id)
         .gt("qtd_estimada", 0);
 
       if (errSolicitacoes) throw errSolicitacoes;
 
       return {
-        ...dir,
+        ...(dir as Diretoria),
         totalGerencias: (gerencias || []).length,
         totalItens: totalItens || 0,
       };
@@ -269,6 +269,16 @@ export async function deleteSolicitacao(itemId: string) {
   return true;
 }
 
+export async function deleteSolicitacoesBulk(itemIds: string[]) {
+  const { error } = await supabase
+    .from("solicitacoes")
+    .delete()
+    .in("id", itemIds);
+
+  if (error) throw error;
+  return true;
+}
+
 export async function getSolicitacoesByDiretoria(diretoriaId: string, periodoId: string) {
   const data = await fetchAllPages<unknown>((from, to, includeCount) =>
     supabase
@@ -326,7 +336,7 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   diretoria_id: string;
   gerencia_id: string;
 }) {
-  const payload: any = {
+  const payload: Record<string, unknown> = {
     periodo_id: solicitacao.periodo_id,
     diretoria_id: solicitacao.diretoria_id,
     gerencia_id: solicitacao.gerencia_id,
@@ -452,8 +462,8 @@ export async function validateAccessCode(code: string, scope: "diretoria" | "ger
 
     throw new Error(data?.error || "Invalid access code");
   } catch (edgeErr) {
-    const fallbackMessage = String((edgeErr as any)?.message || "").toLowerCase();
-    const fallbackName = String((edgeErr as any)?.name || "").toLowerCase();
+    const fallbackMessage = String((edgeErr as unknown as { message?: string })?.message || "").toLowerCase();
+    const fallbackName = String((edgeErr as unknown as { name?: string })?.name || "").toLowerCase();
     const isConnectivityIssue =
       fallbackName.includes("functionsfetcherror") ||
       fallbackName.includes("functionsfetch") ||
@@ -476,7 +486,7 @@ export async function validateAccessCode(code: string, scope: "diretoria" | "ger
 
 // ============ ITENS CATÁLOGO ============
 
-export async function getItensCatalogo() {
+export default async function getItensCatalogo() {
   return await fetchAllPages<unknown>((from, to, includeCount) =>
     supabase
       .from("itens_catalogo")
@@ -495,7 +505,7 @@ export async function getCategoryBudgetOwnerRules() {
   if (error) throw error;
 
   const rules: Record<string, string> = {};
-  (data || []).forEach((row: any) => {
+  (data || []).forEach((row: { categoria: string; diretoria_orcamentaria_id: string }) => {
     rules[row.categoria] = row.diretoria_orcamentaria_id;
   });
 
@@ -520,7 +530,7 @@ export async function getAdminMiniErpConfigDb() {
   const gerenciaBudgetsAquisicao: Record<string, number> = {};
   const gerenciaBudgetsServicos: Record<string, number> = {};
 
-  (orcamentos || []).forEach((row: any) => {
+  (orcamentos || []).forEach((row: { escopo: string; referencia_id: string; tipo: string; valor: number }) => {
     const tipo = row.tipo as "aquisicao" | "servicos";
     const escopo = row.escopo as "diretoria" | "gerencia";
     const valor = Number(row.valor || 0);
@@ -543,7 +553,7 @@ export async function getAdminMiniErpConfigDb() {
   });
 
   const routingRules: Record<string, RoutingRule> = {};
-  (fluxos || []).forEach((row: any) => {
+  (fluxos || []).forEach((row: { gerencia_id: string; destino_tipo: string; destino_id: string }) => {
     routingRules[row.gerencia_id] = {
       destinoTipo: row.destino_tipo,
       destinoId: row.destino_id,
@@ -579,6 +589,103 @@ export async function saveAdminMiniErpConfigDb(config: {
     body: {
       accessCode: adminAccessCode,
       config,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+// ============ SERVIÇOS CATÁLOGO ============
+
+export async function getServicosCatalogo() {
+  return await fetchAllPages<unknown>((from, to, includeCount) =>
+    supabase
+      .from("servicos_catalogo")
+      .select("*", includeCount ? { count: "exact" } : undefined)
+      .order("item")
+      .range(from, to)
+  );
+}
+
+export async function createServicoCatalogoAndDistribuir(servico: {
+  tipo_contratacao: string;
+  objeto: string;
+  justificativa: string;
+  grau_prioridade: string;
+  estimativa_valor: number;
+  vinculacao: "Sim" | "Não";
+  dependencia_descricao?: string;
+  diretoria_id: string;
+  gerencia_id: string;
+  item: number;
+}) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+
+  if (!adminAccessCode) {
+    throw new Error("Sessão admin não encontrada.");
+  }
+
+  const { data, error } = await supabase.functions.invoke("admin-create-servico-catalogo", {
+    body: {
+      accessCode: adminAccessCode,
+      servico,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+export async function updateServicoCatalogoAdmin(
+  servicoId: string,
+  updates: {
+    tipo_contratacao: string;
+    objeto: string;
+    justificativa: string | null;
+    grau_prioridade: string;
+    estimativa_valor: number;
+    vinculacao: "Sim" | "Não";
+    dependencia_descricao: string | null;
+    diretoria_id: string;
+    gerencia_id: string;
+  }
+) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+
+  if (!adminAccessCode) {
+    throw new Error("Sessão admin não encontrada.");
+  }
+
+  const { data, error } = await supabase.functions.invoke("admin-update-servico-catalogo", {
+    body: {
+      accessCode: adminAccessCode,
+      servicoId,
+      updates,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+export async function deleteServicoCatalogoAdmin(servicoId: string) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+
+  if (!adminAccessCode) {
+    throw new Error("Sessão admin não encontrada.");
+  }
+
+  const { data, error } = await supabase.functions.invoke("admin-delete-servico-catalogo", {
+    body: {
+      accessCode: adminAccessCode,
+      servicoId,
     },
   });
 
@@ -695,8 +802,6 @@ export async function getServicosByGerencia(
   gerenciaId: string,
   periodoId: string
 ) {
-  console.log("BUSCANDO:", { gerenciaId, periodoId });
-
   const { data, error } = await supabase
     .from("servicos")
     .select("*")
@@ -704,10 +809,7 @@ export async function getServicosByGerencia(
     .eq("periodo_id", periodoId)
     .order("item");
 
-  console.log("RETORNO:", { data, error });
-
   if (error) throw error;
-
   return data || [];
 }
 
@@ -715,13 +817,10 @@ export async function getServicosByDiretoria(diretoriaId: string, periodoId: str
   return await fetchAllPages<unknown>((from, to, includeCount) =>
     supabase
       .from("servicos")
-      .select(`
-        *,
-        gerencias!servicos_gerencia_id_fkey(sigla, nome),
-        diretorias(sigla, nome)
-        gerencias:gerencia_id(sigla, nome),
-        diretorias:diretoria_id(sigla, nome)
-      `, includeCount ? { count: "exact" } : undefined)
+      .select(
+        "*, gerencias(sigla, nome), diretorias(sigla, nome)",
+        includeCount ? { count: "exact" } : undefined
+      )
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)
       .order("item")
@@ -729,7 +828,7 @@ export async function getServicosByDiretoria(diretoriaId: string, periodoId: str
   );
 }
 
-export async function updateServico(servicoId: string, updates: any) {
+export async function updateServico(servicoId: string, updates: Partial<ServicoItem>) {
   const { data, error } = await supabase
     .from("servicos")
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -740,19 +839,11 @@ export async function updateServico(servicoId: string, updates: any) {
   return data?.[0];
 }
 
-export async function createServico(servico: any) {
-
-  console.log("SERVICO ENVIADO:", servico);
-
+export async function createServico(servico: Omit<ServicoItem, 'id' | 'created_at' | 'updated_at'>) {
   const { data, error } = await supabase
     .from("servicos")
     .insert([servico])
     .select();
-
-  console.log("RESPOSTA SUPABASE:", { data, error });
-
-  if (error) throw error;
-
 
   if (error) throw error;
   return data?.[0];
@@ -767,3 +858,64 @@ export const deleteServico = async (id: string) => {
   if (error) throw error;
   return true;
 };
+
+// ============ ADMIN SERVIÇOS ============
+
+/**
+ * Função auxiliar para invocar funções admin com tratamento de erro padronizado
+ */
+async function invokeAdminFunction(functionName: string, body: any) {
+  try {
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body,
+    });
+
+    if (error) {
+      const errorMsg = (error as any).message || "";
+      if (errorMsg.includes("404")) {
+        throw new Error(`A função '${functionName}' não foi encontrada. Verifique o deploy no Supabase.`);
+      }
+      throw error;
+    }
+
+    if (data?.error) throw new Error(data.error);
+    return data;
+  } catch (err: any) {
+    const msg = err.message || "";
+    if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("network")) {
+      throw new Error(`Erro de rede ao tentar acessar a função '${functionName}'. Verifique sua conexão ou se a função está publicada.`);
+    }
+    throw err;
+  }
+}
+
+export async function createServicoAdmin(item: Record<string, any>) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+  
+  // Envia o objeto dentro da chave 'item', idêntico ao fluxo de materiais
+  return await invokeAdminFunction("admin-create-servico", { 
+    accessCode: adminAccessCode, 
+    item 
+  });
+}
+
+export async function updateServicoAdmin(servicoId: string, item: Record<string, any>) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+
+  return await invokeAdminFunction("admin-update-servico", { 
+    accessCode: adminAccessCode, 
+    servicoId, 
+    item 
+  });
+}
+
+export async function deleteServicoAdmin(servicoId: string) {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+  return await invokeAdminFunction("admin-delete-servico", { 
+    accessCode: adminAccessCode, 
+    servicoId 
+  });
+}

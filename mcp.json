@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-supabase"
+      ],
+      "env": {
+        "SUPABASE_URL": "https://icyawlvdmlcndsjpudle.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "sb_publishable_DegRlJqU1rw3iziTpeRaaw_08hXoJvN"
+      }
+    },
+    "meu-servidor": {
+      "command": "node",
+      "args": [
+        "path/to/your/server.js"
+      ]
+    }
+  }
+}

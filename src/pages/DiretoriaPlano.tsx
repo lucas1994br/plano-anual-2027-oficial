@@ -8,6 +8,7 @@ import { PlanHeader } from "@/components/layout/PlanHeader";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
 import { PlanTable } from "@/components/tables/PlanTable";
+import { Diretoria, Gerencia } from "@/types/plan";
 import { PlanItem } from "@/types/plan";
 import { resolveGerenciaNome } from "@/data/gerencias";
 import { getDiretorias, getGerenciasByDiretoria, getPeriodosAtivos } from "@/lib/services";
@@ -45,7 +46,7 @@ const DiretoriaPlano = () => {
     queryFn: getDiretorias,
   });
 
-  const diretoria = diretorias.find((d: any) => d.sigla === siglaUpper);
+  const diretoria = diretorias.find((d: Diretoria) => d.sigla === siglaUpper);
 
   // Buscar gerências
   const { data: gerenciasData = [] } = useQuery({
@@ -83,7 +84,7 @@ const DiretoriaPlano = () => {
   }), [items]);
 
   const gerenciasSemDiretoria = useMemo(
-    () => gerenciasData.filter((ger: any) => ger.sigla !== siglaUpper),
+    () => gerenciasData.filter((ger: Gerencia) => ger.sigla !== siglaUpper),
     [gerenciasData, siglaUpper]
   );
 
@@ -96,7 +97,7 @@ const DiretoriaPlano = () => {
       { titulo: "Sul", siglas: ["OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"] },
     ];
 
-    const porSigla = new Map(gerenciasSemDiretoria.map((g: any) => [g.sigla, g]));
+    const porSigla = new Map(gerenciasSemDiretoria.map((g: Gerencia) => [g.sigla, g]));
 
     const grupos = gruposBase.map((grupo) => ({
       titulo: grupo.titulo,
@@ -105,8 +106,8 @@ const DiretoriaPlano = () => {
 
     const siglasConhecidas = new Set(gruposBase.flatMap((g) => g.siglas));
     const outras = gerenciasSemDiretoria
-      .filter((g: any) => !siglasConhecidas.has(g.sigla))
-      .sort((a: any, b: any) => a.sigla.localeCompare(b.sigla));
+      .filter((g: Gerencia) => !siglasConhecidas.has(g.sigla))
+      .sort((a: Gerencia, b: Gerencia) => a.sigla.localeCompare(b.sigla));
 
     if (outras.length > 0) {
       grupos.push({ titulo: "Outras", gerencias: outras });
@@ -191,7 +192,7 @@ const DiretoriaPlano = () => {
                     </Badge>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {grupo.gerencias.map((ger: any) => (
+                    {grupo.gerencias.map((ger: Gerencia) => (
                       <Card
                         key={ger.id}
                         className="p-4 card-shadow cursor-pointer hover:shadow-lg transition-all hover:-translate-y-0.5 text-center"
@@ -207,7 +208,7 @@ const DiretoriaPlano = () => {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              {gerenciasSemDiretoria.map((ger: any) => (
+              {gerenciasSemDiretoria.map((ger: Gerencia) => (
                 <Card
                   key={ger.id}
                   className="p-4 card-shadow cursor-pointer hover:shadow-lg transition-all hover:-translate-y-0.5 text-center"
@@ -271,7 +272,7 @@ const DiretoriaPlano = () => {
       </div>
       <PlanHeader title="Plano Anual de Contratações" diretoria={`${diretoria.sigla} - ${diretoria.nome}`} ano={2026} prazo={prazo} />
       <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
-      <PlanFilters searchTerm={searchTerm} onSearchChange={setSearchTerm} categoria={categoria} onCategoriaChange={setCategoria} gerencia={gerencia} onGerenciaChange={setGerencia} prioridade={prioridade} onPrioridadeChange={setPrioridade} categorias={categorias} gerencias={gerenciasData.map((g: any) => g.sigla)} />
+      <PlanFilters searchTerm={searchTerm} onSearchChange={setSearchTerm} categoria={categoria} onCategoriaChange={setCategoria} gerencia={gerencia} onGerenciaChange={setGerencia} prioridade={prioridade} onPrioridadeChange={setPrioridade} categorias={categorias} gerencias={gerenciasData.map((g: Gerencia) => g.sigla)} />
       <PlanTable items={filteredItems} onUpdateQtdEstimada={handleUpdateQtdEstimada} onUpdateUnidade={handleUpdateUnidade} onUpdateObservacao={handleUpdateObservacao} onUpdatePrioridade={handleUpdatePrioridade} />
       </div>
     </div>

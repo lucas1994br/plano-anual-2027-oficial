@@ -22,6 +22,27 @@ import type {
   UpdateOrcamentoDiretoriaDTO,
 } from '../types/erp';
 
+type HistoricoConsumoEntry = LogOrcamentario;
+
+type CentroCustoComConsumo = {
+  id: string;
+  codigo: string;
+  nome: string;
+  valor_aprovado: number;
+  valor_executado: number;
+  saldo: number;
+  historico: HistoricoConsumoEntry[];
+};
+
+type OrcamentoDiretoriaComConsumo = {
+  ano: number;
+  diretoria_id: string;
+  valor_total_aprovado: number;
+  valor_total_executado: number;
+  saldo_total: number;
+  centros_custo: CentroCustoComConsumo[];
+};
+
 // Você precisa ter essas variáveis no .env:
 // VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 // VITE_SUPABASE_ANON_KEY=eyJ...
@@ -479,7 +500,7 @@ export async function obterDisponibilidadeCompleta(
 export async function obterHistoricoConsumoCentroCusto(
   centroCustoId: string,
   ano: number
-): Promise<any[]> {
+): Promise<HistoricoConsumoEntry[]> {
   try {
     const { data, error } = await supabase
       .from('log_orcamentario')
@@ -496,7 +517,7 @@ export async function obterHistoricoConsumoCentroCusto(
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    return (data as HistoricoConsumoEntry[]) || [];
   } catch (error) {
     console.error('Erro ao obter histórico de consumo:', error);
     return [];
@@ -509,7 +530,7 @@ export async function obterHistoricoConsumoCentroCusto(
 export async function obterOrcamentoDiretoriaComConsumo(
   diretoriaId: string,
   ano: number
-): Promise<any> {
+): Promise<OrcamentoDiretoriaComConsumo | null> {
   try {
     if (!diretoriaId) return null;
 
@@ -519,6 +540,8 @@ export async function obterOrcamentoDiretoriaComConsumo(
       .select('id, codigo, nome')
       .eq('diretoria_id', diretoriaId)
       .eq('ativo', true);
+
+    const centrosCustoTyped = (centrosCusto as Array<{ id: string; codigo: string; nome: string }> ) || [];
 
     if (erroCentros) {
       console.error('Erro ao buscar centros de custo:', erroCentros);
@@ -541,7 +564,9 @@ export async function obterOrcamentoDiretoriaComConsumo(
       .from('orcamento_anual')
       .select('*')
       .eq('ano', ano)
-      .in('centro_custo_id', centrosCusto.map(cc => cc.id));
+      .in('centro_custo_id', centrosCustoTyped.map(cc => cc.id));
+
+    const orcamentosTyped = (orcamentos as Array<{ centro_custo_id: string; valor_aprovado?: number; valor_executado?: number }>) || [];
 
     if (erroOrcamento) {
       console.error('Erro ao buscar orçamentos:', erroOrcamento);
@@ -553,7 +578,7 @@ export async function obterOrcamentoDiretoriaComConsumo(
     let totalExecutado = 0;
 
     const centrosComDetalhe = centrosCusto.map((cc) => {
-      const orc = orcamentos?.find(o => o.centro_custo_id === cc.id);
+      const orc = orcamentosTyped.find(o => o.centro_custo_id === cc.id);
       const valor_aprovado = orc?.valor_aprovado || 0;
       const valor_executado = orc?.valor_executado || 0;
       const saldo = valor_aprovado - valor_executado;
@@ -601,7 +626,7 @@ export async function atualizarOrcamentoDiretoria(
   diretoriaId: string,
   orcamentos: Array<{ centro_custo_id: string; valor_aprovado: number }>,
   userRole?: string // should be 'admin' or 'gerencia'
-): Promise<any> {
+): Promise<unknown> {
   try {
     const payload: Record<string, unknown> = { ano, diretoriaId, orcamentos };
     if (userRole) payload.role = userRole;
@@ -630,7 +655,7 @@ export async function criarOrcamentoPorDiretoria(
   diretoriaId: string,
   valorTotal: number,
   userRole?: string
-): Promise<any> {
+): Promise<unknown> {
   try {
     // Buscar centros de custo da diretoria
     const { data: centrosCusto, error: erroCentros } = await supabase

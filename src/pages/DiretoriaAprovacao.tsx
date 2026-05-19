@@ -1,12 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
-import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan";
-import { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, createSolicitacao, getItensCatalogo, getServicosByDiretoria, updateServico, createServico } from "@/lib/services";
+import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
@@ -22,8 +22,14 @@ import { useToast } from "@/hooks/use-toast";
 import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import DOMPurify from 'dompurify';
+
+/** Itens aguardando decisão da diretoria (podem ser aprovados ou rejeitados em massa). */
+function isPendenteDiretoriaAprovacao(item: PlanItem) {
+  return item.status === "enviado" || item.status === "em_analise";
+}
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string) => {
   const iconMap: Record<string, string> = {
@@ -50,9 +56,15 @@ const DiretoriaAprovacao = () => {
   const [ownCategoria, setOwnCategoria] = useState("");
   const [ownPrioridade, setOwnPrioridade] = useState("todas");
   const [ownGerenciaId, setOwnGerenciaId] = useState<string>("diretoria");
+  const [ownShowOnlyComQuantidade, setOwnShowOnlyComQuantidade] = useState(false);
+  const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  /** Lista exibida em "Recebidos das Gerências": separa pendentes, aprovados, rejeitados e fluxo de compras. */
+  const [recebidosStatusTab, setRecebidosStatusTab] = useState<
+    "pendentes" | "aprovados" | "rejeitados" | "em_compra"
+  >("pendentes");
   const [selectedServicos, setSelectedServicos] = useState<Set<string>>(new Set());
   const [expandedJustificativas, setExpandedJustificativas] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -81,6 +93,10 @@ const DiretoriaAprovacao = () => {
   // Estado do dialog de novo serviço da diretoria
   const [novoServicoOpen, setNovoServicoOpen] = useState(false);
   const [novoServicoLoading, setNovoServicoLoading] = useState(false);
+  const [servicoEditOpen, setServicoEditOpen] = useState(false);
+  const [servicoEdicao, setServicoEdicao] = useState<ServicoItem | null>(null);
+  const [solicitacaoEditOpen, setSolicitacaoEditOpen] = useState(false);
+  const [solicitacaoEdicao, setSolicitacaoEdicao] = useState<PlanItem | null>(null);
   const [novoServicoForm, setNovoServicoForm] = useState({
     objeto: "",
     justificativa: "",
@@ -102,7 +118,7 @@ const DiretoriaAprovacao = () => {
     refetchOnWindowFocus: false,
   });
 
-  const diretoria = diretorias.find((d: any) => d.sigla === siglaUpper);
+  const diretoria = diretorias.find((d: Diretoria) => d.sigla === siglaUpper);
 
   // Buscar gerências desta diretoria
   const { data: gerenciasData = [] } = useQuery({
@@ -115,7 +131,7 @@ const DiretoriaAprovacao = () => {
   // Criar mapa de gerencia_id -> sigla
   const gerenciaMap = useMemo(() => {
     const map: Record<string, string> = {};
-    gerenciasData.forEach((g: any) => {
+    gerenciasData.forEach((g: Gerencia) => {
       map[g.id] = g.sigla;
     });
     return map;
@@ -124,7 +140,7 @@ const DiretoriaAprovacao = () => {
   // Criar mapa de sigla -> nome de gerência
   const siglaToNome = useMemo(() => {
     const map: Record<string, string> = {};
-    gerenciasData.forEach((g: any) => {
+    gerenciasData.forEach((g: Gerencia) => {
       map[g.sigla] = g.nome;
     });
     return map;
@@ -162,14 +178,6 @@ const DiretoriaAprovacao = () => {
     enabled: !!diretoria && !!periodAtivo,
     staleTime: 2 * 60 * 1000,
   });
-
-
-  console.log("authenticated:", authenticated);
-  console.log("selectedOption:", selectedOption);
-  console.log("diretoria:", diretoria);
-  console.log("periodAtivo:", periodAtivo);
-
-  // Buscar serviços para esta diretoria (pré-carrega em paralelo com solicitações)
   const { data: servicosData = [], isFetching: isServicosLoading } = useQuery({
     queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id],
     queryFn: () => (diretoria && periodAtivo) ? getServicosByDiretoria(diretoria.id, periodAtivo.id) : [],
@@ -177,8 +185,6 @@ const DiretoriaAprovacao = () => {
     staleTime: 0,
     refetchOnMount: true,
   });
-
-  console.log("SERVICOS CARREGADOS:", servicosData);
 
   // Buscar itens do catalogo (banco)
   const { data: catalogoData = [] } = useQuery({
@@ -202,8 +208,8 @@ const DiretoriaAprovacao = () => {
     };
   }, [diretoria?.id, adminMiniConfigFromDb]);
   const diretoriaMap = useMemo(() => {
-    const map: Record<string, any> = {};
-    diretorias.forEach((dir: any) => {
+    const map: Record<string, Diretoria> = {};
+    diretorias.forEach((dir: Diretoria) => {
       map[dir.id] = dir;
     });
     return map;
@@ -214,11 +220,11 @@ const DiretoriaAprovacao = () => {
     if (!diretoria) return [];
 
     return solicitacoes
-      .filter((s: any) =>
-        s.qtd_estimada > 0 &&
+      .filter((s: ServicoItem) =>
+        s.qtd_estimada >= 0 &&
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
-      .map((s: any) => {
+      .map((s: ServicoItem) => {
         const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0)
           ? s.categoria
           : "diversos";
@@ -243,7 +249,7 @@ const DiretoriaAprovacao = () => {
           categoria: categoriaItem,
           gerencia: gerenciaMap[s.gerencia_id] || "N/A",
           prioridade: s.prioridade || "Média",
-          qtdEstimada: s.qtd_estimada || 0,
+          qtdEstimada: Number(s.qtd_estimada || 0),
           unidade: s.unidade || "un",
           valorUnitario: s.valor_unitario || 0,
           observacao: s.observacao || "",
@@ -265,8 +271,8 @@ const DiretoriaAprovacao = () => {
     if (!diretoria) return [];
 
     const solicitacoesRascunho = [...solicitacoes]
-      .filter((s: any) => s.status === "rascunho")
-      .sort((a: any, b: any) => {
+      .filter((s: ServicoItem) => s.status === "rascunho")
+      .sort((a: ServicoItem, b: ServicoItem) => {
         const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
         const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
         return aTime - bTime;
@@ -274,7 +280,7 @@ const DiretoriaAprovacao = () => {
 
     const latestByCodigo = new Map<number, PlanItem>();
 
-    solicitacoesRascunho.forEach((s: any) => {
+    solicitacoesRascunho.forEach((s: ServicoItem) => {
       const codigo = Number(s.codigo);
       latestByCodigo.set(codigo, {
         id: s.id,
@@ -283,7 +289,7 @@ const DiretoriaAprovacao = () => {
         categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0) ? s.categoria : "diversos",
         gerencia: gerenciaMap[s.gerencia_id] || "N/A",
         prioridade: s.prioridade || "Média",
-        qtdEstimada: s.qtd_estimada || 0,
+        qtdEstimada: Number(s.qtd_estimada || 0),
         unidade: s.unidade || "un",
         valorUnitario: s.valor_unitario || 0,
         observacao: s.observacao || "",
@@ -349,8 +355,45 @@ const DiretoriaAprovacao = () => {
     if (selectedCategoria !== "todas") {
       filtered = filtered.filter((i) => i.categoria === selectedCategoria);
     }
+    if (showOnlyComQuantidade) {
+      filtered = filtered.filter((i) => i.qtdEstimada > 0);
+    }
     return filtered;
-  }, [items, selectedGerencia, selectedCategoria]);
+  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
+
+  const recebidosTabCounts = useMemo(() => {
+    const base = filteredItems;
+    const counts = { pendentes: 0, aprovados: 0, rejeitados: 0, em_compra: 0 };
+    
+    for (let i = 0; i < base.length; i++) {
+      const item = base[i];
+      if (isPendenteDiretoriaAprovacao(item)) counts.pendentes++;
+      else if (item.status === "aprovado") counts.aprovados++;
+      else if (item.status === "rejeitado") counts.rejeitados++;
+      else if (item.status === "em_compra" || item.status === "concluido") counts.em_compra++;
+    }
+    return counts;
+  }, [filteredItems]);
+
+  const recebidosTableItems = useMemo(() => {
+    switch (recebidosStatusTab) {
+      case "pendentes":
+        return filteredItems.filter(isPendenteDiretoriaAprovacao);
+      case "aprovados":
+        return filteredItems.filter((i) => i.status === "aprovado");
+      case "rejeitados":
+        return filteredItems.filter((i) => i.status === "rejeitado");
+      case "em_compra":
+        return filteredItems.filter((i) => i.status === "em_compra" || i.status === "concluido");
+      default:
+        return filteredItems;
+    }
+  }, [filteredItems, recebidosStatusTab]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedItems(new Set());
+  }, [recebidosStatusTab, selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
 
   const categoriasItensProprios = useMemo(() => {
     const unique = Array.from(new Set(catalogItems.map((item) => item.categoria))).filter(Boolean);
@@ -361,44 +404,47 @@ const DiretoriaAprovacao = () => {
     return new Map(itensProprios.map((item) => [item.codigo, item]));
   }, [itensProprios]);
 
-  const itensDiretoriaDisponiveis = useMemo(() => {
+  const filteredOwnItems = useMemo(() => {
+    const term = ownSearchTerm.trim().toLowerCase();
     const gerenciaSelecionada = ownGerenciaId === "diretoria"
       ? `DIRETORIA ${siglaUpper}`
       : (gerenciaMap[ownGerenciaId] || "N/A");
 
-    return catalogItems.map((item) => {
-      const existente = itensPropriosMap.get(item.codigo);
-      if (existente) {
-        return existente;
-      }
+    const results: PlanItem[] = [];
+    
+    for (const item of catalogItems) {
+      // Filtro de busca (mais performático se feito antes do map)
+      const matchesSearch = term === "" || 
+        item.descricao.toLowerCase().includes(term) || 
+        item.codigo.toString().includes(term);
+      
+      if (!matchesSearch) continue;
 
-      return {
+      const matchesCategoria = !ownCategoria || item.categoria === ownCategoria;
+      if (!matchesCategoria) continue;
+
+      const existente = itensPropriosMap.get(item.codigo);
+      const planItem = existente || {
         ...item,
         gerencia: gerenciaSelecionada,
         status: "rascunho" as SolicitacaoStatus,
       };
-    });
-  }, [catalogItems, itensPropriosMap, gerenciaMap, ownGerenciaId, siglaUpper]);
 
-  const filteredOwnItems = useMemo(() => {
-    return itensDiretoriaDisponiveis.filter((item) => {
-      const matchesGerencia = ownGerenciaId === "diretoria"
-        ? item.gerencia === `DIRETORIA ${siglaUpper}`
-        : item.gerencia === (gerenciaMap[ownGerenciaId] || "N/A");
-      const matchesSearch =
-        ownSearchTerm === "" ||
-        item.descricao.toLowerCase().includes(ownSearchTerm.toLowerCase()) ||
-        item.codigo.toString().includes(ownSearchTerm);
-      const matchesCategoria = !ownCategoria || ownCategoria === "" || item.categoria === ownCategoria;
-      const matchesPrioridade = ownPrioridade === "todas" || item.prioridade === ownPrioridade;
+      // Filtro de prioridade
+      if (ownPrioridade !== "todas" && planItem.prioridade !== ownPrioridade) continue;
 
-      return matchesGerencia && matchesSearch && matchesCategoria && matchesPrioridade;
-    });
-  }, [itensDiretoriaDisponiveis, ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper]);
+      // Filtro de itens com quantidade
+      if (ownShowOnlyComQuantidade && planItem.qtdEstimada <= 0) continue;
+
+      results.push(planItem);
+    }
+
+    return results;
+  }, [catalogItems, itensPropriosMap, ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade]);
 
   useEffect(() => {
     setOwnCurrentPage(1);
-  }, [ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade]);
+  }, [ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade, ownShowOnlyComQuantidade]);
 
   const ownPaginationData = useMemo(() => {
     const totalPages = Math.ceil(filteredOwnItems.length / ITEMS_PER_PAGE);
@@ -408,21 +454,29 @@ const DiretoriaAprovacao = () => {
     return { totalPages, paginatedItems };
   }, [filteredOwnItems, ownCurrentPage]);
 
-  const isItemReadOnly = (item: PlanItem) => item.status === "rejeitado" || item.status === "em_compra" || item.status === "concluido";
+  /** 
+   * Liberado para edição em todas as abas conforme solicitado para permitir ajustes orçamentários.
+   */
+  const isItemReadOnly = (item: PlanItem) => false;
 
   const selectableItems = useMemo(
-    () => filteredItems.filter((item) => item.id && !isItemReadOnly(item)),
-    [filteredItems]
+    () =>
+      recebidosTableItems.filter((item) => {
+        if (!item.id) return false;
+        if (recebidosStatusTab === "rejeitados") return item.status === "rejeitado";
+        return !isItemReadOnly(item);
+      }),
+    [recebidosTableItems, recebidosStatusTab],
   );
 
-  // Paginação
+  // Paginação (tabela Recebidos das Gerências)
   const paginatedItems = useMemo(() => {
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    return filteredItems.slice(startIdx, endIdx);
-  }, [filteredItems, currentPage]);
+    return recebidosTableItems.slice(startIdx, endIdx);
+  }, [recebidosTableItems, currentPage]);
 
-  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(recebidosTableItems.length / ITEMS_PER_PAGE);
 
   const summary = useMemo(() => ({
     totalItens:
@@ -495,24 +549,49 @@ const DiretoriaAprovacao = () => {
   }, [filteredItems, selectedItems]);
 
   // Handlers para edição
-  const handleUpdateQtdEstimada = async (codigo: number, qtdEstimada: number) => {
-    const item = items.find((i) => Number(i.codigo) === codigo);
-    if (!item?.id) return;
-    await updateSolicitacao(item.id, { qtdEstimada });
+  const handleUpdateQtdEstimada = async (id: string, qtdEstimada: number) => {
+    if (!id) return;
+
+    // Atualização otimista no cache local para recálculo instantâneo na UI
+    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    queryClient.setQueryData(queryKey, (current: any) => {
+      if (!Array.isArray(current)) return current;
+      return current.map((row: any) => 
+        row?.id === id ? { ...row, qtd_estimada: qtdEstimada } : row
+      );
+    });
+
+    await updateSolicitacao(id, { qtdEstimada });
     queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
   };
 
-  const handleUpdateObservacao = async (codigo: number, observacao: string) => {
-    const item = items.find((i) => Number(i.codigo) === codigo);
-    if (!item?.id) return;
-    await updateSolicitacao(item.id, { observacao });
+  const handleUpdateObservacao = async (id: string, observacao: string) => {
+    if (!id) return;
+
+    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    queryClient.setQueryData(queryKey, (current: any) => {
+      if (!Array.isArray(current)) return current;
+      return current.map((row: any) => 
+        row?.id === id ? { ...row, observacao } : row
+      );
+    });
+
+    await updateSolicitacao(id, { observacao });
     queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
   };
 
-  const handleUpdatePrioridade = async (codigo: number, prioridade: PlanItem["prioridade"]) => {
-    const item = items.find((i) => Number(i.codigo) === codigo);
-    if (!item?.id) return;
-    await updateSolicitacao(item.id, { prioridade });
+  const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
+    if (!id) return;
+
+    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    queryClient.setQueryData(queryKey, (current: any) => {
+      if (!Array.isArray(current)) return current;
+      return current.map((row: any) => 
+        row?.id === id ? { ...row, prioridade } : row
+      );
+    });
+
+    await updateSolicitacao(id, { prioridade });
     queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
   };
 
@@ -584,6 +663,90 @@ const DiretoriaAprovacao = () => {
     await ensureSolicitacaoDiretoria(codigo, { prioridade });
   };
 
+  const handleDeleteSolicitacao = async (itemId: string) => {
+    if (!confirm("Deseja realmente excluir este item?")) return;
+    try {
+      await deleteSolicitacao(itemId);
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id] });
+      toast({ title: "Item excluído", description: "Solicitação removida com sucesso." });
+    } catch (error) {
+      console.error("Erro ao excluir solicitação:", error);
+      toast({ title: "Erro ao excluir", description: "Não foi possível remover a solicitação.", variant: "destructive" });
+    }
+  };
+
+  const openSolicitacaoEditor = (item: PlanItem) => {
+    setSolicitacaoEdicao(item);
+    setSolicitacaoEditOpen(true);
+  };
+
+  const handleSaveSolicitacaoEdicao = async () => {
+    if (!solicitacaoEdicao?.id) return;
+
+    const updates: Partial<PlanItem> = {
+      descricao: solicitacaoEdicao.descricao,
+      categoria: solicitacaoEdicao.categoria,
+      unidade: solicitacaoEdicao.unidade,
+      qtdEstimada: solicitacaoEdicao.qtdEstimada,
+      prioridade: solicitacaoEdicao.prioridade,
+      observacao: solicitacaoEdicao.observacao,
+    };
+
+    try {
+      await updateSolicitacao(solicitacaoEdicao.id, updates);
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id] });
+      setSolicitacaoEditOpen(false);
+      setSolicitacaoEdicao(null);
+      toast({ title: "Solicitação atualizada", description: "Dados atualizados com sucesso." });
+    } catch (error) {
+      console.error("Erro ao atualizar solicitação:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+    }
+  };
+
+  const openServicoEditor = (servico: ServicoItem) => {
+    setServicoEdicao(servico);
+    setServicoEditOpen(true);
+  };
+
+  const handleDeleteServicoDiretoria = async (servicoId: string) => {
+    if (!confirm("Deseja realmente excluir este serviço?")) return;
+    try {
+      await deleteServico(servicoId);
+      await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
+      toast({ title: "Serviço excluído", description: "Serviço removido com sucesso." });
+    } catch (error) {
+      console.error("Erro ao excluir serviço:", error);
+      toast({ title: "Erro ao excluir", description: "Não foi possível remover o serviço.", variant: "destructive" });
+    }
+  };
+
+  const handleSaveServicoEdicao = async () => {
+    if (!servicoEdicao?.id) return;
+
+    const updates: Partial<ServicoItem> = {
+      objeto: servicoEdicao.objeto,
+      justificativa: servicoEdicao.justificativa,
+      observacao: servicoEdicao.observacao,
+      estimativaValor: servicoEdicao.estimativaValor,
+      dotacaoOrcamentaria: servicoEdicao.dotacaoOrcamentaria,
+      grauPrioridade: servicoEdicao.grauPrioridade,
+      vinculacao: servicoEdicao.vinculacao,
+      dependenciaDescricao: servicoEdicao.dependenciaDescricao,
+    };
+
+    try {
+      await updateServico(servicoEdicao.id, updates);
+      await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
+      setServicoEditOpen(false);
+      setServicoEdicao(null);
+      toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+    } catch (error) {
+      console.error("Erro ao atualizar serviço:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+    }
+  };
+
   const exportToPDF = () => {
     // Dinamic import para evitar problemas de compatibilidade
     import("jspdf").then(({ jsPDF }) => {
@@ -599,7 +762,7 @@ const DiretoriaAprovacao = () => {
           6: { halign: "right" }
         };
 
-        const tableData = filteredItems.map((item) => [
+        const tableData = recebidosTableItems.map((item) => [
           item.codigo,
           item.descricao.substring(0, 40),
           item.gerencia,
@@ -631,7 +794,7 @@ const DiretoriaAprovacao = () => {
       const xlsx = XLSXStyle.default;
       const worksheetData = [
         ["Código", "Descrição", "Gerência", "Prioridade", "Quantidade", "Valor Unitário", "Total"],
-        ...filteredItems.map((item) => [
+        ...recebidosTableItems.map((item) => [
           item.codigo,
           item.descricao,
           item.gerencia,
@@ -755,9 +918,12 @@ const DiretoriaAprovacao = () => {
     };
 
     const newStatus = actionMap[actionDialog.action];
-    const itemsToUpdate = actionDialog.isBulk 
-      ? filteredItems.filter((item) => !isItemReadOnly(item))
-      : filteredItems.filter(item => item.id && selectedItems.has(item.id) && !isItemReadOnly(item));
+    const itemsToUpdate =
+      actionDialog.isBulk && actionDialog.action === "aprovar"
+        ? filteredItems.filter((item) => isPendenteDiretoriaAprovacao(item))
+        : filteredItems.filter(
+            (item) => item.id && selectedItems.has(item.id) && !isItemReadOnly(item),
+          );
 
     const diretoriaQueryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
     // Atualiza cache imediatamente
@@ -789,6 +955,35 @@ const DiretoriaAprovacao = () => {
       toast({
         title: "Erro",
         description: "Não foi possível executar a ação.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBulkDeleteRejected = async () => {
+    if (selectedItems.size === 0) return;
+    if (
+      !confirm(
+        `Deseja realmente excluir permanentemente os ${selectedItems.size} itens selecionados?`,
+      )
+    )
+      return;
+
+    try {
+      const ids = Array.from(selectedItems);
+      await deleteSolicitacoesBulk(ids);
+
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      setSelectedItems(new Set());
+      toast({
+        title: "Itens excluídos",
+        description: "Os itens rejeitados selecionados foram removidos com sucesso.",
+      });
+    } catch (error) {
+      console.error("Erro ao excluir itens em massa:", error);
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível remover alguns itens.",
         variant: "destructive",
       });
     }
@@ -937,8 +1132,7 @@ const DiretoriaAprovacao = () => {
     };
 
     const newStatus = actionMap[actionServicosDialog.action];
-    const servicosEnviados = servicosData.filter((s) => s.status !== "rascunho");
-    const servicosSelecionados = servicosEnviados.filter((s) => s.id && selectedServicos.has(s.id));
+    const servicosSelecionados = servicos.filter((s) => s.id && selectedServicos.has(s.id));
     const servicosToUpdate = actionServicosDialog.action === "enviar_compras"
       ? servicosSelecionados.filter((s) => s.status === "aprovado")
       : servicosSelecionados;
@@ -1137,16 +1331,18 @@ const DiretoriaAprovacao = () => {
       observacao: s.observacao,
     }));
 
-    // Filtrar apenas serviços enviados (não rascunho)
-    const servicosEnviados = servicos.filter((s) => s.status !== "rascunho");
+    // Mostrar rascunhos da própria diretoria + serviços de gerências (não rascunho)
+    const servicosVisiveis = servicos.filter((s) => 
+      s.status !== "rascunho" || s.unidadeDemandante === siglaUpper
+    );
 
-    const servicosEnviadosFiltrados =
+    const servicosFiltrados =
       selectedGerencia === "todas"
-        ? servicosEnviados
-        : servicosEnviados.filter((s) => s.gerencia === selectedGerencia);
+        ? servicosVisiveis
+        : servicosVisiveis.filter((s) => s.gerencia === selectedGerencia);
 
-    const servicosExistentes = servicosEnviadosFiltrados.filter((s) => s.tipoContratacao !== "Novo");
-    const servicosNovos = servicosEnviadosFiltrados.filter((s) => s.tipoContratacao === "Novo");
+    const servicosExistentes = servicosFiltrados.filter((s) => s.tipoContratacao !== "Novo");
+    const servicosNovos = servicosFiltrados.filter((s) => s.tipoContratacao === "Novo");
 
     const toggleSelectAllServicosLista = (lista: ServicoItem[]) => {
       const ids = lista.filter((s) => s.id).map((s) => s.id as string);
@@ -1189,6 +1385,7 @@ const DiretoriaAprovacao = () => {
                 <th className="px-4 py-3 text-left text-sm font-semibold">Prioridade</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Vinculação</th>
+                <th className="px-4 py-3 text-center text-sm font-semibold">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -1281,6 +1478,34 @@ const DiretoriaAprovacao = () => {
                       {servico.vinculacao}
                     </Badge>
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      {servico.id && (
+                        <>
+                          {!isServicoReadOnly(servico) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title="Editar"
+                              onClick={() => openServicoEditor(servico)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            title="Excluir"
+                            onClick={() => handleDeleteServicoDiretoria(servico.id!)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1358,7 +1583,7 @@ const DiretoriaAprovacao = () => {
                 </Select>
               </div>
 
-              {servicosEnviadosFiltrados.length > 0 && (
+              {servicosFiltrados.length > 0 && (
                 <div className="flex gap-2">
                   <Button
                     className="gap-2"
@@ -1391,14 +1616,14 @@ const DiretoriaAprovacao = () => {
             </div>
 
             {/* Serviços Table */}
-            {isServicosLoading && servicosData.length === 0 ? (
+            {isServicosLoading && servicos.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg border">
                 <div className="flex flex-col items-center gap-3">
                   <div className="h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-gray-500">Carregando serviços...</p>
                 </div>
               </div>
-            ) : servicosEnviadosFiltrados.length > 0 ? (
+            ) : servicosFiltrados.length > 0 ? (
               <>
                 {isServicosLoading && (
                   <div className="flex items-center gap-2 text-xs text-blue-600 mb-2">
@@ -1412,7 +1637,7 @@ const DiretoriaAprovacao = () => {
             ) : (
               <div className="text-center py-12 bg-white rounded-lg border">
                 <p className="text-gray-500">
-                  {isServicosLoading ? "Carregando..." : "Nenhum serviço enviado para aprovação nesta gerência"}
+                  {isServicosLoading ? "Carregando..." : "Nenhum serviço cadastrado ou enviado para aprovação"}
                 </p>
               </div>
             )}
@@ -1728,6 +1953,14 @@ const DiretoriaAprovacao = () => {
                 </SelectContent>
               </Select>
             </div>
+            <Button
+              variant={ownShowOnlyComQuantidade ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+              onClick={() => setOwnShowOnlyComQuantidade(!ownShowOnlyComQuantidade)}
+            >
+              {ownShowOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+            </Button>
           </div>
         </div>
 
@@ -1741,9 +1974,9 @@ const DiretoriaAprovacao = () => {
           categorias={categoriasItensProprios}
         />
 
-        {ownCategoria === "" ? (
+        {ownSearchTerm.trim() === "" && !ownShowOnlyComQuantidade ? (
           <div className="text-center py-8 bg-card rounded-lg border border-dashed">
-            <p className="text-sm text-muted-foreground">Selecione uma categoria para exibir os itens.</p>
+            <p className="text-sm text-muted-foreground">🔍 Digite o código ou descrição para buscar itens do catálogo.</p>
           </div>
         ) : filteredOwnItems.length === 0 ? (
           <div className="text-center py-8 bg-card rounded-lg border border-dashed">
@@ -1757,6 +1990,7 @@ const DiretoriaAprovacao = () => {
               onUpdateUnidade={handleUpdateUnidadeDiretoria}
               onUpdateObservacao={handleUpdateObservacaoDiretoria}
               onUpdatePrioridade={handleUpdatePrioridadeDiretoria}
+              onDeleteItem={handleDeleteSolicitacao}
               valorTotal={itensProprios.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
             />
 
@@ -1829,7 +2063,7 @@ const DiretoriaAprovacao = () => {
 
       {/* Filtros */}
       <div className="px-6 py-4">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Gerência:</span>
             <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
@@ -1862,6 +2096,14 @@ const DiretoriaAprovacao = () => {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            variant={showOnlyComQuantidade ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => setShowOnlyComQuantidade(!showOnlyComQuantidade)}
+          >
+            {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+          </Button>
         </div>
       </div>
 
@@ -1872,6 +2114,62 @@ const DiretoriaAprovacao = () => {
         </div>
       ) : (
         <>
+          <div className="px-6 pb-2">
+            <Tabs
+              value={recebidosStatusTab}
+              onValueChange={(v) =>
+                setRecebidosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra")
+              }
+            >
+              <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 p-1">
+                <TabsTrigger value="pendentes" className="gap-2">
+                  <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+                  Pendentes
+                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                    {recebidosTabCounts.pendentes}
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="aprovados" className="gap-2">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+                  Aprovados
+                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                    {recebidosTabCounts.aprovados}
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="rejeitados" className="gap-2">
+                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                  Rejeitados
+                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                    {recebidosTabCounts.rejeitados}
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="em_compra" className="gap-2">
+                  <ShoppingCart className="h-4 w-4 shrink-0 text-sky-600" />
+                  Em compras
+                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                    {recebidosTabCounts.em_compra}
+                  </span>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {recebidosStatusTab === "pendentes" &&
+                "Itens com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar. Itens já rejeitados ou em compras aparecem nas outras abas."}
+              {recebidosStatusTab === "aprovados" &&
+                "Itens aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
+              {recebidosStatusTab === "rejeitados" &&
+                "Itens rejeitados: você pode selecionar itens para aprovar (recuperar) ou excluir permanentemente da lista."}
+              {recebidosStatusTab === "em_compra" &&
+                "Itens já encaminhados às compras ou concluídos (somente consulta)."}
+            </p>
+          </div>
+
+          {recebidosTableItems.length === 0 ? (
+            <div className="px-6 py-8 text-center text-sm text-muted-foreground">
+              Nenhum item nesta lista para os filtros atuais. Escolha outra aba acima.
+            </div>
+          ) : (
+            <>
           {/* Botões de Ação */}
           <div className="px-6 py-4 border-b">
             <div className="flex items-center gap-4 flex-wrap">
@@ -1879,6 +2177,7 @@ const DiretoriaAprovacao = () => {
                 <Checkbox 
                   checked={selectedItems.size === selectableItems.length && selectableItems.length > 0}
                   onCheckedChange={toggleSelectAll}
+                  disabled={selectableItems.length === 0}
                 />
                 <span className="text-sm text-muted-foreground">
                   {selectedItems.size > 0 ? `${selectedItems.size} selecionado(s)` : "Selecionar todos"}
@@ -1886,38 +2185,65 @@ const DiretoriaAprovacao = () => {
               </div>
               
               <div className="flex items-center gap-2 flex-wrap w-full md:w-auto">
+                {selectedItems.size > 0 && (
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => setActionDialog({ open: true, action: "aprovar", isBulk: false })}
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    Aprovar Selecionados ({selectedItems.size})
+                  </Button>
+                )}
+
                 <Button
                   size="sm"
                   variant="secondary"
                   className="gap-2"
                   onClick={() => setConfirmComprasOpen(true)}
-                  disabled={selectedApprovedItems.length === 0}
+                  disabled={selectedApprovedItems.length === 0 || recebidosStatusTab !== "aprovados"}
                 >
                   <Send className="h-4 w-4" />
                   Enviar para Compras ({selectedApprovedItems.length})
                 </Button>
-                <Button 
-                  size="sm" 
-                  variant="default" 
-                  className="gap-2"
-                  onClick={() => setActionDialog({ open: true, action: "aprovar", isBulk: true })}
-                  disabled={filteredItems.every(i => i.status === "aprovado" || i.status === "em_compra" || i.status === "concluido")}
-                >
-                  <CheckCircle className="h-4 w-4" />
-                  Aprovar todos
-                </Button>
+
+                {recebidosStatusTab === "pendentes" && selectedItems.size === 0 && (
+                  <Button 
+                    size="sm" 
+                    variant="default" 
+                    className="gap-2"
+                    onClick={() => setActionDialog({ open: true, action: "aprovar", isBulk: true })}
+                    disabled={!filteredItems.some(isPendenteDiretoriaAprovacao)}
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    Aprovar todos
+                  </Button>
+                )}
 
                 <Button 
                   size="sm" 
                   variant="destructive" 
                   className="gap-2"
                   onClick={() => setActionDialog({ open: true, action: "rejeitar", isBulk: false })}
-                  disabled={selectedItems.size === 0}
+                  disabled={selectedItems.size === 0 || recebidosStatusTab === "rejeitados"}
                 >
                   <XCircle className="h-4 w-4" />
                   Rejeitar ({selectedItems.size})
                 </Button>
 
+                {recebidosStatusTab === "rejeitados" && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="gap-2"
+                    onClick={handleBulkDeleteRejected}
+                    disabled={selectedItems.size === 0}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Excluir Selecionados ({selectedItems.size})
+                  </Button>
+                )}
               </div>
               <div className="flex items-center gap-2 md:ml-auto">
                 <Button 
@@ -1925,7 +2251,7 @@ const DiretoriaAprovacao = () => {
                   variant="outline"
                   className="gap-2"
                   onClick={exportToPDF}
-                  disabled={filteredItems.length === 0}
+                  disabled={recebidosTableItems.length === 0}
                 >
                   <FileText className="h-4 w-4" />
                   Exportar PDF
@@ -1935,7 +2261,7 @@ const DiretoriaAprovacao = () => {
                   variant="outline"
                   className="gap-2"
                   onClick={exportToExcel}
-                  disabled={filteredItems.length === 0}
+                  disabled={recebidosTableItems.length === 0}
                 >
                   <Download className="h-4 w-4" />
                   Exportar Excel
@@ -1946,6 +2272,10 @@ const DiretoriaAprovacao = () => {
 
           {/* Tabela de Itens */}
           <div className="px-6 pb-6">
+            <p className="mb-2 text-xs text-muted-foreground">
+              {recebidosTableItems.length} item(ns) nesta aba
+              {totalPages > 1 ? ` — página ${currentPage} de ${totalPages}` : ""}
+            </p>
             <div className="bg-card rounded-lg border overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -1955,6 +2285,7 @@ const DiretoriaAprovacao = () => {
                         <Checkbox 
                           checked={selectedItems.size === selectableItems.length && selectableItems.length > 0}
                           onCheckedChange={toggleSelectAll}
+                          disabled={selectableItems.length === 0}
                         />
                       </th>
                       <th className="p-3 text-left text-xs font-medium text-muted-foreground">Cód.</th>
@@ -1962,24 +2293,26 @@ const DiretoriaAprovacao = () => {
                       <th className="p-3 text-left text-xs font-medium text-muted-foreground">Gerência</th>
                       <th className="p-3 text-left text-xs font-medium text-muted-foreground">Status</th>
                       <th className="p-3 text-left text-xs font-medium text-muted-foreground">Prioridade</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Qtd.</th>
+                      <th className="p-3 text-center text-xs font-medium text-muted-foreground">Qtd.</th>
                       <th className="p-3 text-left text-xs font-medium text-muted-foreground">Unidade</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Obs.</th>
                       <th className="p-3 text-right text-xs font-medium text-muted-foreground">Valor Unit.</th>
                       <th className="p-3 text-right text-xs font-medium text-muted-foreground">Total</th>
+                      <th className="p-3 text-center text-xs font-medium text-muted-foreground">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedItems.map((item, index) => (
                       <tr 
-                        key={item.id}
+                        key={item.id ?? `row-${item.codigo}-${item.gerencia}-${index}`}
                         className={`border-b hover:bg-muted/30 ${index % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}
                       >
                         <td className="p-3">
                           <Checkbox 
-                            checked={selectedItems.has(item.id)}
-                            onCheckedChange={() => toggleSelectItem(item.id)}
-                            disabled={isItemReadOnly(item)}
+                            checked={Boolean(item.id && selectedItems.has(item.id))}
+                            onCheckedChange={() => {
+                              if (item.id) toggleSelectItem(item.id);
+                            }}
+                            disabled={isItemReadOnly(item) || !item.id}
                           />
                         </td>
                         <td className="p-3 text-sm font-mono">{item.codigo}</td>
@@ -1999,7 +2332,7 @@ const DiretoriaAprovacao = () => {
                               {item.prioridade}
                             </Badge>
                           ) : (
-                            <Select value={item.prioridade} onValueChange={(value) => handleUpdatePrioridade(item.codigo, value as any)}>
+                            <Select value={item.prioridade} onValueChange={(value) => handleUpdatePrioridade(item.id!, value as any)}>
                               <SelectTrigger className="w-24 h-8">
                                 <SelectValue />
                               </SelectTrigger>
@@ -2019,7 +2352,7 @@ const DiretoriaAprovacao = () => {
                               type="number"
                               min={0}
                               defaultValue={item.qtdEstimada}
-                              onBlur={(e) => handleUpdateQtdEstimada(item.codigo, Number(e.target.value))}
+                              onBlur={(e) => handleUpdateQtdEstimada(item.id!, Number(e.target.value))}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.currentTarget.blur();
@@ -2030,24 +2363,41 @@ const DiretoriaAprovacao = () => {
                           )}
                         </td>
                         <td className="p-3 text-sm">{item.unidade}</td>
-                        <td className="p-3 text-sm min-w-[220px]">
-                          {isItemReadOnly(item) ? (
-                            <span className="text-muted-foreground">{item.observacao || "-"}</span>
-                          ) : (
-                            <Textarea
-                              defaultValue={item.observacao || ""}
-                              onBlur={(e) => handleUpdateObservacao(item.codigo, e.target.value)}
-                              placeholder="Observação"
-                              rows={2}
-                              className="min-h-[56px] text-sm"
-                            />
-                          )}
-                        </td>
                         <td className="p-3 text-right text-sm">
                           R$ {item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-right text-sm font-medium">
                           R$ {(item.qtdEstimada * item.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-1">
+                            {item.id && (
+                              <>
+                                {!isItemReadOnly(item) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    title="Editar"
+                                    onClick={() => openSolicitacaoEditor(item)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                                {(!isItemReadOnly(item) || item.status === "rejeitado") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-destructive"
+                                    title="Excluir"
+                                    onClick={() => handleDeleteSolicitacao(item.id!)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2091,6 +2441,8 @@ const DiretoriaAprovacao = () => {
               </div>
             )}
           </div>
+            </>
+          )}
         </>
       )}
 
@@ -2231,7 +2583,8 @@ const DiretoriaAprovacao = () => {
               {actionDialog.action === "rejeitar" && "Rejeitar Solicitações"}
             </DialogTitle>
             <DialogDescription>
-              {actionDialog.action === "aprovar" && `Aprovar ${filteredItems.length} solicitação(ões)?`}
+              {actionDialog.action === "aprovar" &&
+                `Aprovar ${recebidosTabCounts.pendentes} solicitação(ões) com status Enviado/Em análise?`}
               {actionDialog.action === "rejeitar" && `Rejeitar ${selectedItems.size} solicitação(ões) selecionada(s)? Informe uma justificativa:`}
             </DialogDescription>
           </DialogHeader>
@@ -2289,4 +2642,3 @@ const DiretoriaAprovacao = () => {
 };
 
 export default DiretoriaAprovacao;
-

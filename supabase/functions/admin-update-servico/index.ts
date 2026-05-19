@@ -24,10 +24,10 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { accessCode, item } = await req.json();
+    const { accessCode, servicoId, updates } = await req.json();
 
-    if (!accessCode || !item) {
-      return new Response(JSON.stringify({ error: "Missing accessCode or item" }), {
+    if (!accessCode || !servicoId || !updates) {
+      return new Response(JSON.stringify({ error: "Missing accessCode, servicoId or updates" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -72,73 +72,83 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: itemCatalogo, error: itemError } = await supabase
-      .from("itens_catalogo")
-      .insert([
-        {
-          codigo: Number(item.codigo),
-          descricao: String(item.descricao).trim(),
-          categoria: String(item.categoria).trim(),
-          unidade: String(item.unidade).trim().toUpperCase(),
-          valor_unitario: Number(item.valorUnitario),
-        },
-      ])
-      .select("*")
-      .single();
-
-    if (itemError) {
-      throw itemError;
-    }
-
-    const { data: periodoAtivo, error: periodoError } = await supabase
-      .from("periodos")
-      .select("id")
-      .eq("ativo", true)
-      .order("fim", { ascending: false })
-      .limit(1)
+    // Verificar se o serviço existe
+    const { data: servico, error: fetchError } = await supabase
+      .from("servicos")
+      .select("id, status")
+      .eq("id", servicoId)
       .maybeSingle();
 
-    if (periodoError) {
-      throw periodoError;
+    if (fetchError) {
+      throw fetchError;
     }
 
-    if (periodoAtivo) {
-      const { data: gerencias, error: gerenciasError } = await supabase
-        .from("gerencias")
-        .select("id, diretoria_id")
-        .eq("ativa", true);
+    if (!servico) {
+      return new Response(JSON.stringify({ error: "Serviço não encontrado" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-      if (gerenciasError) {
-        throw gerenciasError;
-      }
+    // Lista de campos permitidos para edição por admin (todos)
+    const allowedFields = [
+      "item",
+      "tipo_contratacao",
+      "unidade_demandante",
+      "objeto",
+      "justificativa",
+      "previsao_inicio",
+      "estimativa_valor",
+      "dotacao_orcamentaria",
+      "grau_prioridade",
+      "vinculacao",
+      "dependencia_descricao",
+      "status",
+      "observacao",
+    ];
 
-      if (gerencias && gerencias.length > 0) {
-        const solicitacoes = gerencias.map((gerencia: { id: string; diretoria_id: string }) => ({
-          periodo_id: periodoAtivo.id,
-          diretoria_id: gerencia.diretoria_id,
-          gerencia_id: gerencia.id,
-          item_id: itemCatalogo.id,
-          codigo: itemCatalogo.codigo,
-          descricao: itemCatalogo.descricao,
-          categoria: itemCatalogo.categoria,
-          unidade: itemCatalogo.unidade,
-          qtd_estimada: 0,
-          valor_unitario: itemCatalogo.valor_unitario,
-          prioridade: "Baixa",
-          status: "rascunho",
-        }));
-
-        const { error: solicitacoesError } = await supabase
-          .from("solicitacoes")
-          .insert(solicitacoes);
-
-        if (solicitacoesError) {
-          throw solicitacoesError;
+    const filteredUpdates: Record<string, unknown> = {};
+    for (const key of Object.keys(updates)) {
+      if (allowedFields.includes(key)) {
+        if (key === "previsao_inicio" && updates[key]) {
+          filteredUpdates[key] = new Date(updates[key]).toISOString().split('T')[0];
+        } else if (key === "estimativa_valor" || key === "dotacao_orcamentaria") {
+          filteredUpdates[key] = Number(updates[key]);
+        } else if (key === "item") {
+          filteredUpdates[key] = Number(updates[key]);
+        } else {
+          filteredUpdates[key] = updates[key];
         }
       }
     }
 
-    return new Response(JSON.stringify({ success: true, item: itemCatalogo }), {
+    // Adicionar timestamp de atualização
+    filteredUpdates.updated_at = new Date().toISOString();
+
+    if (Object.keys(filteredUpdates).length === 0) {
+      return new Response(JSON.stringify({ error: "No valid fields to update" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Realizar o update
+    const { data: updatedServico, error: updateError } = await supabase
+      .from("servicos")
+      .update(filteredUpdates)
+      .eq("id", servicoId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: "Serviço atualizado com sucesso",
+      servico: updatedServico,
+    }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

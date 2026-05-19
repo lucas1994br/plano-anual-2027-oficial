@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// deno-lint-ignore-file
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
@@ -5,33 +8,23 @@ import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
-function buildScopeAliases(scope: string, sigla: string) {
-  const normalizedSigla = String(sigla || "").trim().toLowerCase();
-
-  if (!normalizedSigla) {
-    return [] as string[];
-  }
+function buildScopeAliases(scope: string, sigla: string): string[] {
+  const s = String(sigla || "").trim().toLowerCase();
+  if (!s) return [];
 
   if (scope === "diretoria") {
-    return [
-      `${normalizedSigla}1234`,
-      `${normalizedSigla}123`,
-      `1234${normalizedSigla}`,
-    ];
+    return [`${s}1234`];
   }
 
   if (scope === "gerencia") {
-    return [
-      `${normalizedSigla}123`,
-      `${normalizedSigla}1234`,
-      `1234${normalizedSigla}`,
-    ];
+    return [`${s}123`];
   }
 
-  return [] as string[];
+  return [];
 }
 
 serve(async (req: Request) => {
@@ -45,106 +38,98 @@ serve(async (req: Request) => {
     if (!code || !scope) {
       return new Response(
         JSON.stringify({ error: "Missing code or scope" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: corsHeaders }
       );
     }
 
-    // Initialize Supabase client
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return new Response(
-        JSON.stringify({ error: "Missing environment variables" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Hash do codigo normalizado em minusculo para evitar diferencas de caixa.
     const normalizedCode = String(code).trim().toLowerCase();
+
+    // 🔐 HASH
     const encoded = new TextEncoder().encode(normalizedCode);
     const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    const hashHex = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
 
-    // Query the access codes
-    const { data: accessCodes, error: queryError } = await supabase
+    // ✅ 1) Tenta por hash direto
+    const { data: hashedMatches } = await supabase
       .from("codigos_acesso")
       .select("*")
       .eq("ativo", true)
-      .eq("scope", scope);
+      .eq("scope", scope)
+      .eq("codigo_hash", hashHex);
 
-    if (queryError) throw queryError;
+    if (hashedMatches && hashedMatches.length > 0) {
+      return successResponse(hashedMatches[0]);
+    }
 
-    let matchedCode = (accessCodes as any[])?.find(
-      (ac: any) => ac.codigo_hash === hashHex
+    // ✅ 2) Fallback por sigla
+    if (scope !== "diretoria" && scope !== "gerencia") {
+      return invalid();
+    }
+
+    const table = scope === "diretoria" ? "diretorias" : "gerencias";
+    const idColumn = scope === "diretoria" ? "diretoria_id" : "gerencia_id";
+
+    const { data: entities } = await supabase
+      .from(table)
+      .select("id, sigla")
+      .eq("ativa", true);
+
+    const entity = entities?.find((e: any) =>
+      buildScopeAliases(scope, e.sigla).includes(normalizedCode)
     );
 
-    if (!matchedCode && (scope === "diretoria" || scope === "gerencia")) {
-      const tableName = scope === "diretoria" ? "diretorias" : "gerencias";
-      const idColumn = scope === "diretoria" ? "diretoria_id" : "gerencia_id";
+    if (!entity) return invalid();
 
-      const { data: entities, error: entitiesError } = await supabase
-        .from(tableName)
-        .select("id, sigla, ativa")
-        .eq("ativa", true);
+    // ✅ 3) Busca DETERMINÍSTICA do código válido
+    const { data: validCodes } = await supabase
+      .from("codigos_acesso")
+      .select("*")
+      .eq("ativo", true)
+      .eq("scope", scope)
+      .eq(idColumn, entity.id)
+      .or(`expira_em.is.null,expira_em.gt.${new Date().toISOString()}`)
+      .order("created_at", { ascending: false })
+      .limit(1);
 
-      if (entitiesError) throw entitiesError;
-
-      const matchedEntity = (entities as any[])?.find((entity: any) => {
-        const aliases = buildScopeAliases(scope, entity.sigla);
-        return aliases.includes(normalizedCode);
-      });
-
-      if (matchedEntity) {
-        matchedCode = (accessCodes as any[])?.find(
-          (ac: any) => ac[idColumn] === matchedEntity.id
-        ) || {
-          scope,
-          diretoria_id: scope === "diretoria" ? matchedEntity.id : null,
-          gerencia_id: scope === "gerencia" ? matchedEntity.id : null,
-          expira_em: null,
-        };
-      }
+    if (!validCodes || validCodes.length === 0) {
+      return invalid();
     }
 
-    if (!matchedCode) {
-      return new Response(
-        JSON.stringify({ error: "Invalid access code" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Check expiration if set
-    if (matchedCode.expira_em && new Date(matchedCode.expira_em) < new Date()) {
-      return new Response(
-        JSON.stringify({ error: "Access code expired" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Return success response
+    return successResponse(validCodes[0]);
+  } catch (err) {
+    console.error(err);
     return new Response(
-      JSON.stringify({
-        success: true,
-        access: {
-          scope: matchedCode.scope,
-          diretoria_id: matchedCode.diretoria_id,
-          gerencia_id: matchedCode.gerencia_id,
-          expired_at: matchedCode.expira_em,
-        },
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : "Internal server error";
-    console.error(errorMessage);
-    
-    return new Response(
-      JSON.stringify({ error: errorMessage }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Internal server error" }),
+      { status: 500, headers: corsHeaders }
     );
   }
 });
+
+function successResponse(code: any) {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      access: {
+        scope: code.scope,
+        diretoria_id: code.diretoria_id,
+        gerencia_id: code.gerencia_id,
+        expired_at: code.expira_em,
+      },
+    }),
+    { status: 200, headers: corsHeaders }
+  );
+}
+
+function invalid() {
+  return new Response(
+    JSON.stringify({ error: "Invalid access code" }),
+    { status: 401, headers: corsHeaders }
+  );
+}

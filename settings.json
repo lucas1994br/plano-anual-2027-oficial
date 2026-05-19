@@ -1,0 +1,9 @@
+{
+    "deno.enable": true,
+
+    "deepseek.apiKey": "sk-6fa494b656e943458e2c2dc04946a415",
+    "deepseek.model": "deepseek-coder"
+    
+
+}
+
