@@ -3,10 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Card } from "@/components/ui/card.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import DOMPurify from 'dompurify';
 import {
   Select,
@@ -14,20 +14,20 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select.tsx";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "@/components/ui/dialog";
-import { PlanHeader } from "@/components/layout/PlanHeader";
-import { SummaryCards } from "@/components/common/SummaryCards";
-import { PlanFilters } from "@/components/forms/PlanFilters";
-import { PlanTable } from "@/components/tables/PlanTable";
-import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard";
-import { AdminBudgetConfig } from "@/lib/adminBudgetConfig";
+} from "@/components/ui/dialog.tsx";
+import { PlanHeader } from "@/components/layout/PlanHeader.tsx";
+import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+import { PlanFilters } from "@/components/forms/PlanFilters.tsx";
+import { PlanTable } from "@/components/tables/PlanTable.tsx";
+import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard.tsx";
+import { AdminBudgetConfig } from "@/lib/adminBudgetConfig.ts";
 import {
   Pagination,
   PaginationContent,
@@ -36,9 +36,9 @@ import {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
-} from "@/components/ui/pagination";
-import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
-import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
+} from "@/components/ui/pagination.tsx";
+import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
+import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan.ts";
 import {
   getAdminMiniErpConfigDb,
   getDiretorias,
@@ -53,12 +53,12 @@ import {
   updateServico,
   createServico,
   deleteServico,
-} from "@/lib/services";
-import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+} from "@/lib/services.ts";
+import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig.ts";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useToast } from "@/hooks/use-toast";
-import { resolveGerenciaNome } from "@/data/gerencias";
+import { useToast } from "@/hooks/use-toast.ts";
+import { resolveGerenciaNome } from "@/data/gerencias.ts";
 
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string): string | null => {
@@ -931,7 +931,7 @@ const GerenciaPanel = () => {
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
-                                {(["Muito Baixo", "Baixo", "Médio", "Alto", "Muito Alto"] as GrauPrioridade[]).map((p) => (
+                                {(["Baixo", "Médio", "Alto"] as GrauPrioridade[]).map((p) => (
                                   <SelectItem key={p} value={p}>
                                     <Badge variant={getPrioridadeBadgeVariant(p)}>{p}</Badge>
                                   </SelectItem>
@@ -1216,11 +1216,9 @@ const GerenciaPanel = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Muito Baixo">Muito Baixo</SelectItem>
                       <SelectItem value="Baixo">Baixo</SelectItem>
                       <SelectItem value="Médio">Médio</SelectItem>
                       <SelectItem value="Alto">Alto</SelectItem>
-                      <SelectItem value="Muito Alto">Muito Alto</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -1,5 +1,5 @@
 import { Package, DollarSign } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { Card } from "@/components/ui/card.tsx";
 
 interface SummaryCardsProps {
   totalItens: number;

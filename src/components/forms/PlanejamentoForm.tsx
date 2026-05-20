@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import erpService from '@/lib/services-erp';
-import type { CategoriaItem, PlanoItem } from '@/types/erp';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { toast } from '@/hooks/use-toast';
+import erpService from '@/lib/services-erp.ts';
+import type { CategoriaItem, PlanoItem } from '@/types/erp.ts';
+import { Card } from '@/components/ui/card.tsx';
+import { Button } from '@/components/ui/button.tsx';
+import { Input } from '@/components/ui/input.tsx';
+import { toast } from '@/hooks/use-toast.ts';
 
 interface PlanejamentoFormProps {
   planoDiretoriaId: string;

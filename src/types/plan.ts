@@ -35,11 +35,9 @@ export interface PlanSummary {
 
 // Tipos e interfaces para Serviços
 export type GrauPrioridade = 
-  | "Muito Baixo"
   | "Baixo"
   | "Médio"
-  | "Alto"
-  | "Muito Alto";
+  | "Alto";
 
 export interface ServicoItem {
   justificativa_rejeicao: string;

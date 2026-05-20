@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import erpService from '@/lib/services-erp';
-import type { OrcamentoDisponivel } from '@/types/erp';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import erpService from '@/lib/services-erp.ts';
+import type { OrcamentoDisponivel } from '@/types/erp.ts';
+import { Card } from '@/components/ui/card.tsx';
+import { Badge } from '@/components/ui/badge.tsx';
 
 export function OrcamentoDashboard() {
   const [ano, setAno] = useState(2026);

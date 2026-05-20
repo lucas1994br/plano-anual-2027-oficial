@@ -1,4 +1,4 @@
-import { PlanItem } from "@/types/plan";
+import { PlanItem } from "@/types/plan.ts";
 
 // Dados parseados do CSV do PAC 2026
 // Organizados por diretoria

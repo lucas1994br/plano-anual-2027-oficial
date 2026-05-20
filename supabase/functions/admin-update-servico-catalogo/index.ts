@@ -37,6 +37,7 @@ serve(async (req: Request) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("Missing environment variables");
       return new Response(JSON.stringify({ error: "Missing environment variables" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -46,15 +47,30 @@ serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const accessHash = await hashCode(accessCode);
 
-    const { data: accessRow, error: accessError } = await supabase
+    // Validar Admin - Busca por código direto OU código hash
+    const { data: accessRowByCode, error: errorByCode } = await supabase
       .from("codigos_acesso")
       .select("id, scope, ativo, expira_em")
       .eq("scope", "admin")
       .eq("ativo", true)
-      .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+      .eq("codigo_hash", accessCode)
       .maybeSingle();
 
-    if (accessError) throw accessError;
+    const { data: accessRowByHash, error: errorByHash } = await supabase
+      .from("codigos_acesso")
+      .select("id, scope, ativo, expira_em")
+      .eq("scope", "admin")
+      .eq("ativo", true)
+      .eq("codigo_hash", accessHash)
+      .maybeSingle();
+
+    const accessRow = accessRowByCode || accessRowByHash;
+    const accessError = errorByCode || errorByHash;
+
+    if (accessError) {
+      console.error("Error validating access code:", accessError);
+      throw accessError;
+    }
 
     if (!accessRow) {
       return new Response(JSON.stringify({ error: "Codigo admin invalido." }), {

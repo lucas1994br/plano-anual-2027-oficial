@@ -1,34 +1,39 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
-import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
+import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Card } from "@/components/ui/card.tsx";
+import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
+import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan.ts";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { SummaryCards } from "@/components/common/SummaryCards";
-import { PlanFilters } from "@/components/forms/PlanFilters";
-import { PlanTable } from "@/components/tables/PlanTable";
-import { ServicosTable } from "@/components/tables/ServicosTable";
-import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/hooks/use-toast";
-import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+import { PlanFilters } from "@/components/forms/PlanFilters.tsx";
+import { PlanTable } from "@/components/tables/PlanTable.tsx";
+import { ServicosTable } from "@/components/tables/ServicosTable.tsx";
+import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { useToast } from "@/hooks/use-toast.ts";
+import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig.ts";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
+import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination.tsx";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 
 import DOMPurify from 'dompurify';
 
 /** Itens aguardando decisão da diretoria (podem ser aprovados ou rejeitados em massa). */
 function isPendenteDiretoriaAprovacao(item: PlanItem) {
   return item.status === "enviado" || item.status === "em_analise";
+}
+
+/** Serviços aguardando decisão da diretoria */
+function isPendenteServicoAprovacao(servico: ServicoItem) {
+  return servico.status === "rascunho" || servico.status === "enviado";
 }
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string) => {
@@ -65,6 +70,11 @@ const DiretoriaAprovacao = () => {
   const [recebidosStatusTab, setRecebidosStatusTab] = useState<
     "pendentes" | "aprovados" | "rejeitados" | "em_compra"
   >("pendentes");
+  /** Tab de status para serviços: separa pendentes, aprovados, rejeitados e em compras */
+  const [servicosStatusTab, setServicosStatusTab] = useState<
+    "pendentes" | "aprovados" | "rejeitados" | "em_compra"
+  >("pendentes");
+  const [servicosCurrentPage, setServicosCurrentPage] = useState(1);
   const [selectedServicos, setSelectedServicos] = useState<Set<string>>(new Set());
   const [expandedJustificativas, setExpandedJustificativas] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -508,6 +518,36 @@ const DiretoriaAprovacao = () => {
         ),
     [servicosData],
   );
+
+  /** Contadores de serviços por status */
+  const servicosTabCounts = useMemo(() => {
+    const counts = { pendentes: 0, aprovados: 0, rejeitados: 0, em_compra: 0 };
+    
+    for (let i = 0; i < servicosData.length; i++) {
+      const servico = servicosData[i];
+      if (isPendenteServicoAprovacao(servico)) counts.pendentes++;
+      else if (servico.status === "aprovado") counts.aprovados++;
+      else if (servico.status === "rejeitado") counts.rejeitados++;
+      else if (servico.status === "em_compra" || servico.status === "concluido") counts.em_compra++;
+    }
+    return counts;
+  }, [servicosData]);
+
+  /** Filtra serviços baseado no status selecionado */
+  const servicosFiltradasPorStatus = useMemo(() => {
+    switch (servicosStatusTab) {
+      case "pendentes":
+        return servicosData.filter(isPendenteServicoAprovacao);
+      case "aprovados":
+        return servicosData.filter((s: any) => s.status === "aprovado");
+      case "rejeitados":
+        return servicosData.filter((s: any) => s.status === "rejeitado");
+      case "em_compra":
+        return servicosData.filter((s: any) => s.status === "em_compra" || s.status === "concluido");
+      default:
+        return servicosData;
+    }
+  }, [servicosData, servicosStatusTab]);
 
   // Listas únicas de categorias
   const categorias = useMemo(() => [...new Set(items.map(i => i.categoria))].sort(), [items]);
@@ -1132,9 +1172,9 @@ const DiretoriaAprovacao = () => {
     };
 
     const newStatus = actionMap[actionServicosDialog.action];
-    const servicosSelecionados = servicos.filter((s) => s.id && selectedServicos.has(s.id));
+    const servicosSelecionados = servicosFiltradasPorStatus.filter((s: any) => s.id && selectedServicos.has(s.id));
     const servicosToUpdate = actionServicosDialog.action === "enviar_compras"
-      ? servicosSelecionados.filter((s) => s.status === "aprovado")
+      ? servicosSelecionados.filter((s: any) => s.status === "aprovado")
       : servicosSelecionados;
 
     if (actionServicosDialog.action === "enviar_compras" && servicosToUpdate.length === 0) {
@@ -1153,8 +1193,8 @@ const DiretoriaAprovacao = () => {
     try {
       await Promise.all(
         servicosToUpdate
-          .filter((s) => s.id)
-          .map((s) => updateServico(s.id, { status: newStatus }))
+          .filter((s: any) => s.id)
+          .map((s: any) => updateServico(s.id, { status: newStatus, justificativa_rejeicao: actionServicosDialog.action === "rejeitar" ? justificativa : undefined }))
       );
       queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast({
@@ -1175,6 +1215,36 @@ const DiretoriaAprovacao = () => {
         description: "Não foi possível executar a ação.",
         variant: "destructive",
       });
+    }
+  };
+
+  // Handlers para seleção de serviços
+  const toggleSelectAllServicos = () => {
+    const selectableIds = servicosFiltradasPorStatus
+      .filter((s: any) => s.id && !isServicoReadOnly(s))
+      .map((s: any) => s.id as string);
+
+    if (selectedServicos.size === selectableIds.length && selectableIds.length > 0) {
+      setSelectedServicos(new Set());
+    } else {
+      setSelectedServicos(new Set(selectableIds));
+    }
+  };
+
+  const handleBulkDeleteRejectedServicos = async () => {
+    if (selectedServicos.size === 0) return;
+    if (!confirm(`Deseja realmente excluir ${selectedServicos.size} serviço(s) rejeitado(s)?`)) return;
+
+    try {
+      await Promise.all(
+        Array.from(selectedServicos).map((id) => deleteServico(id))
+      );
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      setSelectedServicos(new Set());
+      toast({ title: "Serviços excluídos", description: "Serviços rejeitados removidos com sucesso." });
+    } catch (error) {
+      console.error("Erro ao excluir serviços:", error);
+      toast({ title: "Erro", description: "Não foi possível excluir os serviços.", variant: "destructive" });
     }
   };
 
@@ -1396,6 +1466,7 @@ const DiretoriaAprovacao = () => {
                       type="checkbox"
                       checked={selectedServicos.has(servico.id || "")}
                       onChange={() => toggleSelectServico(servico.id || "")}
+                      disabled={isServicoReadOnly(servico) || !servico.id}
                       className="rounded"
                     />
                   </td>
@@ -1457,11 +1528,9 @@ const DiretoriaAprovacao = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Muito Baixo">Muito Baixo</SelectItem>
                           <SelectItem value="Baixo">Baixo</SelectItem>
                           <SelectItem value="Médio">Médio</SelectItem>
                           <SelectItem value="Alto">Alto</SelectItem>
-                          <SelectItem value="Muito Alto">Muito Alto</SelectItem>
                         </SelectContent>
                       </Select>
                     )}
@@ -1564,6 +1633,57 @@ const DiretoriaAprovacao = () => {
               gasto={gastoServicosDiretoria}
             />
 
+            {/* Tabs de Status para Serviços */}
+            <div className="px-0 pb-4">
+              <Tabs
+                value={servicosStatusTab}
+                onValueChange={(v) =>
+                  setServicosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra")
+                }
+              >
+                <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 p-1">
+                  <TabsTrigger value="pendentes" className="gap-2">
+                    <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+                    Pendentes
+                    <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                      {servicosTabCounts.pendentes}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="aprovados" className="gap-2">
+                    <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+                    Aprovados
+                    <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                      {servicosTabCounts.aprovados}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="rejeitados" className="gap-2">
+                    <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                    Rejeitados
+                    <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                      {servicosTabCounts.rejeitados}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="em_compra" className="gap-2">
+                    <ShoppingCart className="h-4 w-4 shrink-0 text-sky-600" />
+                    Em compras
+                    <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                      {servicosTabCounts.em_compra}
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {servicosStatusTab === "pendentes" &&
+                  "Serviços em rascunho ou enviados: aprove/rejeite em massa usando os checkboxes."}
+                {servicosStatusTab === "aprovados" &&
+                  "Serviços aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
+                {servicosStatusTab === "rejeitados" &&
+                  "Serviços rejeitados: você pode reaprová-los ou excluir permanentemente da lista."}
+                {servicosStatusTab === "em_compra" &&
+                  "Serviços já encaminhados às compras ou concluídos (somente consulta)."}
+              </p>
+            </div>
+
             {/* Filtro de gerência */}
             <div className="mb-4 flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
@@ -1585,45 +1705,65 @@ const DiretoriaAprovacao = () => {
 
               {servicosFiltrados.length > 0 && (
                 <div className="flex gap-2">
-                  <Button
-                    className="gap-2"
-                    disabled={selectedServicos.size === 0}
-                    onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "aprovar" })}
-                  >
-                    <Check className="h-4 w-4" />
-                    Aprovar Seleção
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2"
-                    disabled={selectedServicos.size === 0}
-                    onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "rejeitar" })}
-                  >
-                    <X className="h-4 w-4" />
-                    Rejeitar Seleção
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2"
-                    disabled={selectedServicos.size === 0}
-                    onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "enviar_compras" })}
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar para Compras
-                  </Button>
+                  {servicosStatusTab === "pendentes" && (
+                    <>
+                      <Button
+                        className="gap-2"
+                        disabled={selectedServicos.size === 0}
+                        onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "aprovar" })}
+                      >
+                        <Check className="h-4 w-4" />
+                        Aprovar Seleção ({selectedServicos.size})
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        disabled={selectedServicos.size === 0}
+                        onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "rejeitar" })}
+                      >
+                        <X className="h-4 w-4" />
+                        Rejeitar Seleção ({selectedServicos.size})
+                      </Button>
+                    </>
+                  )}
+
+                  {servicosStatusTab === "aprovados" && (
+                    <Button
+                      variant="outline"
+                      className="gap-2"
+                      disabled={selectedServicos.size === 0}
+                      onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "enviar_compras" })}
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar para Compras ({selectedServicos.size})
+                    </Button>
+                  )}
+
+                  {servicosStatusTab === "rejeitados" && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="gap-2"
+                      onClick={handleBulkDeleteRejectedServicos}
+                      disabled={selectedServicos.size === 0}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Excluir Selecionados ({selectedServicos.size})
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Serviços Table */}
-            {isServicosLoading && servicos.length === 0 ? (
+            {isServicosLoading && servicosFiltradasPorStatus.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg border">
                 <div className="flex flex-col items-center gap-3">
                   <div className="h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-gray-500">Carregando serviços...</p>
                 </div>
               </div>
-            ) : servicosFiltrados.length > 0 ? (
+            ) : servicosFiltradasPorStatus.length > 0 ? (
               <>
                 {isServicosLoading && (
                   <div className="flex items-center gap-2 text-xs text-blue-600 mb-2">
@@ -1631,13 +1771,30 @@ const DiretoriaAprovacao = () => {
                     Atualizando...
                   </div>
                 )}
-                {servicosExistentes.length > 0 && renderServicosTable("Serviços Existentes", servicosExistentes)}
-                {servicosNovos.length > 0 && renderServicosTable("Serviços Novos", servicosNovos)}
+                {/* Filtra serviços por gerência e tipo de contratação */}
+                {(() => {
+                  const filtered = selectedGerencia === "todas"
+                    ? servicosFiltradasPorStatus
+                    : servicosFiltradasPorStatus.filter((s: any) => {
+                        const sigla = gerenciaMap[s.gerencia_id];
+                        return sigla === selectedGerencia;
+                      });
+
+                  const existentes = filtered.filter((s: any) => s.tipo_contratacao !== "Novo");
+                  const novos = filtered.filter((s: any) => s.tipo_contratacao === "Novo");
+
+                  return (
+                    <>
+                      {existentes.length > 0 && renderServicosTable("Serviços Existentes", existentes)}
+                      {novos.length > 0 && renderServicosTable("Serviços Novos", novos)}
+                    </>
+                  );
+                })()}
               </>
             ) : (
               <div className="text-center py-12 bg-white rounded-lg border">
                 <p className="text-gray-500">
-                  {isServicosLoading ? "Carregando..." : "Nenhum serviço cadastrado ou enviado para aprovação"}
+                  {isServicosLoading ? "Carregando..." : `Nenhum serviço ${servicosStatusTab === "pendentes" ? "pendente" : servicosStatusTab === "aprovados" ? "aprovado" : servicosStatusTab === "rejeitados" ? "rejeitado" : "em compras"} para os filtros atuais`}
                 </p>
               </div>
             )}
@@ -1757,11 +1914,9 @@ const DiretoriaAprovacao = () => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Muito Baixo">Muito Baixo</SelectItem>
                         <SelectItem value="Baixo">Baixo</SelectItem>
                         <SelectItem value="Médio">Médio</SelectItem>
                         <SelectItem value="Alto">Alto</SelectItem>
-                        <SelectItem value="Muito Alto">Muito Alto</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

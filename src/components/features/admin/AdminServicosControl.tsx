@@ -248,7 +248,7 @@ export function AdminServicosControl() {
         grau_prioridade: formData.grau_prioridade,
         estimativa_valor: estimativaValor,
         vinculacao: formData.vinculacao,
-        dependencia_descricao: formData.dependencia_descricao.trim() || undefined,
+        dependencia_descricao: formData.dependencia_descricao.trim() || null,
         diretoria_id: formData.diretoria_id,
         gerencia_id: formData.gerencia_id,
         item: 0,
@@ -346,11 +346,9 @@ export function AdminServicosControl() {
 
   const getPrioridadeColor = (prioridade: GrauPrioridade): string => {
     const colors: Record<GrauPrioridade, string> = {
-      "Muito Baixo": "bg-gray-100 text-gray-800",
       "Baixo": "bg-blue-100 text-blue-800",
       "Médio": "bg-yellow-100 text-yellow-800",
       "Alto": "bg-orange-100 text-orange-800",
-      "Muito Alto": "bg-red-100 text-red-800",
     };
     return colors[prioridade] || "bg-gray-100 text-gray-800";
   };
@@ -535,11 +533,9 @@ export function AdminServicosControl() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Muito Baixo">Muito Baixo</SelectItem>
                     <SelectItem value="Baixo">Baixo</SelectItem>
                     <SelectItem value="Médio">Médio</SelectItem>
                     <SelectItem value="Alto">Alto</SelectItem>
-                    <SelectItem value="Muito Alto">Muito Alto</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -713,11 +709,9 @@ export function AdminServicosControl() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Muito Baixo">Muito Baixo</SelectItem>
                     <SelectItem value="Baixo">Baixo</SelectItem>
                     <SelectItem value="Médio">Médio</SelectItem>
                     <SelectItem value="Alto">Alto</SelectItem>
-                    <SelectItem value="Muito Alto">Muito Alto</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

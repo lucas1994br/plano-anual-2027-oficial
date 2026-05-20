@@ -1,18 +1,32 @@
 import { supabase } from "./supabaseClient.ts";
-import { PlanItem, SolicitacaoStatus, ServicoItem, Diretoria } from "@/types/plan.ts";
-import { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig.ts";
+import type {
+  PlanItem,
+  SolicitacaoStatus,
+  ServicoItem,
+  Diretoria,
+} from "@/types/plan.ts";
+import type { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig.ts";
+import type {
+  PostgrestSingleResponse,
+  PostgrestFilterBuilder,
+} from "@supabase/supabase-js";
 
 const SUPABASE_PAGE_SIZE = 1000;
 const DIRETORIAS_CACHE_KEY = "pac2027:diretorias";
 const DIRETORIAS_CACHE_TTL_MS = 10 * 60 * 1000;
 
-type DiretoriaRow = {
+interface DiretoriaRow {
   id: string;
   sigla: string;
   nome?: string;
   descricao?: string;
   ativa?: boolean;
-};
+}
+
+interface CacheData<T> {
+  updatedAt: number;
+  data: T[];
+}
 
 function loadDiretoriasCache(): DiretoriaRow[] | null {
   if (typeof window === "undefined") return null;
@@ -21,7 +35,7 @@ function loadDiretoriasCache(): DiretoriaRow[] | null {
     const raw = window.localStorage.getItem(DIRETORIAS_CACHE_KEY);
     if (!raw) return null;
 
-    const parsed = JSON.parse(raw) as { updatedAt?: number; data?: DiretoriaRow[] };
+    const parsed = JSON.parse(raw) as CacheData<DiretoriaRow>;
     if (!parsed?.updatedAt || !Array.isArray(parsed.data)) return null;
 
     const isFresh = Date.now() - parsed.updatedAt <= DIRETORIAS_CACHE_TTL_MS;
@@ -31,7 +45,7 @@ function loadDiretoriasCache(): DiretoriaRow[] | null {
   }
 }
 
-function saveDiretoriasCache(data: DiretoriaRow[]) {
+function saveDiretoriasCache(data: DiretoriaRow[]): void {
   if (typeof window === "undefined") return;
 
   try {
@@ -56,8 +70,8 @@ async function fetchAllPages<T>(
     from: number,
     to: number,
     includeCount: boolean
-  ) => Promise<{ data: T[] | null; error: unknown; count?: number | null }>
-) {
+  ) => Promise<PostgrestSingleResponse<T[]>>
+): Promise<T[]> {
   const allRows: T[] = [];
   let from = 0;
 
@@ -82,7 +96,7 @@ async function fetchAllPages<T>(
 
 // ============ DIRETORIAS & GERÊNCIAS ============
 
-export async function getDiretorias() {
+export async function getDiretorias(): Promise<DiretoriaRow[]> {
   const cached = loadDiretoriasCache();
   if (cached && cached.length > 0) {
     return cached;
@@ -95,7 +109,9 @@ export async function getDiretorias() {
 
   if (!query.error) {
     const normalized = normalizeDiretorias(query.data as DiretoriaRow[]);
-    const hasAtivaFlag = normalized.some((dir) => Object.prototype.hasOwnProperty.call(dir, "ativa"));
+    const hasAtivaFlag = normalized.some((dir) =>
+      Object.prototype.hasOwnProperty.call(dir, "ativa")
+    );
     const filtered = hasAtivaFlag
       ? normalized.filter((dir) => dir.ativa !== false)
       : normalized;
@@ -111,7 +127,9 @@ export async function getDiretorias() {
   throw query.error;
 }
 
-export async function getGerenciasByDiretoria(diretoriaId: string) {
+export async function getGerenciasByDiretoria(
+  diretoriaId: string
+): Promise<Record<string, unknown>[]> {
   const { data, error } = await supabase
     .from("gerencias")
     .select("*")
@@ -123,7 +141,9 @@ export async function getGerenciasByDiretoria(diretoriaId: string) {
   return data || [];
 }
 
-export async function getDiretoriasComDetalhes() {
+export async function getDiretoriasComDetalhes(): Promise<
+  (Diretoria & { totalGerencias: number; totalItens: number })[]
+> {
   const { data: diretorias, error: errDir } = await supabase
     .from("diretorias")
     .select("*")
@@ -132,25 +152,26 @@ export async function getDiretoriasComDetalhes() {
 
   if (errDir) throw errDir;
 
-  // Para cada diretoria, buscar gerências e contar itens
   const diretoriasComDetalhes = await Promise.all(
     (diretorias || []).map(async (dir: unknown) => {
+      const dirTyped = dir as Diretoria & { id: string };
+      
       const { data: gerencias } = await supabase
         .from("gerencias")
         .select("*")
-        .eq("diretoria_id", (dir as { id: string }).id)
+        .eq("diretoria_id", dirTyped.id)
         .eq("ativa", true);
 
       const { count: totalItens, error: errSolicitacoes } = await supabase
         .from("solicitacoes")
         .select("id", { count: "exact", head: true })
-        .eq("diretoria_id", (dir as { id: string }).id)
+        .eq("diretoria_id", dirTyped.id)
         .gt("qtd_estimada", 0);
 
       if (errSolicitacoes) throw errSolicitacoes;
 
       return {
-        ...(dir as Diretoria),
+        ...dirTyped,
         totalGerencias: (gerencias || []).length,
         totalItens: totalItens || 0,
       };
@@ -162,7 +183,7 @@ export async function getDiretoriasComDetalhes() {
 
 // ============ PERÍODOS ============
 
-export async function getPeriodosAtivos() {
+export async function getPeriodosAtivos(): Promise<Record<string, unknown>[]> {
   const { data, error } = await supabase
     .from("periodos")
     .select("*")
@@ -173,7 +194,7 @@ export async function getPeriodosAtivos() {
   return data || [];
 }
 
-export async function getTodosPeriodos() {
+export async function getTodosPeriodos(): Promise<Record<string, unknown>[]> {
   const { data, error } = await supabase
     .from("periodos")
     .select("*")
@@ -183,17 +204,29 @@ export async function getTodosPeriodos() {
   return data || [];
 }
 
-export async function createPeriodo(periodo: { nome: string; inicio: string; fim: string }) {
+export async function createPeriodo(periodo: {
+  nome: string;
+  inicio: string;
+  fim: string;
+}): Promise<Record<string, unknown>> {
   const { data, error } = await supabase
     .from("periodos")
     .insert([{ ...periodo, ativo: false }])
     .select();
 
   if (error) throw error;
-  return data?.[0];
+  return data?.[0] || {};
 }
 
-export async function updatePeriodo(periodoId: string, updates: { nome?: string; inicio?: string; fim?: string; ativo?: boolean }) {
+export async function updatePeriodo(
+  periodoId: string,
+  updates: {
+    nome?: string;
+    inicio?: string;
+    fim?: string;
+    ativo?: boolean;
+  }
+): Promise<Record<string, unknown>> {
   const { data, error } = await supabase
     .from("periodos")
     .update(updates)
@@ -205,15 +238,15 @@ export async function updatePeriodo(periodoId: string, updates: { nome?: string;
   }
 
   if (!data || data.length === 0) {
-    const msg = "Atualizacao bloqueada. Verifique RLS/policies na tabela periodos.";
+    const msg =
+      "Atualizacao bloqueada. Verifique RLS/policies na tabela periodos.";
     throw new Error(msg);
   }
 
   return data[0];
 }
 
-export async function cleanupDuplicatePeriodos() {
-  // Busca todos os períodos
+export async function cleanupDuplicatePeriodos(): Promise<boolean> {
   const { data: allPeriodos, error: fetchError } = await supabase
     .from("periodos")
     .select("*")
@@ -222,22 +255,22 @@ export async function cleanupDuplicatePeriodos() {
   if (fetchError) throw fetchError;
   if (!allPeriodos || allPeriodos.length <= 1) return true;
 
-  // DELETA todos exceto o primeiro (o mais antigo)
   const todosExcetoPrimeiro = allPeriodos.slice(1);
-  
+
   for (const periodo of todosExcetoPrimeiro) {
+    const periodoTyped = periodo as { id: string };
     const { error } = await supabase
       .from("periodos")
       .delete()
-      .eq("id", periodo.id);
+      .eq("id", periodoTyped.id);
     if (error) throw error;
   }
 
-  // Garante que o primeiro está ativo
+  const periodoFirst = allPeriodos[0] as { id: string };
   const { error: activateError } = await supabase
     .from("periodos")
     .update({ ativo: true })
-    .eq("id", allPeriodos[0].id);
+    .eq("id", periodoFirst.id);
 
   if (activateError) throw activateError;
   return true;
@@ -245,21 +278,24 @@ export async function cleanupDuplicatePeriodos() {
 
 // ============ SOLICITAÇÕES ============
 
-export async function getSolicitacoesByGerencia(gerenciaId: string, periodoId: string) {
-  const data = await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getSolicitacoesByGerencia(
+  gerenciaId: string,
+  periodoId: string
+): Promise<PlanItem[]> {
+  const data = await fetchAllPages<PlanItem>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*", includeCount ? { count: "exact" } : undefined)
+      .select("*")
       .eq("gerencia_id", gerenciaId)
       .eq("periodo_id", periodoId)
       .order("codigo")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data as PlanItem[];
+  return data;
 }
 
-export async function deleteSolicitacao(itemId: string) {
+export async function deleteSolicitacao(itemId: string): Promise<boolean> {
   const { error } = await supabase
     .from("solicitacoes")
     .delete()
@@ -269,7 +305,7 @@ export async function deleteSolicitacao(itemId: string) {
   return true;
 }
 
-export async function deleteSolicitacoesBulk(itemIds: string[]) {
+export async function deleteSolicitacoesBulk(itemIds: string[]): Promise<boolean> {
   const { error } = await supabase
     .from("solicitacoes")
     .delete()
@@ -279,55 +315,72 @@ export async function deleteSolicitacoesBulk(itemIds: string[]) {
   return true;
 }
 
-export async function getSolicitacoesByDiretoria(diretoriaId: string, periodoId: string) {
-  const data = await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getSolicitacoesByDiretoria(
+  diretoriaId: string,
+  periodoId: string
+): Promise<PlanItem[]> {
+  const data = await fetchAllPages<PlanItem>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*", includeCount ? { count: "exact" } : undefined)
+      .select("*")
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)
-      .in("status", ["rascunho", "enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"])
+      .in("status", [
+        "rascunho",
+        "enviado",
+        "em_analise",
+        "aprovado",
+        "rejeitado",
+        "em_compra",
+        "concluido",
+      ])
       .order("codigo")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data as PlanItem[];
+  return data;
 }
 
-export async function getSolicitacoesByPeriodo({ periodoId }: { periodoId: string; }) {
-  const data = await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getSolicitacoesByPeriodo({
+  periodoId,
+}: {
+  periodoId: string;
+}): Promise<PlanItem[]> {
+  const data = await fetchAllPages<PlanItem>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*", includeCount ? { count: "exact" } : undefined)
+      .select("*")
       .eq("periodo_id", periodoId)
       .order("codigo")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data as PlanItem[];
+  return data;
 }
 
-export async function getSolicitacoesCompras(periodoId: string) {
-  return await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getSolicitacoesCompras(
+  periodoId: string
+): Promise<unknown[]> {
+  return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*, diretorias(sigla), gerencias(sigla)", includeCount ? { count: "exact" } : undefined)
+      .select("*, diretorias(sigla), gerencias(sigla)")
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("codigo")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
-export async function getServicosCompras(periodoId: string) {
-  return await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getServicosCompras(periodoId: string): Promise<unknown[]> {
+  return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos")
-      .select("*, diretorias(sigla), gerencias(sigla)", includeCount ? { count: "exact" } : undefined)
+      .select("*, diretorias(sigla), gerencias(sigla)")
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("item")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -335,7 +388,7 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   periodo_id: string;
   diretoria_id: string;
   gerencia_id: string;
-}) {
+}): Promise<PlanItem> {
   const payload: Record<string, unknown> = {
     periodo_id: solicitacao.periodo_id,
     diretoria_id: solicitacao.diretoria_id,
@@ -344,8 +397,12 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
     descricao: solicitacao.descricao,
     categoria: solicitacao.categoria,
     unidade: solicitacao.unidade,
-    valor_unitario: solicitacao.valorUnitario ?? (solicitacao as unknown as { valor_unitario: number }).valor_unitario,
-    qtd_estimada: solicitacao.qtdEstimada ?? (solicitacao as unknown as { qtd_estimada: number }).qtd_estimada,
+    valor_unitario:
+      solicitacao.valorUnitario ??
+      (solicitacao as unknown as { valor_unitario: number }).valor_unitario,
+    qtd_estimada:
+      solicitacao.qtdEstimada ??
+      (solicitacao as unknown as { qtd_estimada: number }).qtd_estimada,
     prioridade: solicitacao.prioridade,
     observacao: solicitacao.observacao,
     status: solicitacao.status,
@@ -361,18 +418,21 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   return data as PlanItem;
 }
 
-export async function updateSolicitacao(id: string, updates: Partial<PlanItem>) {
-  // Converter camelCase para snake_case para o banco de dados
+export async function updateSolicitacao(
+  id: string,
+  updates: Partial<PlanItem>
+): Promise<PlanItem> {
   const dbUpdates: Record<string, unknown> = {};
-  
+
   if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
   if (updates.unidade !== undefined) dbUpdates.unidade = updates.unidade;
   if (updates.observacao !== undefined) dbUpdates.observacao = updates.observacao;
   if (updates.prioridade !== undefined) dbUpdates.prioridade = updates.prioridade;
-  if (updates.valorUnitario !== undefined) dbUpdates.valor_unitario = updates.valorUnitario;
+  if (updates.valorUnitario !== undefined)
+    dbUpdates.valor_unitario = updates.valorUnitario;
   if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
   if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
-  
+
   const { data, error } = await supabase
     .from("solicitacoes")
     .update(dbUpdates)
@@ -388,9 +448,9 @@ export async function updateSolicitacaoStatus(
   id: string,
   status: SolicitacaoStatus,
   justificativa?: string
-) {
+): Promise<PlanItem> {
   const updates: Record<string, unknown> = { status };
-  
+
   if (status === "enviado") {
     updates.enviado_em = new Date().toISOString();
   } else if (status === "aprovado") {
@@ -408,7 +468,6 @@ export async function updateSolicitacaoStatus(
 
   if (error) throw error;
 
-  // Log histórico
   if (data) {
     await logHistorico(id, status, justificativa);
   }
@@ -418,34 +477,48 @@ export async function updateSolicitacaoStatus(
 
 // ============ HISTÓRICO ============
 
-async function logHistorico(solicitacaoId: string, status: SolicitacaoStatus, justificativa?: string) {
-  await supabase
-    .from("solicitacao_historico")
-    .insert([
-      {
-        solicitacao_id: solicitacaoId,
-        status_novo: status,
-        acao: `Status alterado para ${status}`,
-        autor_tipo: "sistema",
-        justificativa: justificativa,
-      },
-    ]);
+async function logHistorico(
+  solicitacaoId: string,
+  status: SolicitacaoStatus,
+  justificativa?: string
+): Promise<void> {
+  await supabase.from("solicitacao_historico").insert([
+    {
+      solicitacao_id: solicitacaoId,
+      status_novo: status,
+      acao: `Status alterado para ${status}`,
+      autor_tipo: "sistema",
+      justificativa: justificativa,
+    },
+  ]);
 }
 
 // ============ VALIDAÇÃO DE CÓDIGO ============
 
-export async function validateAccessCode(code: string, scope: "diretoria" | "gerencia" | "admin" | "compras") {
+interface AccessCodeResponse {
+  scope: string;
+  diretoria_id?: string;
+  gerencia_id?: string;
+  expired_at?: string;
+}
+
+export async function validateAccessCode(
+  code: string,
+  scope: "diretoria" | "gerencia" | "admin" | "compras"
+): Promise<AccessCodeResponse> {
   const normalizedCode = code.trim();
 
   if (!normalizedCode) {
     throw new Error("Código de acesso vazio");
   }
 
-  // Segurança: validação ocorre somente na Edge Function.
   try {
-    const { data, error } = await supabase.functions.invoke("validate-access-code", {
-      body: { code: normalizedCode, scope },
-    });
+    const { data, error } = await supabase.functions.invoke(
+      "validate-access-code",
+      {
+        body: { code: normalizedCode, scope },
+      }
+    );
 
     if (error) {
       throw error;
@@ -461,9 +534,10 @@ export async function validateAccessCode(code: string, scope: "diretoria" | "ger
     }
 
     throw new Error(data?.error || "Invalid access code");
-  } catch (edgeErr) {
-    const fallbackMessage = String((edgeErr as unknown as { message?: string })?.message || "").toLowerCase();
-    const fallbackName = String((edgeErr as unknown as { name?: string })?.name || "").toLowerCase();
+  } catch (edgeErr: unknown) {
+    const error = edgeErr as { message?: string; name?: string };
+    const fallbackMessage = String(error?.message || "").toLowerCase();
+    const fallbackName = String(error?.name || "").toLowerCase();
     const isConnectivityIssue =
       fallbackName.includes("functionsfetcherror") ||
       fallbackName.includes("functionsfetch") ||
@@ -486,17 +560,19 @@ export async function validateAccessCode(code: string, scope: "diretoria" | "ger
 
 // ============ ITENS CATÁLOGO ============
 
-export default async function getItensCatalogo() {
-  return await fetchAllPages<unknown>((from, to, includeCount) =>
+export default async function getItensCatalogo(): Promise<unknown[]> {
+  return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("itens_catalogo")
-      .select("*", includeCount ? { count: "exact" } : undefined)
+      .select("*")
       .order("codigo")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
-export async function getCategoryBudgetOwnerRules() {
+export async function getCategoryBudgetOwnerRules(): Promise<
+  Record<string, string>
+> {
   const { data, error } = await supabase
     .from("categoria_diretoria_orcamentaria")
     .select("categoria, diretoria_orcamentaria_id")
@@ -505,14 +581,18 @@ export async function getCategoryBudgetOwnerRules() {
   if (error) throw error;
 
   const rules: Record<string, string> = {};
-  (data || []).forEach((row: { categoria: string; diretoria_orcamentaria_id: string }) => {
-    rules[row.categoria] = row.diretoria_orcamentaria_id;
-  });
+  (data || []).forEach(
+    (row: { categoria: string; diretoria_orcamentaria_id: string }) => {
+      rules[row.categoria] = row.diretoria_orcamentaria_id;
+    }
+  );
 
   return rules;
 }
 
-export async function getAdminMiniErpConfigDb() {
+export async function getAdminMiniErpConfigDb(): Promise<
+  Partial<AdminBudgetConfig>
+> {
   const { data: orcamentos, error: orcamentosError } = await supabase
     .from("admin_orcamento_config")
     .select("escopo, referencia_id, tipo, valor");
@@ -530,35 +610,44 @@ export async function getAdminMiniErpConfigDb() {
   const gerenciaBudgetsAquisicao: Record<string, number> = {};
   const gerenciaBudgetsServicos: Record<string, number> = {};
 
-  (orcamentos || []).forEach((row: { escopo: string; referencia_id: string; tipo: string; valor: number }) => {
-    const tipo = row.tipo as "aquisicao" | "servicos";
-    const escopo = row.escopo as "diretoria" | "gerencia";
-    const valor = Number(row.valor || 0);
+  (orcamentos || []).forEach(
+    (row: {
+      escopo: string;
+      referencia_id: string;
+      tipo: string;
+      valor: number;
+    }) => {
+      const tipo = row.tipo as "aquisicao" | "servicos";
+      const escopo = row.escopo as "diretoria" | "gerencia";
+      const valor = Number(row.valor || 0);
 
-    if (escopo === "diretoria" && tipo === "aquisicao") {
-      diretoriaBudgetsAquisicao[row.referencia_id] = valor;
-    }
+      if (escopo === "diretoria" && tipo === "aquisicao") {
+        diretoriaBudgetsAquisicao[row.referencia_id] = valor;
+      }
 
-    if (escopo === "diretoria" && tipo === "servicos") {
-      diretoriaBudgetsServicos[row.referencia_id] = valor;
-    }
+      if (escopo === "diretoria" && tipo === "servicos") {
+        diretoriaBudgetsServicos[row.referencia_id] = valor;
+      }
 
-    if (escopo === "gerencia" && tipo === "aquisicao") {
-      gerenciaBudgetsAquisicao[row.referencia_id] = valor;
-    }
+      if (escopo === "gerencia" && tipo === "aquisicao") {
+        gerenciaBudgetsAquisicao[row.referencia_id] = valor;
+      }
 
-    if (escopo === "gerencia" && tipo === "servicos") {
-      gerenciaBudgetsServicos[row.referencia_id] = valor;
+      if (escopo === "gerencia" && tipo === "servicos") {
+        gerenciaBudgetsServicos[row.referencia_id] = valor;
+      }
     }
-  });
+  );
 
   const routingRules: Record<string, RoutingRule> = {};
-  (fluxos || []).forEach((row: { gerencia_id: string; destino_tipo: string; destino_id: string }) => {
-    routingRules[row.gerencia_id] = {
-      destinoTipo: row.destino_tipo,
-      destinoId: row.destino_id,
-    };
-  });
+  (fluxos || []).forEach(
+    (row: { gerencia_id: string; destino_tipo: string; destino_id: string }) => {
+      routingRules[row.gerencia_id] = {
+        destinoTipo: row.destino_tipo,
+        destinoId: row.destino_id,
+      };
+    }
+  );
 
   const config: Partial<AdminBudgetConfig> = {
     diretoriaBudgetsAquisicao,
@@ -578,19 +667,24 @@ export async function saveAdminMiniErpConfigDb(config: {
   gerenciaBudgetsAquisicao: Record<string, number>;
   gerenciaBudgetsServicos: Record<string, number>;
   routingRules: Record<string, RoutingRule>;
-}) {
+}): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
-    throw new Error("Sessão admin não encontrada. Entre novamente no painel admin.");
+    throw new Error(
+      "Sessão admin não encontrada. Entre novamente no painel admin."
+    );
   }
 
-  const { data, error } = await supabase.functions.invoke("admin-upsert-mini-erp-config", {
-    body: {
-      accessCode: adminAccessCode,
-      config,
-    },
-  });
+  const { data, error } = await supabase.functions.invoke(
+    "admin-upsert-mini-erp-config",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        config,
+      },
+    }
+  );
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
@@ -600,13 +694,13 @@ export async function saveAdminMiniErpConfigDb(config: {
 
 // ============ SERVIÇOS CATÁLOGO ============
 
-export async function getServicosCatalogo() {
-  return await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getServicosCatalogo(): Promise<unknown[]> {
+  return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos_catalogo")
-      .select("*", includeCount ? { count: "exact" } : undefined)
+      .select("*")
       .order("item")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -620,25 +714,58 @@ export async function createServicoCatalogoAndDistribuir(servico: {
   dependencia_descricao?: string;
   diretoria_id: string;
   gerencia_id: string;
-  item: number;
-}) {
+}): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
-    throw new Error("Sessão admin não encontrada.");
+    throw new Error(
+      "Sessão admin não encontrada. Faça login novamente no painel admin."
+    );
   }
 
-  const { data, error } = await supabase.functions.invoke("admin-create-servico-catalogo", {
-    body: {
-      accessCode: adminAccessCode,
-      servico,
-    },
-  });
+  try {
+    const { data, error } = await supabase.functions.invoke(
+      "admin-create-servico-catalogo",
+      {
+        body: {
+          accessCode: adminAccessCode,
+          servico: {
+            tipo_contratacao: servico.tipo_contratacao,
+            objeto: servico.objeto,
+            justificativa: servico.justificativa,
+            grau_prioridade: servico.grau_prioridade,
+            estimativa_valor: Number(servico.estimativa_valor),
+            vinculacao: servico.vinculacao,
+            dependencia_descricao: servico.dependencia_descricao || null,
+            diretoria_id: servico.diretoria_id,
+            gerencia_id: servico.gerencia_id,
+          },
+        },
+      }
+    );
 
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+    if (error) {
+      console.error("Erro na Edge Function:", error);
+      const errorMessage = error.message || "Erro desconhecido na Edge Function";
+      throw new Error(`Erro ao criar serviço: ${errorMessage}`);
+    }
 
-  return data;
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+
+    if (!data?.success) {
+      throw new Error(
+        data?.message || "Falha ao criar serviço. Verifique os logs da Edge Function."
+      );
+    }
+
+    return data;
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("createServicoCatalogoAndDistribuir error:", errorMessage);
+    throw new Error(`Falha ao criar serviço: ${errorMessage}`);
+  }
 }
 
 export async function updateServicoCatalogoAdmin(
@@ -654,20 +781,23 @@ export async function updateServicoCatalogoAdmin(
     diretoria_id: string;
     gerencia_id: string;
   }
-) {
+): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
     throw new Error("Sessão admin não encontrada.");
   }
 
-  const { data, error } = await supabase.functions.invoke("admin-update-servico-catalogo", {
-    body: {
-      accessCode: adminAccessCode,
-      servicoId,
-      updates,
-    },
-  });
+  const { data, error } = await supabase.functions.invoke(
+    "admin-update-servico-catalogo",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        servicoId,
+        updates,
+      },
+    }
+  );
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
@@ -675,19 +805,24 @@ export async function updateServicoCatalogoAdmin(
   return data;
 }
 
-export async function deleteServicoCatalogoAdmin(servicoId: string) {
+export async function deleteServicoCatalogoAdmin(
+  servicoId: string
+): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
     throw new Error("Sessão admin não encontrada.");
   }
 
-  const { data, error } = await supabase.functions.invoke("admin-delete-servico-catalogo", {
-    body: {
-      accessCode: adminAccessCode,
-      servicoId,
-    },
-  });
+  const { data, error } = await supabase.functions.invoke(
+    "admin-delete-servico-catalogo",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        servicoId,
+      },
+    }
+  );
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
@@ -695,25 +830,32 @@ export async function deleteServicoCatalogoAdmin(servicoId: string) {
   return data;
 }
 
-export async function saveCategoryBudgetOwnerRules(rules: Record<string, string>) {
+export async function saveCategoryBudgetOwnerRules(
+  rules: Record<string, string>
+): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
-    throw new Error("Sessão admin não encontrada. Entre novamente no painel admin.");
+    throw new Error(
+      "Sessão admin não encontrada. Entre novamente no painel admin."
+    );
   }
 
-  // Filter out sentinel/default values like "__solicitante__" that are not real UUIDs
-  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const filteredRules = Object.fromEntries(
     Object.entries(rules).filter(([, v]) => uuidPattern.test(v))
   );
 
-  const { data, error } = await supabase.functions.invoke("admin-upsert-category-budget-owners", {
-    body: {
-      accessCode: adminAccessCode,
-      rules: filteredRules,
-    },
-  });
+  const { data, error } = await supabase.functions.invoke(
+    "admin-upsert-category-budget-owners",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        rules: filteredRules,
+      },
+    }
+  );
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
@@ -727,25 +869,30 @@ export async function createItemCatalogoAndDistribuir(item: {
   categoria: string;
   unidade: string;
   valorUnitario: number;
-}) {
+}): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
-    throw new Error("Sessão admin não encontrada. Entre novamente no painel admin.");
+    throw new Error(
+      "Sessão admin não encontrada. Entre novamente no painel admin."
+    );
   }
 
-  const { data, error } = await supabase.functions.invoke("admin-create-catalog-item", {
-    body: {
-      accessCode: adminAccessCode,
-      item: {
-        codigo: item.codigo,
-        descricao: item.descricao,
-        categoria: item.categoria,
-        unidade: item.unidade,
-        valorUnitario: item.valorUnitario,
+  const { data, error } = await supabase.functions.invoke(
+    "admin-create-catalog-item",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        item: {
+          codigo: item.codigo,
+          descricao: item.descricao,
+          categoria: item.categoria,
+          unidade: item.unidade,
+          valorUnitario: item.valorUnitario,
+        },
       },
-    },
-  });
+    }
+  );
 
   if (error) {
     throw error;
@@ -765,7 +912,7 @@ export async function createSolicitacoesFromCatalogo(
   gerenciaId: string,
   periodoId: string,
   codigosCatalogo: number[]
-) {
+): Promise<unknown[]> {
   const itens = await supabase
     .from("itens_catalogo")
     .select("*")
@@ -773,19 +920,22 @@ export async function createSolicitacoesFromCatalogo(
 
   if (itens.error) throw itens.error;
 
-  const solicitacoes = itens.data?.map((item) => ({
-    periodo_id: periodoId,
-    diretoria_id: diretoriaId,
-    gerencia_id: gerenciaId,
-    codigo: item.codigo,
-    descricao: item.descricao,
-    categoria: item.categoria,
-    unidade: item.unidade,
-    valor_unitario: item.valor_unitario,
-    qtd_estimada: 0,
-    prioridade: "Média",
-    status: "rascunho",
-  })) || [];
+  const solicitacoes = (itens.data || []).map((item: unknown) => {
+    const itemTyped = item as Record<string, unknown>;
+    return {
+      periodo_id: periodoId,
+      diretoria_id: diretoriaId,
+      gerencia_id: gerenciaId,
+      codigo: itemTyped.codigo,
+      descricao: itemTyped.descricao,
+      categoria: itemTyped.categoria,
+      unidade: itemTyped.unidade,
+      valor_unitario: itemTyped.valor_unitario,
+      qtd_estimada: 0,
+      prioridade: "Média",
+      status: "rascunho",
+    };
+  });
 
   const { data, error } = await supabase
     .from("solicitacoes")
@@ -793,7 +943,7 @@ export async function createSolicitacoesFromCatalogo(
     .select();
 
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
 // ============ SERVIÇOS ============
@@ -801,7 +951,7 @@ export async function createSolicitacoesFromCatalogo(
 export async function getServicosByGerencia(
   gerenciaId: string,
   periodoId: string
-) {
+): Promise<ServicoItem[]> {
   const { data, error } = await supabase
     .from("servicos")
     .select("*")
@@ -810,25 +960,30 @@ export async function getServicosByGerencia(
     .order("item");
 
   if (error) throw error;
-  return data || [];
+  return (data as ServicoItem[]) || [];
 }
 
-export async function getServicosByDiretoria(diretoriaId: string, periodoId: string) {
-  return await fetchAllPages<unknown>((from, to, includeCount) =>
+export async function getServicosByDiretoria(
+  diretoriaId: string,
+  periodoId: string
+): Promise<unknown[]> {
+  return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos")
       .select(
-        "*, gerencias(sigla, nome), diretorias(sigla, nome)",
-        includeCount ? { count: "exact" } : undefined
+        "*, gerencias(sigla, nome), diretorias(sigla, nome)"
       )
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)
       .order("item")
-      .range(from, to)
+      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
-export async function updateServico(servicoId: string, updates: Partial<ServicoItem>) {
+export async function updateServico(
+  servicoId: string,
+  updates: Partial<ServicoItem>
+): Promise<ServicoItem | undefined> {
   const { data, error } = await supabase
     .from("servicos")
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -836,24 +991,23 @@ export async function updateServico(servicoId: string, updates: Partial<ServicoI
     .select();
 
   if (error) throw error;
-  return data?.[0];
+  return (data?.[0] as ServicoItem) || undefined;
 }
 
-export async function createServico(servico: Omit<ServicoItem, 'id' | 'created_at' | 'updated_at'>) {
+export async function createServico(
+  servico: Omit<ServicoItem, "id" | "created_at" | "updated_at">
+): Promise<ServicoItem | undefined> {
   const { data, error } = await supabase
     .from("servicos")
     .insert([servico])
     .select();
 
   if (error) throw error;
-  return data?.[0];
+  return (data?.[0] as ServicoItem) || undefined;
 }
 
-export const deleteServico = async (id: string) => {
-  const { error } = await supabase
-    .from("servicos")
-    .delete()
-    .eq("id", id);
+export const deleteServico = async (id: string): Promise<boolean> => {
+  const { error } = await supabase.from("servicos").delete().eq("id", id);
 
   if (error) throw error;
   return true;
@@ -864,58 +1018,74 @@ export const deleteServico = async (id: string) => {
 /**
  * Função auxiliar para invocar funções admin com tratamento de erro padronizado
  */
-async function invokeAdminFunction(functionName: string, body: any) {
+async function invokeAdminFunction(
+  functionName: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
   try {
     const { data, error } = await supabase.functions.invoke(functionName, {
       body,
     });
 
     if (error) {
-      const errorMsg = (error as any).message || "";
+      const errorMsg = (error as { message?: string }).message || "";
       if (errorMsg.includes("404")) {
-        throw new Error(`A função '${functionName}' não foi encontrada. Verifique o deploy no Supabase.`);
+        throw new Error(
+          `A função '${functionName}' não foi encontrada. Verifique o deploy no Supabase.`
+        );
       }
       throw error;
     }
 
-    if (data?.error) throw new Error(data.error);
+    if (data?.error) throw new Error(data.error as string);
     return data;
-  } catch (err: any) {
-    const msg = err.message || "";
-    if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("network")) {
-      throw new Error(`Erro de rede ao tentar acessar a função '${functionName}'. Verifique sua conexão ou se a função está publicada.`);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    const msg = error.message || "";
+    if (
+      msg.toLowerCase().includes("failed to fetch") ||
+      msg.toLowerCase().includes("network")
+    ) {
+      throw new Error(
+        `Erro de rede ao tentar acessar a função '${functionName}'. Verifique sua conexão ou se a função está publicada.`
+      );
     }
     throw err;
   }
 }
 
-export async function createServicoAdmin(item: Record<string, any>) {
+export async function createServicoAdmin(
+  item: Record<string, unknown>
+): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
-  
-  // Envia o objeto dentro da chave 'item', idêntico ao fluxo de materiais
-  return await invokeAdminFunction("admin-create-servico", { 
-    accessCode: adminAccessCode, 
-    item 
+
+  return await invokeAdminFunction("admin-create-servico", {
+    accessCode: adminAccessCode,
+    item,
   });
 }
 
-export async function updateServicoAdmin(servicoId: string, item: Record<string, any>) {
+export async function updateServicoAdmin(
+  servicoId: string,
+  item: Record<string, unknown>
+): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
-  return await invokeAdminFunction("admin-update-servico", { 
-    accessCode: adminAccessCode, 
-    servicoId, 
-    item 
+  return await invokeAdminFunction("admin-update-servico", {
+    accessCode: adminAccessCode,
+    servicoId,
+    item,
   });
 }
 
-export async function deleteServicoAdmin(servicoId: string) {
+export async function deleteServicoAdmin(servicoId: string): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
-  return await invokeAdminFunction("admin-delete-servico", { 
-    accessCode: adminAccessCode, 
-    servicoId 
+
+  return await invokeAdminFunction("admin-delete-servico", {
+    accessCode: adminAccessCode,
+    servicoId,
   });
 }

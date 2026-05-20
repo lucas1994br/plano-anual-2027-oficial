@@ -1,14 +1,14 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Package, Clock, AlertTriangle, ArrowRight, Shield, ShoppingBag, Users, Building2 } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
 import { differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { getDiretorias, getPeriodosAtivos } from "@/lib/services";
+import { getDiretorias, getPeriodosAtivos } from "@/lib/services.ts";
 import { useQuery } from "@tanstack/react-query";
-import { Diretoria } from "@/types/plan";
-import { DIRETORIAS } from "@/data/diretorias";
+import { Diretoria } from "@/types/plan.ts";
+import { DIRETORIAS } from "@/data/diretorias.ts";
 
 const PERFIS = [
   {

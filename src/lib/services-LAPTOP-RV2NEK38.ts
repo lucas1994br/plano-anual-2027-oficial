@@ -1,5 +1,5 @@
-import { supabase } from "./supabaseClient";
-import { PlanItem, SolicitacaoStatus } from "@/types/plan";
+import { supabase } from "./supabaseClient.ts";
+import { PlanItem, SolicitacaoStatus } from "@/types/plan.ts";
 
 // ============ DIRETORIAS & GERÊNCIAS ============
 

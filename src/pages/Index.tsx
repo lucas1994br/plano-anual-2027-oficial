@@ -1,11 +1,11 @@
 import { useState, useMemo } from "react";
 import { addDays } from "date-fns";
-import { PlanHeader } from "@/components/layout/PlanHeader";
-import { SummaryCards } from "@/components/common/SummaryCards";
-import { PlanFilters } from "@/components/forms/PlanFilters";
-import { PlanTable } from "@/components/tables/PlanTable";
-import { PlanItem } from "@/types/plan";
-import { CATEGORIAS, GERENCIAS, initialItems } from "@/data/mockData";
+import { PlanHeader } from "@/components/layout/PlanHeader.tsx";
+import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+import { PlanFilters } from "@/components/forms/PlanFilters.tsx";
+import { PlanTable } from "@/components/tables/PlanTable.tsx";
+import { PlanItem } from "@/types/plan.ts";
+import { CATEGORIAS, GERENCIAS, initialItems } from "@/data/mockData.ts";
 
 const Index = () => {
   const [items, setItems] = useState<PlanItem[]>(initialItems);

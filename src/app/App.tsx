@@ -1,16 +1,16 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toaster.tsx";
+import { Toaster as Sonner } from "@/components/ui/sonner.tsx";
+import { TooltipProvider } from "@/components/ui/tooltip.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Home from "../pages/Home";
-import DiretoriaPlano from "../pages/DiretoriaPlano";
-import DiretoriaAprovacao from "../pages/DiretoriaAprovacao";
-import GerenciaPanel from "../pages/GerenciaPanel";
-import ComprasPanel from "../pages/ComprasPanel";
-import AdminPanel from "../pages/AdminPanel";
-import ErpTest from "../pages/ErpTest";
-import NotFound from "../pages/NotFound";
+import Home from "../pages/Home.tsx";
+import DiretoriaPlano from "../pages/DiretoriaPlano.tsx";
+import DiretoriaAprovacao from "../pages/DiretoriaAprovacao.tsx";
+import GerenciaPanel from "../pages/GerenciaPanel.tsx";
+import ComprasPanel from "../pages/ComprasPanel.tsx";
+import AdminPanel from "../pages/AdminPanel.tsx";
+import ErpTest from "../pages/ErpTest.tsx";
+import NotFound from "../pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
 

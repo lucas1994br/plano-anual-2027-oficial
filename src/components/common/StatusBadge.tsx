@@ -1,5 +1,5 @@
-import { Badge } from "@/components/ui/badge";
-import { SolicitacaoStatus } from "@/types/plan";
+import { Badge } from "@/components/ui/badge.tsx";
+import { SolicitacaoStatus } from "@/types/plan.ts";
 
 const STATUS_CONFIG: Record<SolicitacaoStatus, { label: string; variant: string; className: string }> = {
   rascunho: { label: "Rascunho", variant: "outline", className: "border-blue-300 text-blue-600 bg-blue-50" },

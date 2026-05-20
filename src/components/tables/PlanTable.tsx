@@ -7,16 +7,16 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+} from "@/components/ui/select.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@/components/ui/popover.tsx";
 import {
   Table,
   TableBody,
@@ -24,10 +24,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { PlanItem } from "@/types/plan";
-import { UNIDADES } from "@/data/mockData";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+} from "@/components/ui/table.tsx";
+import { PlanItem } from "@/types/plan.ts";
+import { UNIDADES } from "@/data/mockData.ts";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 // XLSX is loaded lazily inside the export handler to avoid bundling Node-only deps.
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";

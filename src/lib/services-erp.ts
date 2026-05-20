@@ -20,7 +20,7 @@ import type {
   ResponseValidacaoOrcamentaria,
   OrcamentoDiretoria,
   UpdateOrcamentoDiretoriaDTO,
-} from '../types/erp';
+} from '../types/erp.ts';
 
 type HistoricoConsumoEntry = LogOrcamentario;
 

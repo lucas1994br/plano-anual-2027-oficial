@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { validateAccessCode } from "@/lib/services";
+import { validateAccessCode } from "@/lib/services.ts";
 import { toast } from "sonner";
 
 interface AccessSession {

@@ -1,6 +1,6 @@
 // src/pages/ErpTest.tsx
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card.tsx';
+import { Badge } from '@/components/ui/badge.tsx';
 import { useState } from 'react';
 
 export default function ErpTest() {

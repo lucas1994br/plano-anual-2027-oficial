@@ -6,18 +6,18 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
+} from "@/components/ui/select.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
-import { useToast } from "@/hooks/use-toast";
+} from "@/components/ui/popover.tsx";
+import { useToast } from "@/hooks/use-toast.ts";
 import { useQueryClient } from "@tanstack/react-query";
-import { deleteServico } from "@/lib/services";
+import { deleteServico } from "@/lib/services.ts";
 import {
   Table,
   TableBody,
@@ -25,9 +25,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { ServicoItem, GrauPrioridade } from "@/types/plan";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+} from "@/components/ui/table.tsx";
+import { ServicoItem, GrauPrioridade } from "@/types/plan.ts";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -55,7 +55,7 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       await deleteServico(servicoId);
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
       toast({ title: "Serviço excluído", description: "Serviço removido com sucesso." });
-    } catch (error) {
+    } catch (_error) {
       toast({ title: "Erro", description: "Não foi possível excluir o serviço.", variant: "destructive" });
     }
   };
@@ -74,7 +74,15 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
 
   const handleExportExcel = async () => {
     const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
-    const XLSX = (xlsxModule as { default?: unknown }).default ?? xlsxModule;
+    type ExcelModule = {
+      utils: {
+        book_new: () => unknown;
+        aoa_to_sheet: (data: unknown[][]) => unknown;
+        book_append_sheet: (wb: unknown, ws: unknown, name: string) => void;
+      };
+      writeFile: (wb: unknown, filename: string) => void;
+    };
+    const XLSX = (((xlsxModule as { default?: unknown }).default ?? xlsxModule) as ExcelModule);
     const wb = XLSX.utils.book_new();
     const wsData: unknown[][] = [];
 
@@ -239,9 +247,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Muito Baixo">
-                            <Badge variant="outline">Muito Baixo</Badge>
-                          </SelectItem>
                           <SelectItem value="Baixo">
                             <Badge variant="secondary">Baixo</Badge>
                           </SelectItem>
@@ -250,9 +255,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                           </SelectItem>
                           <SelectItem value="Alto">
                             <Badge variant="warning">Alto</Badge>
-                          </SelectItem>
-                          <SelectItem value="Muito Alto">
-                            <Badge variant="destructive">Muito Alto</Badge>
                           </SelectItem>
                         </SelectContent>
                       </Select>

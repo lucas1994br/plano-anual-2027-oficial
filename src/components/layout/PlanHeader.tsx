@@ -1,5 +1,5 @@
 import { Package, AlertTriangle, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils.ts";
 import { format, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 

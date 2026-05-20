@@ -1,17 +1,17 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Card } from "@/components/ui/card.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select.tsx";
 import {
   Table,
   TableBody,
@@ -19,11 +19,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
-import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras } from "@/lib/services";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+} from "@/components/ui/table.tsx";
+import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
+import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras } from "@/lib/services.ts";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery } from "@tanstack/react-query";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";

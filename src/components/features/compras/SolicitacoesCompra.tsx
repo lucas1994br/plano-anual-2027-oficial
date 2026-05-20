@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import erpService from '@/lib/services-erp';
-import type { SolicitacaoCompra } from '@/types/erp';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { toast } from '@/hooks/use-toast';
+import erpService from '@/lib/services-erp.ts';
+import type { SolicitacaoCompra } from '@/types/erp.ts';
+import { Card } from '@/components/ui/card.tsx';
+import { Button } from '@/components/ui/button.tsx';
+import { Badge } from '@/components/ui/badge.tsx';
+import { toast } from '@/hooks/use-toast.ts';
 
 interface SolicitacoesCompraProps {
   diretoriaId: string;

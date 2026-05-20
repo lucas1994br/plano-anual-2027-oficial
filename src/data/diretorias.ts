@@ -1,4 +1,4 @@
-import { PlanItem } from "@/types/plan";
+import { PlanItem } from "@/types/plan.ts";
 
 export interface Diretoria {
   sigla: string;

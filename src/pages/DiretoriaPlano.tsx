@@ -1,17 +1,17 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Users, Shield, Home } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { PlanHeader } from "@/components/layout/PlanHeader";
-import { SummaryCards } from "@/components/common/SummaryCards";
-import { PlanFilters } from "@/components/forms/PlanFilters";
-import { PlanTable } from "@/components/tables/PlanTable";
-import { Diretoria, Gerencia } from "@/types/plan";
-import { PlanItem } from "@/types/plan";
-import { resolveGerenciaNome } from "@/data/gerencias";
-import { getDiretorias, getGerenciasByDiretoria, getPeriodosAtivos } from "@/lib/services";
+import { Button } from "@/components/ui/button.tsx";
+import { Card } from "@/components/ui/card.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { PlanHeader } from "@/components/layout/PlanHeader.tsx";
+import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+import { PlanFilters } from "@/components/forms/PlanFilters.tsx";
+import { PlanTable } from "@/components/tables/PlanTable.tsx";
+import { Diretoria, Gerencia } from "@/types/plan.ts";
+import { PlanItem } from "@/types/plan.ts";
+import { resolveGerenciaNome } from "@/data/gerencias.ts";
+import { getDiretorias, getGerenciasByDiretoria, getPeriodosAtivos } from "@/lib/services.ts";
 import { useQuery } from "@tanstack/react-query";
 
 import DOMPurify from 'dompurify';
