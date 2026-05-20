@@ -1,30 +1,28 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart } from "lucide-react";
-import { Button } from "@/components/ui/button.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
-import { Card } from "@/components/ui/card.tsx";
-import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
-import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan.ts";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services.ts";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
+import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { SummaryCards } from "@/components/common/SummaryCards.tsx";
-import { PlanFilters } from "@/components/forms/PlanFilters.tsx";
-import { PlanTable } from "@/components/tables/PlanTable.tsx";
-import { ServicosTable } from "@/components/tables/ServicosTable.tsx";
-import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
-import { Textarea } from "@/components/ui/textarea.tsx";
-import { Checkbox } from "@/components/ui/checkbox.tsx";
-import { Input } from "@/components/ui/input.tsx";
-import { useToast } from "@/hooks/use-toast.ts";
-import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig.ts";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination.tsx";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
-
-import DOMPurify from 'dompurify';
+import { SummaryCards } from "@/components/common/SummaryCards";
+import { PlanFilters } from "@/components/forms/PlanFilters";
+import { PlanTable } from "@/components/tables/PlanTable";
+import { ServicosTable } from "@/components/tables/ServicosTable";
+import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
+import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /** Itens aguardando decisão da diretoria (podem ser aprovados ou rejeitados em massa). */
 function isPendenteDiretoriaAprovacao(item: PlanItem) {
