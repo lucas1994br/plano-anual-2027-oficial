@@ -154,6 +154,7 @@ create table if not exists servicos (
   dependencia_descricao text,
   status text not null default 'rascunho',
   observacao text,
+  justificativa_rejeicao text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

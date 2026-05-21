@@ -73,6 +73,7 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
   };
 
   const handleExportExcel = async () => {
+    // @ts-ignore
     const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
     type ExcelModule = {
       utils: {
@@ -121,7 +122,7 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       ]);
     });
 
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const ws = XLSX.utils.aoa_to_sheet(wsData) as any;
 
     // Larguras das colunas
     const colWidths = [

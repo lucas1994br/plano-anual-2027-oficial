@@ -141,7 +141,7 @@ export function AdminServicosControl() {
     queryKey: ["diretorias"],
     queryFn: async (): Promise<Diretoria[]> => {
       const result = await getDiretorias();
-      return result.map((dir: DiretoriaAPI): Diretoria => ({
+      return (result as any[]).map((dir: any): Diretoria => ({
         id: dir.id,
         sigla: dir.sigla,
         nome: dir.nome || dir.sigla,
@@ -155,8 +155,8 @@ export function AdminServicosControl() {
     queryKey: ["gerencias-create", formData.diretoria_id],
     queryFn: (): Promise<Gerencia[]> => 
       formData.diretoria_id 
-        ? getGerenciasByDiretoria(formData.diretoria_id).then((result: GerenciaAPI[]) =>
-            result.map((ger: GerenciaAPI): Gerencia => ({
+        ? getGerenciasByDiretoria(formData.diretoria_id).then((result: any[]) =>
+            result.map((ger: any): Gerencia => ({
               id: ger.id,
               sigla: ger.sigla,
               nome: ger.nome || ger.sigla,
@@ -172,8 +172,8 @@ export function AdminServicosControl() {
     queryKey: ["gerencias-edit", editFormData.diretoria_id],
     queryFn: (): Promise<Gerencia[]> => 
       editFormData.diretoria_id 
-        ? getGerenciasByDiretoria(editFormData.diretoria_id).then((result: GerenciaAPI[]) =>
-            result.map((ger: GerenciaAPI): Gerencia => ({
+        ? getGerenciasByDiretoria(editFormData.diretoria_id).then((result: any[]) =>
+            result.map((ger: any): Gerencia => ({
               id: ger.id,
               sigla: ger.sigla,
               nome: ger.nome || ger.sigla,
@@ -248,10 +248,9 @@ export function AdminServicosControl() {
         grau_prioridade: formData.grau_prioridade,
         estimativa_valor: estimativaValor,
         vinculacao: formData.vinculacao,
-        dependencia_descricao: formData.dependencia_descricao.trim() || null,
+        dependencia_descricao: formData.dependencia_descricao.trim() || undefined,
         diretoria_id: formData.diretoria_id,
         gerencia_id: formData.gerencia_id,
-        item: 0,
       });
 
       resetForm();

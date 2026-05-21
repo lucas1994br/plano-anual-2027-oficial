@@ -289,7 +289,7 @@ export async function getSolicitacoesByGerencia(
       .eq("gerencia_id", gerenciaId)
       .eq("periodo_id", periodoId)
       .order("codigo")
-      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
   return data;
@@ -335,7 +335,7 @@ export async function getSolicitacoesByDiretoria(
         "concluido",
       ])
       .order("codigo")
-      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
   return data;
@@ -352,7 +352,7 @@ export async function getSolicitacoesByPeriodo({
       .select("*")
       .eq("periodo_id", periodoId)
       .order("codigo")
-      .range(from, to) as Promise<PostgrestSingleResponse<PlanItem[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
   return data;
@@ -368,7 +368,7 @@ export async function getSolicitacoesCompras(
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("codigo")
-      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -380,7 +380,7 @@ export async function getServicosCompras(periodoId: string): Promise<unknown[]> 
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("item")
-      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -566,7 +566,7 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
       .from("itens_catalogo")
       .select("*")
       .order("codigo")
-      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -643,7 +643,7 @@ export async function getAdminMiniErpConfigDb(): Promise<
   (fluxos || []).forEach(
     (row: { gerencia_id: string; destino_tipo: string; destino_id: string }) => {
       routingRules[row.gerencia_id] = {
-        destinoTipo: row.destino_tipo,
+        destinoTipo: row.destino_tipo as any,
         destinoId: row.destino_id,
       };
     }
@@ -700,7 +700,7 @@ export async function getServicosCatalogo(): Promise<unknown[]> {
       .from("servicos_catalogo")
       .select("*")
       .order("item")
-      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
 
@@ -948,6 +948,80 @@ export async function createSolicitacoesFromCatalogo(
 
 // ============ SERVIÇOS ============
 
+function mapDbToServicoItem(row: any): ServicoItem {
+  if (!row) return row;
+  return {
+    id: row.id,
+    item: row.item,
+    tipoContratacao: row.tipo_contratacao ?? row.tipoContratacao,
+    unidadeDemandante: row.unidade_demandante ?? row.unidadeDemandante,
+    objeto: row.objeto,
+    justificativa: row.justificativa,
+    previsaoInicio: row.previsao_inicio ?? row.previsaoInicio,
+    estimativaValor: row.estimativa_valor ?? row.estimativaValor,
+    dotacaoOrcamentaria: row.dotacao_orcamentaria ?? row.dotacaoOrcamentaria,
+    grauPrioridade: row.grau_prioridade ?? row.grauPrioridade,
+    vinculacao: row.vinculacao,
+    dependenciaDescricao: row.dependencia_descricao ?? row.dependenciaDescricao,
+    gerencia: row.gerencias?.sigla ?? row.gerencia ?? row.gerencia_id,
+    diretoriaSigla: row.diretorias?.sigla ?? row.diretoriaSigla ?? row.diretoria_id,
+    status: row.status,
+    observacao: row.observacao,
+    justificativaRejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
+    justificativa_rejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  } as ServicoItem;
+}
+
+function mapServicoItemToDb(item: any): any {
+  if (!item) return item;
+  const dbRow: any = {};
+  
+  if (item.id !== undefined) dbRow.id = item.id;
+  if (item.item !== undefined) dbRow.item = item.item;
+  
+  const tipoContratacao = item.tipo_contratacao ?? item.tipoContratacao;
+  if (tipoContratacao !== undefined) dbRow.tipo_contratacao = tipoContratacao;
+  
+  const unidadeDemandante = item.unidade_demandante ?? item.unidadeDemandante;
+  if (unidadeDemandante !== undefined) dbRow.unidade_demandante = unidadeDemandante;
+  
+  if (item.objeto !== undefined) dbRow.objeto = item.objeto;
+  if (item.justificativa !== undefined) dbRow.justificativa = item.justificativa;
+  
+  const previsaoInicio = item.previsao_inicio ?? item.previsaoInicio;
+  if (previsaoInicio !== undefined) dbRow.previsao_inicio = previsaoInicio;
+  
+  const estimativaValor = item.estimativa_valor ?? item.estimativaValor;
+  if (estimativaValor !== undefined) dbRow.estimativa_valor = estimativaValor;
+  
+  const dotacaoOrcamentaria = item.dotacao_orcamentaria ?? item.dotacaoOrcamentaria;
+  if (dotacaoOrcamentaria !== undefined) dbRow.dotacao_orcamentaria = dotacaoOrcamentaria;
+  
+  const grauPrioridade = item.grau_prioridade ?? item.grauPrioridade;
+  if (grauPrioridade !== undefined) dbRow.grau_prioridade = grauPrioridade;
+  
+  if (item.vinculacao !== undefined) dbRow.vinculacao = item.vinculacao;
+  
+  const dependenciaDescricao = item.dependencia_descricao ?? item.dependenciaDescricao;
+  if (dependenciaDescricao !== undefined) dbRow.dependencia_descricao = dependenciaDescricao;
+  
+  if (item.gerencia_id !== undefined) dbRow.gerencia_id = item.gerencia_id;
+  if (item.diretoria_id !== undefined) dbRow.diretoria_id = item.diretoria_id;
+  if (item.periodo_id !== undefined) dbRow.periodo_id = item.periodo_id;
+  if (item.status !== undefined) dbRow.status = item.status;
+  if (item.observacao !== undefined) dbRow.observacao = item.observacao;
+  
+  const justificativaRejeicao = item.justificativa_rejeicao ?? item.justificativaRejeicao;
+  if (justificativaRejeicao !== undefined) dbRow.justificativa_rejeicao = justificativaRejeicao;
+  
+  if (item.created_at !== undefined) dbRow.created_at = item.created_at;
+  if (item.updated_at !== undefined) dbRow.updated_at = item.updated_at;
+  
+  return dbRow;
+}
+
 export async function getServicosByGerencia(
   gerenciaId: string,
   periodoId: string
@@ -960,14 +1034,14 @@ export async function getServicosByGerencia(
     .order("item");
 
   if (error) throw error;
-  return (data as ServicoItem[]) || [];
+  return (data || []).map(mapDbToServicoItem);
 }
 
 export async function getServicosByDiretoria(
   diretoriaId: string,
   periodoId: string
-): Promise<unknown[]> {
-  return await fetchAllPages<unknown>((from, to) =>
+): Promise<ServicoItem[]> {
+  const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("servicos")
       .select(
@@ -976,34 +1050,41 @@ export async function getServicosByDiretoria(
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)
       .order("item")
-      .range(from, to) as Promise<PostgrestSingleResponse<unknown[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
   );
+  return data.map(mapDbToServicoItem);
 }
 
 export async function updateServico(
   servicoId: string,
-  updates: Partial<ServicoItem>
+  updates: Partial<ServicoItem> | any
 ): Promise<ServicoItem | undefined> {
+  const dbUpdates = mapServicoItemToDb(updates);
+  dbUpdates.updated_at = new Date().toISOString();
+
   const { data, error } = await supabase
     .from("servicos")
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(dbUpdates)
     .eq("id", servicoId)
-    .select();
+    .select()
+    .single();
 
   if (error) throw error;
-  return (data?.[0] as ServicoItem) || undefined;
+  return data ? mapDbToServicoItem(data) : undefined;
 }
 
 export async function createServico(
-  servico: Omit<ServicoItem, "id" | "created_at" | "updated_at">
+  servico: Omit<ServicoItem, "id" | "created_at" | "updated_at"> | any
 ): Promise<ServicoItem | undefined> {
+  const dbRow = mapServicoItemToDb(servico);
   const { data, error } = await supabase
     .from("servicos")
-    .insert([servico])
-    .select();
+    .insert([dbRow])
+    .select()
+    .single();
 
   if (error) throw error;
-  return (data?.[0] as ServicoItem) || undefined;
+  return data ? mapDbToServicoItem(data) : undefined;
 }
 
 export const deleteServico = async (id: string): Promise<boolean> => {

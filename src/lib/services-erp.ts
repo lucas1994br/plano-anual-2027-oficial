@@ -637,7 +637,7 @@ export async function atualizarOrcamentoDiretoria(
 
     if (error) throw error;
     return data;
-  } catch (error: unknown) {
+  } catch (error: any) {
     if (String(error.message || '').includes('row-level security policy')) {
       console.error('RLS violation updating orçamento via edge function:', error);
       throw new Error('Permissão insuficiente: apenas admin/gerência pode alterar orçamentos');

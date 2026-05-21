@@ -18,7 +18,7 @@ export function useAccessControl() {
     async (code: string, scope: "diretoria" | "gerencia" | "admin" | "compras") => {
       setIsLoading(true);
       try {
-        const result = await validateAccessCode(code, scope);
+        const result = await validateAccessCode(code, scope) as any;
         
         if (result.success && result.access) {
           setSession(result.access);

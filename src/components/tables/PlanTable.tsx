@@ -87,6 +87,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
   };
 
   const handleExportExcel = async () => {
+    // @ts-ignore
     const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
     const XLSX = (xlsxModule as any).default ?? xlsxModule;
     const wb = XLSX.utils.book_new();

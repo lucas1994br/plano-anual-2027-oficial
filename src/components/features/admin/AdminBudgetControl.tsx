@@ -111,7 +111,7 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
     queryKey: ["admin-mini-erp-gerencias", diretorias.map((d) => d.id).join("|")],
     queryFn: async () => {
       const all = await Promise.all(diretorias.map((dir) => getGerenciasByDiretoria(dir.id)));
-      return all.flat() as GerenciaResumo[];
+      return all.flat() as unknown as GerenciaResumo[];
     },
     enabled: diretorias.length > 0,
   });

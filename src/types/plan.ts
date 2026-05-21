@@ -40,15 +40,6 @@ export type GrauPrioridade =
   | "Alto";
 
 export interface ServicoItem {
-  justificativa_rejeicao: string;
-  valor_unitario: number;
-  unidade: string;
-  qtd_estimada: number;
-  prioridade: string;
-  codigo: string;
-  descricao: string;
-  diretoria_id: string;
-  categoria: string;
   id?: string;
   item: number;
   tipoContratacao: string;
@@ -65,9 +56,12 @@ export interface ServicoItem {
   diretoriaSigla?: string;
   status?: SolicitacaoStatus;
   observacao?: string;
+  justificativaRejeicao?: string;
+  justificativa_rejeicao?: string;
   created_at?: string;
   updated_at?: string;
 }
+
 
 export interface Diretoria {
   id: string;

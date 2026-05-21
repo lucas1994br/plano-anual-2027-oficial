@@ -31,7 +31,7 @@ import autoTable from "jspdf-autotable";
 const ComprasPanel = () => {
   const navigate = useNavigate();
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | null>(null);
+  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | null>(null);
   const [selectedDiretoria, setSelectedDiretoria] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -52,7 +52,7 @@ const ComprasPanel = () => {
     queryFn: getPeriodosAtivos,
   });
 
-  const periodAtivo = periodos[0];
+  const periodAtivo = periodos[0] as any;
 
   const { data: solicitacoesCompras = [] } = useQuery({
     queryKey: ["solicitacoes-compras", periodAtivo?.id],
@@ -68,7 +68,7 @@ const ComprasPanel = () => {
 
   const diretoriasById = useMemo(() => {
     const entries = diretorias.map((dir: any) => [dir.id, dir.sigla]);
-    return new Map<string, string>(entries);
+    return new Map<string, string>(entries as any);
   }, [diretorias]);
 
   const allApprovedItems: PlanItem[] = useMemo(() => solicitacoesCompras.map((s: any) => ({
@@ -133,8 +133,13 @@ const ComprasPanel = () => {
     const matchesDiretoria =
       diretoriaSelecionada === "TODAS" ||
       normalizeFilterValue(servico.diretoriaSigla) === diretoriaSelecionada;
-    return matchesDiretoria;
-  }), [allServicos, selectedDiretoria]);
+
+    const matchesTipo = selectedOption === "servicos_novos"
+      ? (servico.tipoContratacao ?? (servico as any).tipo_contratacao) === "Novo"
+      : (servico.tipoContratacao ?? (servico as any).tipo_contratacao) !== "Novo";
+
+    return matchesDiretoria && matchesTipo;
+  }), [allServicos, selectedDiretoria, selectedOption]);
 
   const isServicoReadOnly = (servico: ServicoItem) => servico.status !== "rascunho";
 
@@ -208,6 +213,7 @@ const ComprasPanel = () => {
   };
 
   const handleExportExcel = async () => {
+    // @ts-ignore
     const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
     const XLSX = (xlsxModule as any).default ?? xlsxModule;
     const wb = XLSX.utils.book_new();
@@ -277,12 +283,17 @@ const ComprasPanel = () => {
   };
 
   const handleExportServicosExcel = async () => {
+    // @ts-ignore
     const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
     const XLSX = (xlsxModule as any).default ?? xlsxModule;
     const wb = XLSX.utils.book_new();
     const wsData: any[][] = [];
 
-    wsData.push(["Painel de Compras - Serviços"]);
+    const isNovos = selectedOption === "servicos_novos";
+    const categoryTitle = isNovos ? "Novos Serviços" : "Serviços Existentes";
+    const categoryFile = isNovos ? "Novos_Servicos" : "Servicos_Existentes";
+
+    wsData.push([`Painel de Compras - ${categoryTitle}`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
     wsData.push(["Objeto", "Diretoria", "Gerencia", "Justificativa", "Prioridade", "Estimativa Valor"]);
@@ -302,13 +313,17 @@ const ComprasPanel = () => {
     ws["!cols"] = [{ wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, "Servicos");
     const hoje = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
-    XLSX.writeFile(wb, `Compras_Servicos_${hoje}.xlsx`);
+    XLSX.writeFile(wb, `Compras_${categoryFile}_${hoje}.xlsx`);
   };
 
   const handleExportServicosPDF = () => {
+    const isNovos = selectedOption === "servicos_novos";
+    const categoryTitle = isNovos ? "Novos Serviços" : "Serviços Existentes";
+    const categoryFile = isNovos ? "Novos_Servicos" : "Servicos_Existentes";
+
     const doc = new jsPDF({ orientation: "landscape", format: "a4" });
     doc.setFontSize(14);
-    doc.text("PAC 2027 - Serviços", 14, 18);
+    doc.text(`PAC 2027 - ${categoryTitle}`, 14, 18);
     doc.setFontSize(9);
     doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
 
@@ -329,7 +344,7 @@ const ComprasPanel = () => {
     });
 
     const hoje = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
-    doc.save(`PAC_2027_Servicos_${hoje}.pdf`);
+    doc.save(`PAC_2027_${categoryFile}_${hoje}.pdf`);
   };
 
   if (!authenticated) {
@@ -425,10 +440,10 @@ const ComprasPanel = () => {
     );
   }
 
-  // Se escolheu "Serviços", mostrar tabela de serviços
+  // Tela de seleção: Serviços Existentes ou Novos Serviços
   if (selectedOption === "servicos") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -447,15 +462,117 @@ const ComprasPanel = () => {
                 <ArrowLeft className="h-4 w-4" />
                 Voltar
               </Button>
-              <Badge variant="outline" className="text-xs">Serviços</Badge>
             </div>
           </div>
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-green-600 to-green-800 px-6 py-6">
+          <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-8">
+            <div className="max-w-7xl mx-auto text-center">
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <span className="text-5xl">🛠️</span>
+                <Badge className="bg-white/20 text-white border-none text-xl font-bold">Serviços</Badge>
+              </div>
+              <p className="text-white/80 text-lg">Selecione o tipo de serviço que deseja visualizar</p>
+            </div>
+          </div>
+
+          {/* Opções: Serviços Existentes e Novos Serviços */}
+          <div className="px-6 py-12">
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Cartão Serviços Existentes */}
+                <button
+                  onClick={() => setSelectedOption("servicos_existentes")}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                >
+                  <div className="mb-4 flex justify-center">
+                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-blue-50 group-hover:bg-blue-100 transition-colors border">
+                      <img
+                        src="/assets/images/servico_existente.png"
+                        alt="Serviços Existentes"
+                        className="w-16 h-16 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Serviços Existentes</h2>
+                  <p className="text-muted-foreground">
+                    Visualizar contratações recorrentes e serviços já existentes
+                  </p>
+                </button>
+
+                {/* Cartão Novos Serviços */}
+                <button
+                  onClick={() => setSelectedOption("servicos_novos")}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                >
+                  <div className="mb-4 flex justify-center">
+                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-green-50 group-hover:bg-green-100 transition-colors border">
+                      <img
+                        src="/assets/images/novo_servico_gerado.png"
+                        alt="Novos Serviços"
+                        className="w-16 h-16 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Novos Serviços</h2>
+                  <p className="text-muted-foreground">
+                    Visualizar novos serviços e novas demandas de contratação
+                  </p>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Se escolheu uma das opções de "Serviços", mostrar tabela de serviços
+  if (selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") {
+    const isNovos = selectedOption === "servicos_novos";
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+        <div
+          className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
+          style={{ top: "200px" }}
+        >
+          <img
+            src="/assets/images/caema-logo.png"
+            alt="CAEMA"
+            className="w-full max-w-3xl opacity-[0.08]"
+          />
+        </div>
+        <div className="relative z-10">
+          {/* Top Bar */}
+          <div className="px-6 py-3 bg-card border-b">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption("servicos")}>
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              <Badge variant="outline" className="text-xs">
+                {isNovos ? "Novos Serviços" : "Serviços Existentes"}
+              </Badge>
+            </div>
+          </div>
+
+          {/* Header */}
+          <div className={`bg-gradient-to-r ${isNovos ? "from-emerald-600 to-emerald-800" : "from-blue-600 to-blue-800"} px-6 py-6`}>
             <div className="max-w-7xl mx-auto">
-              <h1 className="text-2xl font-bold text-white mb-2">Gestão de Serviços - Compras</h1>
-              <p className="text-white/80 text-sm">Serviços aprovados pelas diretorias para processamento</p>
+              <h1 className="text-2xl font-bold text-white mb-2">
+                {isNovos ? "Gestão de Novos Serviços - Compras" : "Gestão de Serviços Existentes - Compras"}
+              </h1>
+              <p className="text-white/80 text-sm">
+                {isNovos 
+                  ? "Novos serviços cadastrados e aprovados para processamento" 
+                  : "Serviços existentes planejados e aprovados para processamento"}
+              </p>
             </div>
           </div>
 
@@ -716,7 +833,16 @@ const ComprasPanel = () => {
                 </div>
               )}
             </div>
-            <div />
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportExcel}>
+                <FileSpreadsheet className="h-4 w-4" />
+                Excel
+              </Button>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportPDF}>
+                <FileDown className="h-4 w-4" />
+                PDF
+              </Button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <Table>

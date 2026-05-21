@@ -81,7 +81,7 @@ const Home = () => {
     []
   );
 
-  const { data: diretoriasDb = [], isFetching: fetchingDiretorias } = useQuery<Diretoria[]>({
+  const { data: diretoriasDb = [], isFetching: fetchingDiretorias } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
     placeholderData: diretoriasFallback,
@@ -89,16 +89,16 @@ const Home = () => {
     refetchOnWindowFocus: false,
   });
 
-  const diretorias = diretoriasDb.length > 0 ? diretoriasDb : diretoriasFallback;
+  const diretorias = (diretoriasDb.length > 0 ? diretoriasDb : diretoriasFallback) as any[];
 
-  const { data: periodos = [] } = useQuery({
+  const { data: periodos = [] } = useQuery<any[]>({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
   });
 
   const prazo = useMemo(() => {
     if (!periodos[0]?.fim) return null;
-    return new Date(periodos[0].fim);
+    return new Date(periodos[0].fim as string);
   }, [periodos]);
 
   const diasRestantes = useMemo(() => {
@@ -194,7 +194,7 @@ const Home = () => {
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 [&>*:last-child:nth-child(3n-2)]:md:col-start-2 [&>*:last-child:nth-child(3n-2)]:lg:col-start-2">
-            {diretorias.map((dir) => (
+            {diretorias.map((dir: any) => (
               <Card
                 key={dir.sigla}
                 className="p-0 overflow-hidden card-shadow cursor-pointer hover:shadow-lg transition-all hover:-translate-y-1 group"

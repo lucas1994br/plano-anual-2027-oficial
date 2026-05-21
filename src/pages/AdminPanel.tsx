@@ -44,13 +44,15 @@ const AdminPanel = () => {
     enabled: authenticated,
   });
 
-  const { data: periodos = [], isLoading: isLoadingPeriodos, refetch: refetchPeriodos } = useQuery({
+  const { data: periodosRaw = [], isLoading: isLoadingPeriodos, refetch: refetchPeriodos } = useQuery({
     queryKey: ["todos-periodos"],
     queryFn: getTodosPeriodos,
     enabled: authenticated,
     staleTime: 0,
     gcTime: 0,
   });
+
+  const periodos = periodosRaw as any[];
 
   const [novoPeriodo, setNovoPeriodo] = useState({ nome: "", inicio: "", fim: "" });
   const [isCreatingPeriodo, setIsCreatingPeriodo] = useState(false);

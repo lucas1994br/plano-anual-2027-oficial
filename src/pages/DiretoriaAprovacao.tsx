@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -53,7 +53,7 @@ const DiretoriaAprovacao = () => {
   const { toast } = useToast();
 
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | null>(null);
+  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | null>(null);
   const [approvalTab, setApprovalTab] = useState<"aquisicao" | "servicos" | null>(null);
   const [ownSearchTerm, setOwnSearchTerm] = useState("");
   const [ownCategoria, setOwnCategoria] = useState("");
@@ -119,19 +119,19 @@ const DiretoriaAprovacao = () => {
   });
 
   // Buscar diretorias
-  const { data: diretorias = [], isLoading: isDiretoriasLoading, isError: isDiretoriasError } = useQuery({
+  const { data: diretorias = [], isLoading: isDiretoriasLoading, isError: isDiretoriasError } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-  const diretoria = diretorias.find((d: Diretoria) => d.sigla === siglaUpper);
+  const diretoria = (diretorias as any[]).find((d: any) => d.sigla === siglaUpper);
 
   // Buscar gerências desta diretoria
-  const { data: gerenciasData = [] } = useQuery({
+  const { data: gerenciasData = [] } = useQuery<any[]>({
     queryKey: ["gerencias", diretoria?.id],
-    queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : [],
+    queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : Promise.resolve([]),
     enabled: !!diretoria,
     staleTime: 5 * 60 * 1000,
   });
@@ -139,7 +139,7 @@ const DiretoriaAprovacao = () => {
   // Criar mapa de gerencia_id -> sigla
   const gerenciaMap = useMemo(() => {
     const map: Record<string, string> = {};
-    gerenciasData.forEach((g: Gerencia) => {
+    (gerenciasData as any[]).forEach((g: any) => {
       map[g.id] = g.sigla;
     });
     return map;
@@ -148,14 +148,14 @@ const DiretoriaAprovacao = () => {
   // Criar mapa de sigla -> nome de gerência
   const siglaToNome = useMemo(() => {
     const map: Record<string, string> = {};
-    gerenciasData.forEach((g: Gerencia) => {
+    (gerenciasData as any[]).forEach((g: any) => {
       map[g.sigla] = g.nome;
     });
     return map;
   }, [gerenciasData]);
 
   // Buscar períodos ativos
-  const { data: periodos = [] } = useQuery({
+  const { data: periodos = [] } = useQuery<any[]>({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
     staleTime: 5 * 60 * 1000,
@@ -189,7 +189,7 @@ const DiretoriaAprovacao = () => {
   const { data: servicosData = [], isFetching: isServicosLoading } = useQuery({
     queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id],
     queryFn: () => (diretoria && periodAtivo) ? getServicosByDiretoria(diretoria.id, periodAtivo.id) : [],
-    enabled: authenticated && selectedOption === "servicos" && !!diretoria && !!periodAtivo,
+    enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") && !!diretoria && !!periodAtivo,
     staleTime: 0,
     refetchOnMount: true,
   });
@@ -217,7 +217,7 @@ const DiretoriaAprovacao = () => {
   }, [diretoria?.id, adminMiniConfigFromDb]);
   const diretoriaMap = useMemo(() => {
     const map: Record<string, Diretoria> = {};
-    diretorias.forEach((dir: Diretoria) => {
+    (diretorias as any[]).forEach((dir: any) => {
       map[dir.id] = dir;
     });
     return map;
@@ -228,11 +228,11 @@ const DiretoriaAprovacao = () => {
     if (!diretoria) return [];
 
     return solicitacoes
-      .filter((s: ServicoItem) =>
+      .filter((s: any) =>
         s.qtd_estimada >= 0 &&
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
-      .map((s: ServicoItem) => {
+      .map((s: any) => {
         const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0)
           ? s.categoria
           : "diversos";
@@ -279,8 +279,8 @@ const DiretoriaAprovacao = () => {
     if (!diretoria) return [];
 
     const solicitacoesRascunho = [...solicitacoes]
-      .filter((s: ServicoItem) => s.status === "rascunho")
-      .sort((a: ServicoItem, b: ServicoItem) => {
+      .filter((s: any) => s.status === "rascunho")
+      .sort((a: any, b: any) => {
         const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
         const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
         return aTime - bTime;
@@ -288,7 +288,7 @@ const DiretoriaAprovacao = () => {
 
     const latestByCodigo = new Map<number, PlanItem>();
 
-    solicitacoesRascunho.forEach((s: ServicoItem) => {
+    solicitacoesRascunho.forEach((s: any) => {
       const codigo = Number(s.codigo);
       latestByCodigo.set(codigo, {
         id: s.id,
@@ -508,44 +508,64 @@ const DiretoriaAprovacao = () => {
   const gastoServicosDiretoria = useMemo(
     () =>
       servicosData
-        .filter((s: any) => s.status !== "rascunho")
+        .filter((s: ServicoItem) => s.status !== "rascunho")
         .reduce(
-          (acc: number, servico: any) =>
-            acc + (servico.dotacao_orcamentaria || servico.estimativa_valor || 0),
+          (acc: number, servico: ServicoItem) =>
+            acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
           0,
         ),
     [servicosData],
   );
 
+  // Mostrar rascunhos da própria diretoria + serviços de gerências (não rascunho)
+  const servicosVisiveis = useMemo(() => {
+    return servicosData.filter((s: ServicoItem) => 
+      s.status !== "rascunho" || s.unidadeDemandante === siglaUpper
+    );
+  }, [servicosData, siglaUpper]);
+
+  const filteredServicos = useMemo(() => {
+    const list = selectedGerencia === "todas"
+      ? servicosVisiveis
+      : servicosVisiveis.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
+
+    if (selectedOption === "servicos_novos") {
+      return list.filter((s: ServicoItem) => (s.tipoContratacao ?? (s as any).tipo_contratacao) === "Novo");
+    } else if (selectedOption === "servicos_existentes") {
+      return list.filter((s: ServicoItem) => (s.tipoContratacao ?? (s as any).tipo_contratacao) !== "Novo");
+    }
+    return list;
+  }, [servicosVisiveis, selectedGerencia, selectedOption]);
+
   /** Contadores de serviços por status */
   const servicosTabCounts = useMemo(() => {
     const counts = { pendentes: 0, aprovados: 0, rejeitados: 0, em_compra: 0 };
     
-    for (let i = 0; i < servicosData.length; i++) {
-      const servico = servicosData[i];
+    for (let i = 0; i < filteredServicos.length; i++) {
+      const servico = filteredServicos[i];
       if (isPendenteServicoAprovacao(servico)) counts.pendentes++;
       else if (servico.status === "aprovado") counts.aprovados++;
       else if (servico.status === "rejeitado") counts.rejeitados++;
       else if (servico.status === "em_compra" || servico.status === "concluido") counts.em_compra++;
     }
     return counts;
-  }, [servicosData]);
+  }, [filteredServicos]);
 
   /** Filtra serviços baseado no status selecionado */
   const servicosFiltradasPorStatus = useMemo(() => {
     switch (servicosStatusTab) {
       case "pendentes":
-        return servicosData.filter(isPendenteServicoAprovacao);
+        return filteredServicos.filter(isPendenteServicoAprovacao);
       case "aprovados":
-        return servicosData.filter((s: any) => s.status === "aprovado");
+        return filteredServicos.filter((s: ServicoItem) => s.status === "aprovado");
       case "rejeitados":
-        return servicosData.filter((s: any) => s.status === "rejeitado");
+        return filteredServicos.filter((s: ServicoItem) => s.status === "rejeitado");
       case "em_compra":
-        return servicosData.filter((s: any) => s.status === "em_compra" || s.status === "concluido");
+        return filteredServicos.filter((s: ServicoItem) => s.status === "em_compra" || s.status === "concluido");
       default:
-        return servicosData;
+        return filteredServicos;
     }
-  }, [servicosData, servicosStatusTab]);
+  }, [filteredServicos, servicosStatusTab]);
 
   // Listas únicas de categorias
   const categorias = useMemo(() => [...new Set(items.map(i => i.categoria))].sort(), [items]);
@@ -869,6 +889,99 @@ const DiretoriaAprovacao = () => {
       const workbook = xlsx.utils.book_new();
       xlsx.utils.book_append_sheet(workbook, worksheet, "Aprovação");
       xlsx.writeFile(workbook, `aprovacao_${diretoria?.sigla}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    });
+  };
+
+  const exportServicosToPDF = () => {
+    import("jspdf").then(({ jsPDF }) => {
+      import("jspdf-autotable").then(() => {
+        const doc = new jsPDF({ orientation: "landscape", format: "a4" }) as any;
+        const columnStyles = {
+          0: { halign: "left" },
+          1: { halign: "center" },
+          2: { halign: "center" },
+          3: { halign: "left" },
+          4: { halign: "center" },
+          5: { halign: "right" }
+        };
+
+        const isNovos = selectedOption === "servicos_novos";
+        const categoryTitle = isNovos ? "Novos Serviços" : "Serviços Existentes";
+        const categoryFile = isNovos ? "Novos_Servicos" : "Servicos_Existentes";
+
+        const tableData = servicosFiltradasPorStatus.map((s: any) => [
+          s.objeto,
+          s.gerencia || "N/A",
+          s.unidadeDemandante || "N/A",
+          s.justificativa || "-",
+          s.grauPrioridade || "Médio",
+          `R$ ${(s.estimativaValor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        ]);
+
+        doc.autoTable({
+          head: [["Objeto", "Gerência", "Unid. Demandante", "Justificativa", "Prioridade", "Estimativa Valor"]],
+          body: tableData,
+          columnStyles,
+          headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
+          theme: 'striped',
+          margin: { top: 10, right: 10, bottom: 10, left: 10 },
+          startY: 20
+        });
+  
+        doc.text(`Painel de Aprovação - ${categoryTitle} - ${diretoria?.sigla}`, 10, 10);
+        
+        const totalValue = servicosFiltradasPorStatus.reduce((acc: number, s: any) => acc + (s.estimativaValor || 0), 0);
+        doc.text(`Total: R$ ${totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 10, doc.lastAutoTable.finalY + 10);
+        doc.save(`aprovacao_${categoryFile}_${diretoria?.sigla}_${new Date().toISOString().split('T')[0]}.pdf`);
+      });
+    });
+  };
+
+  const exportServicosToExcel = () => {
+    import("xlsx-js-style").then((XLSXStyle) => {
+      const xlsx = XLSXStyle.default;
+      
+      const isNovos = selectedOption === "servicos_novos";
+      const categoryTitle = isNovos ? "Novos Serviços" : "Serviços Existentes";
+      const categoryFile = isNovos ? "Novos_Servicos" : "Servicos_Existentes";
+
+      const worksheetData = [
+        ["Objeto", "Gerência", "Unidade Demandante", "Justificativa", "Prioridade", "Estimativa Valor"],
+        ...servicosFiltradasPorStatus.map((s: any) => [
+          s.objeto,
+          s.gerencia || "N/A",
+          s.unidadeDemandante || "N/A",
+          s.justificativa || "-",
+          s.grauPrioridade || "Médio",
+          s.estimativaValor || 0
+        ])
+      ];
+
+      const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
+      worksheet['!cols'] = [
+        { wch: 40 }, // Objeto
+        { wch: 15 }, // Gerência
+        { wch: 20 }, // Unidade Demandante
+        { wch: 30 }, // Justificativa
+        { wch: 12 }, // Prioridade
+        { wch: 18 }  // Estimativa Valor
+      ];
+
+      // Aplicar estilos ao header
+      const headerStyle = {
+        fill: { fgColor: { rgb: "FF2980B9" } },
+        font: { color: { rgb: "FFFFFFFF" }, bold: true },
+        alignment: { horizontal: "center", vertical: "center" }
+      };
+
+      for (let i = 0; i < 6; i++) {
+        const cellRef = xlsx.utils.encode_cell({ r: 0, c: i });
+        worksheet[cellRef].s = headerStyle;
+      }
+
+      const workbook = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(workbook, worksheet, "Serviços");
+      xlsx.writeFile(workbook, `aprovacao_${categoryFile}_${diretoria?.sigla}_${new Date().toISOString().split('T')[0]}.xlsx`);
     });
   };
 
@@ -1273,7 +1386,7 @@ const DiretoriaAprovacao = () => {
     return (
       <AccessCodeScreen
         title={`Diretoria ${diretoria.sigla}`}
-        subtitle={diretoria.nome}
+        subtitle={diretoria.nome || ""}
         gradientClass="from-blue-700 to-blue-900"
         icon=""
         onAccessGranted={() => setAuthenticated(true)}
@@ -1377,40 +1490,116 @@ const DiretoriaAprovacao = () => {
     );
   }
 
-  // Se escolheu "Serviços", mostrar tabela de serviços com aprovação
+  // Tela de seleção: Serviços Existentes ou Novos Serviços (Diretoria)
   if (selectedOption === "servicos") {
-    // Converter dados de serviços para o formato correto
-    const servicos: ServicoItem[] = servicosData.map((s: any) => ({
-      id: s.id,
-      item: s.item,
-      tipoContratacao: s.tipo_contratacao,
-      unidadeDemandante: s.unidade_demandante,
-      objeto: s.objeto,
-      justificativa: s.justificativa,
-      previsaoInicio: s.previsao_inicio,
-      estimativaValor: s.estimativa_valor,
-      dotacaoOrcamentaria: s.dotacao_orcamentaria,
-      grauPrioridade: s.grau_prioridade as GrauPrioridade,
-      vinculacao: s.vinculacao as "Sim" | "Não",
-      dependenciaDescricao: s.dependencia_descricao,
-      gerencia: gerenciaMap[s.gerencia_id] || "",
-      diretoriaSigla: siglaUpper,
-      status: s.status as SolicitacaoStatus,
-      observacao: s.observacao,
-    }));
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+        <div
+          className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
+          style={{ top: "200px" }}
+        >
+          <img
+            src="/assets/images/caema-logo.png"
+            alt="CAEMA"
+            className="w-full max-w-3xl opacity-[0.08]"
+          />
+        </div>
+        <div className="relative z-10">
+          {/* Top Bar */}
+          <div className="px-6 py-3 bg-card border-b">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
+                <Home className="h-4 w-4" />
+                Página inicial
+              </Button>
+              <Badge variant="outline" className="text-xs">Diretoria {diretoria?.sigla}</Badge>
+            </div>
+          </div>
 
-    // Mostrar rascunhos da própria diretoria + serviços de gerências (não rascunho)
-    const servicosVisiveis = servicos.filter((s) => 
-      s.status !== "rascunho" || s.unidadeDemandante === siglaUpper
+          {/* Header */}
+          <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-8">
+            <div className="max-w-7xl mx-auto text-center">
+              <div className="flex items-center justify-center gap-3 mb-4">
+                {getIconPath(diretoria?.sigla) && (
+                  <img src={getIconPath(diretoria?.sigla)!} alt={diretoria?.sigla} className="h-12 w-12 object-contain" />
+                )}
+                <Badge className="bg-white/20 text-white border-none text-xl font-bold">Diretoria {diretoria?.sigla}</Badge>
+              </div>
+              <h1 className="text-2xl font-bold text-white mb-2">Aprovação de Serviços</h1>
+              <p className="text-white/80 text-lg">Selecione a categoria de serviços para aprovação</p>
+            </div>
+          </div>
+
+          {/* Opções: Serviços Existentes e Novos Serviços */}
+          <div className="px-6 py-12">
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Cartão Serviços Existentes */}
+                <button
+                  onClick={() => {
+                    setSelectedOption("servicos_existentes");
+                    setApprovalTab("servicos");
+                  }}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                >
+                  <div className="mb-4 flex justify-center">
+                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-blue-50 group-hover:bg-blue-100 transition-colors border">
+                      <img
+                        src="/assets/images/servico_existente.png"
+                        alt="Serviços Existentes"
+                        className="w-16 h-16 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Serviços Existentes</h2>
+                  <p className="text-muted-foreground">
+                    Aprovar e gerenciar contratações recorrentes e serviços já existentes
+                  </p>
+                </button>
+
+                {/* Cartão Novos Serviços */}
+                <button
+                  onClick={() => {
+                    setSelectedOption("servicos_novos");
+                    setApprovalTab("servicos");
+                  }}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                >
+                  <div className="mb-4 flex justify-center">
+                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-green-50 group-hover:bg-green-100 transition-colors border">
+                      <img
+                        src="/assets/images/novo_servico_gerado.png"
+                        alt="Novos Serviços"
+                        className="w-16 h-16 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Novos Serviços</h2>
+                  <p className="text-muted-foreground">
+                    Aprovar e gerenciar novas demandas de contratação de serviços
+                  </p>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     );
+  }
 
-    const servicosFiltrados =
-      selectedGerencia === "todas"
-        ? servicosVisiveis
-        : servicosVisiveis.filter((s) => s.gerencia === selectedGerencia);
+  // Se escolheu "Serviços", mostrar tabela de serviços com aprovação
+  if (selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") {
 
-    const servicosExistentes = servicosFiltrados.filter((s) => s.tipoContratacao !== "Novo");
-    const servicosNovos = servicosFiltrados.filter((s) => s.tipoContratacao === "Novo");
 
     const toggleSelectAllServicosLista = (lista: ServicoItem[]) => {
       const ids = lista.filter((s) => s.id).map((s) => s.id as string);
@@ -1701,7 +1890,7 @@ const DiretoriaAprovacao = () => {
                 </Select>
               </div>
 
-              {servicosFiltrados.length > 0 && (
+              {servicosFiltradasPorStatus.length > 0 && (
                 <div className="flex gap-2">
                   {servicosStatusTab === "pendentes" && (
                     <>
@@ -1771,15 +1960,8 @@ const DiretoriaAprovacao = () => {
                 )}
                 {/* Filtra serviços por gerência e tipo de contratação */}
                 {(() => {
-                  const filtered = selectedGerencia === "todas"
-                    ? servicosFiltradasPorStatus
-                    : servicosFiltradasPorStatus.filter((s: any) => {
-                        const sigla = gerenciaMap[s.gerencia_id];
-                        return sigla === selectedGerencia;
-                      });
-
-                  const existentes = filtered.filter((s: any) => s.tipo_contratacao !== "Novo");
-                  const novos = filtered.filter((s: any) => s.tipo_contratacao === "Novo");
+                  const existentes = servicosFiltradasPorStatus.filter((s: any) => s.tipoContratacao !== "Novo");
+                  const novos = servicosFiltradasPorStatus.filter((s: any) => s.tipoContratacao === "Novo");
 
                   return (
                     <>
@@ -2475,8 +2657,8 @@ const DiretoriaAprovacao = () => {
                         </td>
                         <td className="p-3 text-sm">{item.gerencia}</td>
                         <td className="p-3">
-                          <Badge variant={getStatusBadgeVariant(item.status) as any}>
-                            {getStatusLabel(item.status)}
+                          <Badge variant={getStatusBadgeVariant(item.status || "rascunho") as any}>
+                            {getStatusLabel(item.status || "rascunho")}
                           </Badge>
                         </td>
                         <td className="p-3">

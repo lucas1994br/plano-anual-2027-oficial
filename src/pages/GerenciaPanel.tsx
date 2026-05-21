@@ -79,7 +79,7 @@ const GerenciaPanel = () => {
   const gerenciaUpper = (gerenciaParam || "").toUpperCase();
 
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | null>(null);
+  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_novos" | "servicos_existentes" | null>(null);
   const [confirmSendOpen, setConfirmSendOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [categoria, setCategoria] = useState("");
@@ -110,31 +110,31 @@ const GerenciaPanel = () => {
   const { toast } = useToast();
 
   // Buscar diretorias
-  const { data: diretorias = [] } = useQuery({
+  const { data: diretorias = [] } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
     staleTime: 5 * 60 * 1000,
   });
 
-  const diretoria = diretorias.find((d: Diretoria) => d.sigla === siglaUpper);
+  const diretoria = (diretorias as any[]).find((d: any) => d.sigla === siglaUpper);
   const diretoriaMap = useMemo(() => {
-    const map: Record<string, Diretoria> = {};
-    diretorias.forEach((dir: Diretoria) => {
+    const map: Record<string, any> = {};
+    (diretorias as any[]).forEach((dir: any) => {
       map[dir.id] = dir;
     });
     return map;
   }, [diretorias]);
 
   // Buscar gerências
-  const { data: gerenciasData = [] } = useQuery({
+  const { data: gerenciasData = [] } = useQuery<any[]>({
     queryKey: ["gerencias", diretoria?.id],
-    queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : [],
+    queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : Promise.resolve([]),
     enabled: !!diretoria,
     staleTime: 5 * 60 * 1000,
   });
 
   // Buscar períodos ativos
-  const { data: periodos = [] } = useQuery({
+  const { data: periodos = [] } = useQuery<any[]>({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
     staleTime: 5 * 60 * 1000,
@@ -155,7 +155,7 @@ const GerenciaPanel = () => {
   const periodAtivo = periodos[0];
   const prazo = periodAtivo ? new Date(periodAtivo.fim) : null;
 
-  const gerenciaAtual = gerenciasData.find((g: Gerencia) => g.sigla === gerenciaUpper);
+  const gerenciaAtual = gerenciasData.find((g: Gerencia) => g.sigla === gerenciaUpper) as Gerencia | undefined;
   const gerenciaNome = resolveGerenciaNome(gerenciaUpper, gerenciaAtual?.nome);
 
   // Buscar solicitações para esta gerência — pré-carrega sem aguardar seleção de aba
@@ -191,12 +191,12 @@ const GerenciaPanel = () => {
       ...(dbConfig || {}),
       routingRules: dbConfig?.routingRules || localConfig?.routingRules || {},
       categoryBudgetOwners: localConfig?.categoryBudgetOwners || {},
-    };
+    } as AdminBudgetConfig;
   }, [adminMiniConfigFromDb]);
 
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
-    return solicitacoes.map((s: ServicoItem) => {
+    return solicitacoes.map((s: any) => {
       const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0)
         ? s.categoria
         : "diversos";
@@ -233,7 +233,7 @@ const GerenciaPanel = () => {
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
       const matchesComQuantidade = !showOnlyComQuantidade || item.qtdEstimada > 0;
-      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status);
+      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
       return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
   }, [items, searchTerm, categoria, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
@@ -432,7 +432,7 @@ const GerenciaPanel = () => {
   const handleUpdateGrauPrioridade = async (item: number, grauPrioridade: GrauPrioridade) => {
     try {
       const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico) {
+      if (servico && servico.id) {
         await updateServico(servico.id, { grau_prioridade: grauPrioridade });
         queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       }
@@ -444,7 +444,7 @@ const GerenciaPanel = () => {
   const handleUpdateJustificativa = async (item: number, justificativa: string) => {
     try {
       const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.status === "rascunho") {
+      if (servico && servico.id && servico.status === "rascunho") {
         const justificativaLimpa = justificativa.trim();
         if (!justificativaLimpa) return;
 
@@ -459,7 +459,7 @@ const GerenciaPanel = () => {
   const handleUpdateDotacao = async (item: number, dotacaoOrcamentaria: number) => {
     try {
       const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.status === "rascunho") {
+      if (servico && servico.id && servico.status === "rascunho") {
         await updateServico(servico.id, { dotacao_orcamentaria: dotacaoOrcamentaria });
         queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       }
@@ -471,7 +471,7 @@ const GerenciaPanel = () => {
   const handleUpdateVinculacao = async (item: number, vinculacao: string) => {
     try {
       const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.status === "rascunho") {
+      if (servico && servico.id && servico.status === "rascunho") {
         await updateServico(servico.id, { vinculacao });
         queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       }
@@ -483,7 +483,7 @@ const GerenciaPanel = () => {
   const handleUpdateObservacaoServico = async (item: number, observacao: string) => {
     try {
       const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico) {
+      if (servico && servico.id) {
         await updateServico(servico.id, { observacao });
         queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       }
@@ -581,15 +581,18 @@ const GerenciaPanel = () => {
     if (!gerenciaAtual || !periodAtivo) return;
     
     try {
-      const servicosParaEnviar = servicosData
-        .filter((s: ServicoItem) => selectedServicos.has(s.id) && s.status === "rascunho");
+      const filterFn = selectedOption === "servicos_novos"
+        ? (s: any) => (s.tipoContratacao ?? s.tipo_contratacao) === "Novo" && s.status === "rascunho"
+        : (s: any) => (s.tipoContratacao ?? s.tipo_contratacao) !== "Novo" && s.status === "rascunho";
+
+      const servicosParaEnviar = servicosData.filter(filterFn);
 
       if (servicosParaEnviar.length === 0) {
         setConfirmSendServicosOpen(false);
         return;
       }
 
-      const updates = servicosParaEnviar.map((s: ServicoItem) => 
+      const updates = servicosParaEnviar.map((s: any) => 
         updateServico(s.id, { status: "enviado" })
       );
       
@@ -605,13 +608,150 @@ const GerenciaPanel = () => {
 
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual.id, periodAtivo.id] });
 
-      
       setSelectedServicos(new Set());
       setConfirmSendServicosOpen(false);
+      
+      toast({
+        title: "Serviços enviados",
+        description: `${servicosParaEnviar.length} serviço(s) enviado(s) para a diretoria com sucesso.`
+      });
     } catch (error) {
       console.error("Erro ao enviar serviços para diretoria:", error);
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
     }
+  };
+
+  const handleExportAquisicaoExcel = async () => {
+    // @ts-ignore
+    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
+    const XLSX = (xlsxModule as any).default ?? xlsxModule;
+    const wb = XLSX.utils.book_new();
+    const wsData: any[][] = [];
+
+    wsData.push([`Plano Anual de Contratações 2027 — Aquisições — ${gerenciaUpper}`]);
+    wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
+    wsData.push([]);
+
+    const headers = ["Código", "Descrição", "Categoria", "Unidade", "Qtd. Estimada", "Valor Unitário", "Total Item", "Prioridade", "Gerência", "Diretoria Orçamentária", "Observação", "Status"];
+    wsData.push(headers);
+
+    filteredItems.forEach((item) => {
+      wsData.push([
+        item.codigo,
+        item.descricao,
+        item.categoria,
+        item.unidade,
+        item.qtdEstimada,
+        item.valorUnitario,
+        item.qtdEstimada * item.valorUnitario,
+        item.prioridade,
+        item.gerencia,
+        item.diretoriaOrcamentariaSigla || "",
+        item.observacao || "",
+        item.status || "rascunho"
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    ws["!cols"] = [
+      { wch: 10 }, { wch: 45 }, { wch: 20 }, { wch: 10 }, { wch: 14 },
+      { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 12 }
+    ];
+
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } }
+    ];
+
+    const titleStyle = { font: { bold: true, sz: 14, color: { rgb: "1E3A5F" } }, alignment: { horizontal: "center" as const } };
+    const subtitleStyle = { font: { sz: 10, color: { rgb: "666666" } }, alignment: { horizontal: "center" as const } };
+
+    for (let c = 0; c <= 11; c++) {
+      const cell0 = XLSX.utils.encode_cell({ r: 0, c });
+      const cell1 = XLSX.utils.encode_cell({ r: 1, c });
+      if (ws[cell0]) ws[cell0].s = titleStyle;
+      if (ws[cell1]) ws[cell1].s = subtitleStyle;
+    }
+
+    const headerStyle = {
+      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+      fill: { fgColor: { rgb: "2563EB" } },
+      alignment: { horizontal: "center" as const, vertical: "center" as const },
+      border: { bottom: { style: "thin" as const, color: { rgb: "1D4ED8" } } },
+    };
+    for (let c = 0; c < headers.length; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+      if (ws[cellRef]) ws[cellRef].s = headerStyle;
+    }
+
+    const prioridadeColors: Record<string, string> = { Alta: "FECACA", Média: "FEF3C7", Baixa: "D1FAE5" };
+    const prioridadeFontColors: Record<string, string> = { Alta: "DC2626", Média: "D97706", Baixa: "059669" };
+
+    for (let r = 0; r < filteredItems.length; r++) {
+      const rowIdx = r + 4;
+      const item = filteredItems[r];
+
+      const prioCell = XLSX.utils.encode_cell({ r: rowIdx, c: 7 });
+      if (ws[prioCell]) {
+        ws[prioCell].s = {
+          font: { bold: true, color: { rgb: prioridadeFontColors[item.prioridade] || "000000" } },
+          fill: { fgColor: { rgb: prioridadeColors[item.prioridade] || "FFFFFF" } },
+          alignment: { horizontal: "center" as const },
+        };
+      }
+
+      for (const valueCol of [5, 6]) {
+        const valRef = XLSX.utils.encode_cell({ r: rowIdx, c: valueCol });
+        if (ws[valRef]) {
+          ws[valRef].z = '#,##0.00';
+          ws[valRef].s = { alignment: { horizontal: "right" as const } };
+        }
+      }
+
+      for (const c of [0, 3, 4, 8, 9, 11]) {
+        const ref = XLSX.utils.encode_cell({ r: rowIdx, c });
+        if (ws[ref]) {
+          ws[ref].s = { ...(ws[ref].s || {}), alignment: { horizontal: "center" as const } };
+        }
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, "Aquisições");
+    XLSX.writeFile(wb, `PAC_2027_Aquisicoes_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
+  const handleExportAquisicaoPDF = () => {
+    const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+    doc.setFontSize(14);
+    doc.text(`PAC 2027 — Aquisições — ${gerenciaUpper}`, 14, 18);
+    doc.setFontSize(9);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
+    
+    const formatCurrency = (value?: number) =>
+      value != null
+        ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
+        : "—";
+
+    autoTable(doc, {
+      head: [["Cód.", "Descrição", "Categoria", "Unid.", "Qtd. Est.", "Valor Unit.", "Total Item", "Prioridade", "Status"]],
+      body: filteredItems.map((item) => [
+        item.codigo,
+        item.descricao.length > 60 ? item.descricao.substring(0, 60) + "…" : item.descricao,
+        item.categoria,
+        item.unidade,
+        item.qtdEstimada,
+        formatCurrency(item.valorUnitario),
+        formatCurrency(item.qtdEstimada * item.valorUnitario),
+        item.prioridade,
+        item.status === "rascunho" ? "Rascunho" : item.status === "enviado" ? "Enviado" : item.status === "aprovado" ? "Aprovado" : item.status
+      ]) as any,
+      startY: 30,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 247, 254] },
+    });
+    doc.save(`PAC_2027_Aquisicoes_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.pdf`);
   };
 
   if (!diretoria) {
@@ -726,8 +866,108 @@ const GerenciaPanel = () => {
     );
   }
 
-  // Se escolheu "Serviços", mostrar tabela de serviços com seleção
+  // Tela de seleção secundária: Serviços Existentes ou Novos Serviços
   if (selectedOption === "servicos") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+        <div
+          className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
+          style={{ top: "200px" }}
+        >
+          <img
+            src="/assets/images/caema-logo.png"
+            alt="CAEMA"
+            className="w-full max-w-3xl opacity-[0.08]"
+          />
+        </div>
+        <div className="relative z-10">
+          {/* Top Bar */}
+          <div className="px-6 py-3 bg-card border-b">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
+                <Home className="h-4 w-4" />
+                Página inicial
+              </Button>
+              <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
+              <Badge variant="outline" className="text-xs bg-green-50 text-green-700">Serviços</Badge>
+            </div>
+          </div>
+
+          {/* Header */}
+          <div className="bg-gradient-to-r from-green-600 to-green-800 px-6 py-8">
+            <div className="max-w-7xl mx-auto text-center">
+              <div className="flex items-center justify-center gap-3 mb-4">
+                {getIconPath(siglaUpper) && (
+                  <img src={getIconPath(siglaUpper)!} alt={siglaUpper} className="h-12 w-12 object-contain" />
+                )}
+                <Badge className="bg-white/20 text-white border-none text-xl font-bold">{gerenciaUpper}</Badge>
+              </div>
+              <p className="text-white/90 text-sm mb-2">{gerenciaNome}</p>
+              <p className="text-white/80 text-lg">Selecione a categoria de serviços</p>
+            </div>
+          </div>
+
+          {/* Opções: Serviços Existentes e Novos Serviços */}
+          <div className="px-6 py-12">
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Cartão Serviços Existentes */}
+                <button
+                  onClick={() => setSelectedOption("servicos_existentes")}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                >
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                      <img
+                        src="/assets/images/servico_existente.png"
+                        alt="Serviços Existentes"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Serviços Existentes</h2>
+                    <p className="text-muted-foreground text-sm">
+                      Contratos vigentes, renovações e prorrogações em andamento
+                    </p>
+                  </div>
+                </button>
+
+                {/* Cartão Novos Serviços */}
+                <button
+                  onClick={() => setSelectedOption("servicos_novos")}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                >
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                      <img
+                        src="/assets/images/novo_servico_gerado.png"
+                        alt="Novos Serviços"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Novos Serviços</h2>
+                    <p className="text-muted-foreground text-sm">
+                      Cadastrar e gerenciar novas solicitações de serviços e contratações
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Se escolheu "Serviços Existentes" ou "Novos Serviços", mostrar tabela de serviços com seleção
+  if (selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") {
     type ServicoRow = {
       id?: string;
       item: number;
@@ -745,19 +985,19 @@ const GerenciaPanel = () => {
       observacao?: string;
     };
 
-    const servicos: ServicoItem[] = servicosData.map((s: ServicoRow) => ({
+    const servicos: ServicoItem[] = (servicosData as any[]).map((s: any) => ({
       id: s.id,
       item: s.item,
-      tipoContratacao: s.tipo_contratacao,
-      unidadeDemandante: s.unidade_demandante,
-      objeto: s.objeto,
-      justificativa: s.justificativa,
-      previsaoInicio: s.previsao_inicio,
-      estimativaValor: s.estimativa_valor,
-      dotacaoOrcamentaria: s.dotacao_orcamentaria,
-      grauPrioridade: s.grau_prioridade,
-      vinculacao: s.vinculacao,
-      dependenciaDescricao: s.dependencia_descricao,
+      tipoContratacao: s.tipoContratacao || s.tipo_contratacao || "",
+      unidadeDemandante: s.unidadeDemandante || s.unidade_demandante || "",
+      objeto: s.objeto || "",
+      justificativa: s.justificativa || "",
+      previsaoInicio: s.previsaoInicio || s.previsao_inicio,
+      estimativaValor: s.estimativaValor || s.estimativa_valor,
+      dotacaoOrcamentaria: s.dotacaoOrcamentaria || s.dotacao_orcamentaria,
+      grauPrioridade: s.grauPrioridade || s.grau_prioridade || "Médio",
+      vinculacao: s.vinculacao || "Não",
+      dependenciaDescricao: s.dependenciaDescricao || s.dependencia_descricao,
       gerencia: gerenciaUpper,
       diretoriaSigla: siglaUpper,
       status: s.status,
@@ -767,9 +1007,10 @@ const GerenciaPanel = () => {
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho";
     const servicosExistentes = servicos.filter((s) => s.tipoContratacao !== "Novo");
     const servicosNovos = servicos.filter((s) => s.tipoContratacao === "Novo");
-    const canSendServicos = servicos.some((s) => !isServicoReadOnly(s));
-    const servicosEditaveis = servicos.filter((s) => !isServicoReadOnly(s));
-    const isAllSent = servicos.length > 0 && servicos.every((s) => isServicoReadOnly(s));
+    const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
+    const canSendServicos = displayedServicos.some((s) => !isServicoReadOnly(s));
+    const servicosEditaveis = displayedServicos.filter((s) => !isServicoReadOnly(s));
+    const isAllSent = displayedServicos.length > 0 && displayedServicos.every((s) => isServicoReadOnly(s));
 
     const formatCurrency = (value?: number) =>
       value != null
@@ -787,32 +1028,37 @@ const GerenciaPanel = () => {
     };
 
     const handleExportExcel = async () => {
+      // @ts-ignore
       const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js") as XlsxModule;
       const XLSX = ((xlsxModule.default ?? xlsxModule) as XlsxModule);
       const wb = XLSX.utils.book_new();
       const wsData: unknown[][] = [];
-      wsData.push([`Plano Anual de Contratações 2027 — Serviços — ${gerenciaUpper}`]);
+      const titleLabel = selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços";
+      const filenameSuffix = selectedOption === "servicos_existentes" ? "Servicos_Existentes" : "Novos_Servicos";
+      wsData.push([`Plano Anual de Contratações 2027 — ${titleLabel} — ${gerenciaUpper}`]);
       wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
       wsData.push([]);
       wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Dotação Orçamentária", "Grau Prioridade", "Vinculação", "Status"]);
-      servicos.forEach((s) => {
+      displayedServicos.forEach((s) => {
         wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.dotacaoOrcamentaria || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
-      XLSX.utils.book_append_sheet(wb, ws, "Serviços");
-      XLSX.writeFile(wb, `PAC_2027_Servicos_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, titleLabel);
+      XLSX.writeFile(wb, `PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
     };
 
     const handleExportPDF = () => {
       const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+      const titleLabel = selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços";
+      const filenameSuffix = selectedOption === "servicos_existentes" ? "Servicos_Existentes" : "Novos_Servicos";
       doc.setFontSize(14);
-      doc.text(`PAC 2027 — Serviços — ${gerenciaUpper}`, 14, 18);
+      doc.text(`PAC 2027 — ${titleLabel} — ${gerenciaUpper}`, 14, 18);
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
       autoTable(doc, {
         head: [["Item", "Tipo", "Objeto", "Estimativa", "Dotação", "Prioridade", "Status"]],
-        body: servicos.map((s) => [
+        body: displayedServicos.map((s) => [
           s.item,
           s.tipoContratacao,
           s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
@@ -826,7 +1072,7 @@ const GerenciaPanel = () => {
         headStyles: { fillColor: [22, 163, 74], textColor: 255 },
         alternateRowStyles: { fillColor: [245, 250, 246] },
       });
-      doc.save(`PAC_2027_Servicos_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.pdf`);
+      doc.save(`PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.pdf`);
     };
 
     const ServicosSection = ({ lista, titulo, badge }: { lista: ServicoItem[]; titulo: string; badge?: React.ReactNode }) => (
@@ -1027,14 +1273,16 @@ const GerenciaPanel = () => {
           {/* Top Bar */}
           <div className="px-6 py-3 bg-card border-b flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
+              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption("servicos")}>
                 <ArrowLeft className="h-4 w-4" />Voltar
               </Button>
               <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
                 <Home className="h-4 w-4" />Página inicial
               </Button>
               <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-green-50">Serviços</Badge>
+              <Badge variant="outline" className="text-xs bg-green-50 text-green-700">
+                {selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços"}
+              </Badge>
             </div>
             <div className="flex items-center gap-2">
               {isAllSent && (
@@ -1056,14 +1304,14 @@ const GerenciaPanel = () => {
           </div>
 
           <PlanHeader
-            title="Painel da Gerência - Serviços"
+            title={`Painel da Gerência - ${selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços"}`}
             diretoria={`${diretoria.sigla} / ${gerenciaUpper} - ${gerenciaNome}`}
             ano={2027}
             prazo={prazo}
           />
 
           <BudgetConsumptionCard
-            titulo={`Orçamento da Gerência ${gerenciaUpper} (serviços)`}
+            titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={orcamentoGerenciaServicos}
             gasto={gastoServicosGerencia}
           />
@@ -1095,38 +1343,49 @@ const GerenciaPanel = () => {
 
           {/* Tabelas */}
           <div className="px-6 py-6">
-            {servicosExistentes.length > 0 && (
-              <ServicosSection
-                lista={servicosExistentes}
-                titulo="Serviços Existentes"
-                badge={<Badge variant="secondary" className="text-xs">Contratos vigentes / renovações</Badge>}
-              />
-            )}
-            {servicosNovos.length > 0 && (
-              <ServicosSection
-                lista={servicosNovos}
-                titulo="Novas Contratações"
-                badge={<Badge variant="outline" className="text-xs bg-green-50 text-green-700">Novos serviços adicionados</Badge>}
-              />
-            )}
-            {servicos.length === 0 && (
-              <div className="text-center py-16 text-muted-foreground">
-                <p className="text-lg font-medium mb-2">Nenhum serviço cadastrado</p>
-                <p className="text-sm">Clique em "Novo Serviço" abaixo para adicionar o primeiro.</p>
-              </div>
+            {selectedOption === "servicos_existentes" && (
+              servicosExistentes.length > 0 ? (
+                <ServicosSection
+                  lista={servicosExistentes}
+                  titulo="Serviços Existentes"
+                  badge={<Badge variant="secondary" className="text-xs">Contratos vigentes / renovações</Badge>}
+                />
+              ) : (
+                <div className="text-center py-16 text-muted-foreground bg-card rounded-lg border border-dashed p-8">
+                  <p className="text-lg font-medium mb-1">Nenhum serviço existente cadastrado</p>
+                  <p className="text-sm">Não há contratos vigentes ou renovações registradas para esta gerência.</p>
+                </div>
+              )
             )}
 
-            {/* Botão Novo Serviço — na parte de baixo */}
-            <div className="mt-4 flex justify-center">
-              <Button
-                variant="outline"
-                className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
-                onClick={() => setNovoServicoOpen(true)}
-              >
-                <Plus className="h-4 w-4" />
-                Adicionar Novo Serviço
-              </Button>
-            </div>
+            {selectedOption === "servicos_novos" && (
+              servicosNovos.length > 0 ? (
+                <ServicosSection
+                  lista={servicosNovos}
+                  titulo="Novas Contratações"
+                  badge={<Badge variant="outline" className="text-xs bg-green-50 text-green-700">Novos serviços adicionados</Badge>}
+                />
+              ) : (
+                <div className="text-center py-16 text-muted-foreground bg-card rounded-lg border border-dashed p-8">
+                  <p className="text-lg font-medium mb-1">Nenhum novo serviço cadastrado</p>
+                  <p className="text-sm">Clique em "Adicionar Novo Serviço" abaixo para adicionar o primeiro.</p>
+                </div>
+              )
+            )}
+
+            {/* Botão Novo Serviço — na parte de baixo apenas para novos serviços */}
+            {selectedOption === "servicos_novos" && (
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
+                  onClick={() => setNovoServicoOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Adicionar Novo Serviço
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Dialog Novo Serviço */}
@@ -1378,50 +1637,73 @@ const GerenciaPanel = () => {
         </div>
       )}
 
-      <div className="px-6 pb-2 flex flex-wrap gap-2">
-        <Button
-          variant={showOnlyZerados ? "default" : "outline"}
-          size="sm"
-          className="gap-2"
-          onClick={() => {
-            const next = !showOnlyZerados;
-            setShowOnlyZerados(next);
-            if (next) setShowOnlyComQuantidade(false);
-          }}
-        >
-          {showOnlyZerados ? "Mostrando apenas itens zerados" : "Filtrar itens zerados"}
-        </Button>
-        <Button
-          variant={showOnlyComQuantidade ? "default" : "outline"}
-          size="sm"
-          className="gap-2"
-          onClick={() => {
-            const next = !showOnlyComQuantidade;
-            setShowOnlyComQuantidade(next);
-            if (next) {
-              setShowOnlyZerados(false);
-              setShowOnlySent(false);
-            }
-          }}
-        >
-          {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
-        </Button>
-        <Button
-          variant={showOnlySent ? "default" : "outline"}
-          size="sm"
-          className="gap-2"
-          onClick={() => {
-            const next = !showOnlySent;
-            setShowOnlySent(next);
-            if (next) {
-              setShowOnlyZerados(false);
-              setShowOnlyComQuantidade(false);
-            }
-          }}
-        >
-          <Send className="h-4 w-4" />
-          {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
-        </Button>
+      <div className="px-6 pb-2 flex flex-wrap justify-between items-center gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={showOnlyZerados ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              const next = !showOnlyZerados;
+              setShowOnlyZerados(next);
+              if (next) setShowOnlyComQuantidade(false);
+            }}
+          >
+            {showOnlyZerados ? "Mostrando apenas itens zerados" : "Filtrar itens zerados"}
+          </Button>
+          <Button
+            variant={showOnlyComQuantidade ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              const next = !showOnlyComQuantidade;
+              setShowOnlyComQuantidade(next);
+              if (next) {
+                setShowOnlyZerados(false);
+                setShowOnlySent(false);
+              }
+            }}
+          >
+            {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+          </Button>
+          <Button
+            variant={showOnlySent ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              const next = !showOnlySent;
+              setShowOnlySent(next);
+              if (next) {
+                setShowOnlyZerados(false);
+                setShowOnlyComQuantidade(false);
+              }
+            }}
+          >
+            <Send className="h-4 w-4" />
+            {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
+          </Button>
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportAquisicaoExcel}
+            disabled={filteredItems.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" />Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportAquisicaoPDF}
+            disabled={filteredItems.length === 0}
+          >
+            <FileDown className="h-4 w-4" />PDF
+          </Button>
+        </div>
       </div>
 
       <PlanFilters
