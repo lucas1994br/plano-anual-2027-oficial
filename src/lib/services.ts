@@ -296,22 +296,34 @@ export async function getSolicitacoesByGerencia(
 }
 
 export async function deleteSolicitacao(itemId: string): Promise<boolean> {
+  // Primeiro remove o histórico para evitar erros de restrição de chave estrangeira
+  await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", itemId);
+
   const { error } = await supabase
     .from("solicitacoes")
     .delete()
     .eq("id", itemId);
 
-  if (error) throw error;
+  if (error) {
+    console.error("Erro ao deletar solicitacao:", error);
+    throw error;
+  }
   return true;
 }
 
 export async function deleteSolicitacoesBulk(itemIds: string[]): Promise<boolean> {
+  // Remove histórico em massa
+  await supabase.from("solicitacao_historico").delete().in("solicitacao_id", itemIds);
+
   const { error } = await supabase
     .from("solicitacoes")
     .delete()
     .in("id", itemIds);
 
-  if (error) throw error;
+  if (error) {
+    console.error("Erro ao deletar solicitacoes em massa:", error);
+    throw error;
+  }
   return true;
 }
 
@@ -1035,6 +1047,18 @@ export async function getServicosByGerencia(
 
   if (error) throw error;
   return (data || []).map(mapDbToServicoItem);
+}
+
+export async function getServicosCatalogoByGerencia(
+  gerenciaId: string
+): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("servicos_catalogo")
+    .select("*")
+    .or(`gerencia_id.eq.${gerenciaId},gerencia_id.is.null`);
+
+  if (error) throw error;
+  return data || [];
 }
 
 export async function getServicosByDiretoria(

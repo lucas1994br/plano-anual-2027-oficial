@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table.tsx";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras } from "@/lib/services.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, getServicosCatalogoCompras } from "@/lib/services.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery } from "@tanstack/react-query";
 import jsPDF from "jspdf";
@@ -66,6 +66,7 @@ const ComprasPanel = () => {
     enabled: !!periodAtivo,
   });
 
+
   const diretoriasById = useMemo(() => {
     const entries = diretorias.map((dir: any) => [dir.id, dir.sigla]);
     return new Map<string, string>(entries as any);
@@ -86,7 +87,7 @@ const ComprasPanel = () => {
     status: s.status as SolicitacaoStatus,
   })), [solicitacoesCompras, diretoriasById]);
 
-  const allServicos: ServicoItem[] = useMemo(() => servicosCompras.map((s: any) => ({
+  const mapServico = (s: any): ServicoItem => ({
     id: s.id,
     item: s.item,
     tipoContratacao: s.tipo_contratacao,
@@ -103,7 +104,10 @@ const ComprasPanel = () => {
     diretoriaSigla: diretoriasById.get(s.diretoria_id) || s.diretorias?.sigla || "N/A",
     status: s.status as SolicitacaoStatus,
     observacao: s.observacao,
-  })), [servicosCompras, diretoriasById]);
+  });
+
+  const allServicosNovos: ServicoItem[] = useMemo(() => servicosCompras.filter((s: any) => s.tipo_contratacao === "Novo").map(mapServico), [servicosCompras, diretoriasById]);
+  const allServicosCatalogo: ServicoItem[] = useMemo(() => servicosCompras.filter((s: any) => s.tipo_contratacao !== "Novo").map(mapServico), [servicosCompras, diretoriasById]);
 
   const normalizeFilterValue = (value?: string | null) =>
     (value || "").trim().toUpperCase();
@@ -128,18 +132,18 @@ const ComprasPanel = () => {
     [allApprovedItems]
   );
 
-  const filteredServicos = useMemo(() => allServicos.filter((servico) => {
-    const diretoriaSelecionada = normalizeFilterValue(selectedDiretoria);
-    const matchesDiretoria =
-      diretoriaSelecionada === "TODAS" ||
-      normalizeFilterValue(servico.diretoriaSigla) === diretoriaSelecionada;
+  const filteredServicos = useMemo(() => {
+    const sourceList = selectedOption === "servicos_novos" ? allServicosNovos : allServicosCatalogo;
 
-    const matchesTipo = selectedOption === "servicos_novos"
-      ? (servico.tipoContratacao ?? (servico as any).tipo_contratacao) === "Novo"
-      : (servico.tipoContratacao ?? (servico as any).tipo_contratacao) !== "Novo";
+    return sourceList.filter((servico) => {
+      const diretoriaSelecionada = normalizeFilterValue(selectedDiretoria);
+      const matchesDiretoria =
+        diretoriaSelecionada === "TODAS" ||
+        normalizeFilterValue(servico.diretoriaSigla) === diretoriaSelecionada;
 
-    return matchesDiretoria && matchesTipo;
-  }), [allServicos, selectedDiretoria, selectedOption]);
+      return matchesDiretoria;
+    });
+  }, [allServicosNovos, allServicosCatalogo, selectedOption, selectedDiretoria]);
 
   const isServicoReadOnly = (servico: ServicoItem) => servico.status !== "rascunho";
 
@@ -483,14 +487,14 @@ const ComprasPanel = () => {
                 {/* Cartão Serviços Existentes */}
                 <button
                   onClick={() => setSelectedOption("servicos_existentes")}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
-                  <div className="mb-4 flex justify-center">
-                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-blue-50 group-hover:bg-blue-100 transition-colors border">
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
                       <img
-                        src="/assets/images/servico_existente.png"
+                        src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
-                        className="w-16 h-16 object-contain"
+                        className="w-full h-full object-cover"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}
@@ -506,14 +510,14 @@ const ComprasPanel = () => {
                 {/* Cartão Novos Serviços */}
                 <button
                   onClick={() => setSelectedOption("servicos_novos")}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
-                  <div className="mb-4 flex justify-center">
-                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-green-50 group-hover:bg-green-100 transition-colors border">
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
                       <img
-                        src="/assets/images/novo_servico_gerado.png"
+                        src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
-                        className="w-16 h-16 object-contain"
+                        className="w-full h-full object-cover"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}

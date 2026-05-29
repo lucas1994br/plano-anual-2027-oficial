@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogoByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
@@ -193,6 +193,7 @@ const DiretoriaAprovacao = () => {
     staleTime: 0,
     refetchOnMount: true,
   });
+
 
   // Buscar itens do catalogo (banco)
   const { data: catalogoData = [] } = useQuery({
@@ -519,7 +520,9 @@ const DiretoriaAprovacao = () => {
 
   // Mostrar rascunhos da própria diretoria + serviços de gerências (não rascunho)
   const servicosVisiveis = useMemo(() => {
-    return servicosData.filter((s: ServicoItem) => 
+    const baseData: ServicoItem[] = servicosData;
+
+    return baseData.filter((s: ServicoItem) => 
       s.status !== "rascunho" || s.unidadeDemandante === siglaUpper
     );
   }, [servicosData, siglaUpper]);
@@ -530,9 +533,10 @@ const DiretoriaAprovacao = () => {
       : servicosVisiveis.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
-      return list.filter((s: ServicoItem) => (s.tipoContratacao ?? (s as any).tipo_contratacao) === "Novo");
-    } else if (selectedOption === "servicos_existentes") {
-      return list.filter((s: ServicoItem) => (s.tipoContratacao ?? (s as any).tipo_contratacao) !== "Novo");
+      return list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+    }
+    if (selectedOption === "servicos_existentes") {
+      return list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
     }
     return list;
   }, [servicosVisiveis, selectedGerencia, selectedOption]);
@@ -1544,14 +1548,14 @@ const DiretoriaAprovacao = () => {
                     setSelectedOption("servicos_existentes");
                     setApprovalTab("servicos");
                   }}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
-                  <div className="mb-4 flex justify-center">
-                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-blue-50 group-hover:bg-blue-100 transition-colors border">
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
                       <img
-                        src="/assets/images/servico_existente.png"
+                        src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
-                        className="w-16 h-16 object-contain"
+                        className="w-full h-full object-cover"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}
@@ -1570,14 +1574,14 @@ const DiretoriaAprovacao = () => {
                     setSelectedOption("servicos_novos");
                     setApprovalTab("servicos");
                   }}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
-                  <div className="mb-4 flex justify-center">
-                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-green-50 group-hover:bg-green-100 transition-colors border">
+                  <div className="mb-4 flex justify-center w-full">
+                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
                       <img
-                        src="/assets/images/novo_servico_gerado.png"
+                        src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
-                        className="w-16 h-16 object-contain"
+                        className="w-full h-full object-cover"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}

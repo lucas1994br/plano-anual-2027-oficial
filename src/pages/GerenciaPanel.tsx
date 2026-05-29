@@ -52,11 +52,13 @@ import {
   updateServico,
   createServico,
   deleteServico,
+  getServicosCatalogoByGerencia,
 } from "@/lib/services";
 import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/lib/supabase";
 import { resolveGerenciaNome } from "@/data/gerencias";
 
 // Mapeamento de ícones por sigla
@@ -176,6 +178,13 @@ const GerenciaPanel = () => {
     enabled: !!periodAtivo && !!gerenciaAtual,
     staleTime: 0,
     refetchOnMount: true,
+  });
+
+  // Buscar itens originais do catálogo para saber quais vieram do painel administrativo
+  const { data: servicosCatalogoData = [] } = useQuery({
+    queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id],
+    queryFn: () => gerenciaAtual ? getServicosCatalogoByGerencia(gerenciaAtual.id) : [],
+    enabled: !!gerenciaAtual,
   });
 
   console.log("SERVICOS DATA:", servicosData);
@@ -388,11 +397,19 @@ const GerenciaPanel = () => {
     if (!confirm("Excluir este item permanentemente?")) return;
 
     try {
+      // Atualização otimista: remove do cache imediatamente
+      queryClient.setQueryData(solicitacoesQueryKey, (current: PlanItem[] | undefined) => {
+        if (!Array.isArray(current)) return current;
+        return current.filter(s => s.id !== itemId);
+      });
+      
       await deleteSolicitacao(itemId);
-      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
       toast({ title: "Item excluído", description: "O item foi removido com sucesso." });
-    } catch (error) {
-      toast({ title: "Erro", description: "Não foi possível excluir o item.", variant: "destructive" });
+    } catch (error: any) {
+      console.error("Erro no handleDeleteItem:", error);
+      toast({ title: "Erro", description: `Não foi possível excluir o item. Detalhe: ${error?.message || JSON.stringify(error)}`, variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
     }
   };
 
@@ -429,72 +446,83 @@ const GerenciaPanel = () => {
     }
   };
 
-  const handleUpdateGrauPrioridade = async (item: number, grauPrioridade: GrauPrioridade) => {
+  const ensureServico = async (itemCode: number, updates: any) => {
     try {
-      const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.id) {
-        await updateServico(servico.id, { grau_prioridade: grauPrioridade });
+      const servicoExistente = servicosData.find((s: ServicoItem) => s.item === itemCode);
+      
+      if (servicoExistente?.id) {
+        if (servicoExistente.status !== "rascunho") return;
+        await updateServico(servicoExistente.id, updates);
         queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+        return;
       }
+
+      // Se não existe, cria!
+      const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
+      if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
+
+      await createServico({
+        periodo_id: periodAtivo.id,
+        diretoria_id: diretoria.id,
+        gerencia_id: gerenciaAtual.id,
+        item: catalogoItem.item,
+        tipo_contratacao: catalogoItem.tipo_contratacao || "",
+        unidade_demandante: gerenciaUpper,
+        objeto: catalogoItem.objeto || "",
+        justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
+        previsao_inicio: null,
+        estimativa_valor: catalogoItem.estimativa_valor || 0,
+        dotacao_orcamentaria: updates.dotacao_orcamentaria !== undefined ? updates.dotacao_orcamentaria : 0,
+        grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Médio"),
+        vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
+        dependencia_descricao: null,
+        status: "rascunho",
+      });
+      
+      queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual.id, periodAtivo.id] });
     } catch (error) {
-      console.error("Erro ao atualizar grau de prioridade:", error);
+      console.error("Erro no ensureServico:", error);
     }
+  };
+
+  const handleUpdateGrauPrioridade = async (item: number, grauPrioridade: GrauPrioridade) => {
+    await ensureServico(item, { grau_prioridade: grauPrioridade });
   };
 
   const handleUpdateJustificativa = async (item: number, justificativa: string) => {
-    try {
-      const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.id && servico.status === "rascunho") {
-        const justificativaLimpa = justificativa.trim();
-        if (!justificativaLimpa) return;
-
-        await updateServico(servico.id, { justificativa: justificativaLimpa });
-        queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
-      }
-    } catch (error) {
-      console.error("Erro ao atualizar justificativa:", error);
-    }
+    const justificativaLimpa = justificativa.trim();
+    if (!justificativaLimpa) return;
+    await ensureServico(item, { justificativa: justificativaLimpa });
   };
 
   const handleUpdateDotacao = async (item: number, dotacaoOrcamentaria: number) => {
-    try {
-      const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.id && servico.status === "rascunho") {
-        await updateServico(servico.id, { dotacao_orcamentaria: dotacaoOrcamentaria });
-        queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
-      }
-    } catch (error) {
-      console.error("Erro ao atualizar dotação orçamentária:", error);
-    }
+    await ensureServico(item, { dotacao_orcamentaria: dotacaoOrcamentaria });
   };
 
   const handleUpdateVinculacao = async (item: number, vinculacao: string) => {
-    try {
-      const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.id && servico.status === "rascunho") {
-        await updateServico(servico.id, { vinculacao });
-        queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
-      }
-    } catch (error) {
-      console.error("Erro ao atualizar vinculação:", error);
-    }
+    await ensureServico(item, { vinculacao });
   };
 
   const handleUpdateObservacaoServico = async (item: number, observacao: string) => {
-    try {
-      const servico = servicosData.find((s: ServicoItem) => s.item === item);
-      if (servico && servico.id) {
-        await updateServico(servico.id, { observacao });
-        queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
-      }
-    } catch (error) {
-      console.error("Erro ao atualizar observação:", error);
-    }
+    await ensureServico(item, { observacao });
   };
 
-  const handleDeleteServico = async (servicoId: string) => {
+
+  const handleDeleteServico = async (servicoId: string | undefined, itemCode: number) => {
+    if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
+
     try {
-      await deleteServico(servicoId);
+      if (servicoId) {
+        await deleteServico(servicoId);
+      }
+      
+      // Tentativa de excluir do catálogo também (para removê-lo da lista de Serviços Existentes, caso seja um teste)
+      const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
+      if (catalogoItem?.id) {
+        await supabase.from("servicos_catalogo").delete().eq("id", catalogoItem.id);
+        queryClient.invalidateQueries({ queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id] });
+      }
+
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       toast({
         title: "Serviço excluído",
@@ -581,9 +609,11 @@ const GerenciaPanel = () => {
     if (!gerenciaAtual || !periodAtivo) return;
     
     try {
+      const catalogoItemsSet = new Set((servicosCatalogoData as any[]).map(c => c.item));
+
       const filterFn = selectedOption === "servicos_novos"
-        ? (s: any) => (s.tipoContratacao ?? s.tipo_contratacao) === "Novo" && s.status === "rascunho"
-        : (s: any) => (s.tipoContratacao ?? s.tipo_contratacao) !== "Novo" && s.status === "rascunho";
+        ? (s: any) => !catalogoItemsSet.has(s.item) && s.status === "rascunho"
+        : (s: any) => catalogoItemsSet.has(s.item) && s.status === "rascunho";
 
       const servicosParaEnviar = servicosData.filter(filterFn);
 
@@ -923,7 +953,7 @@ const GerenciaPanel = () => {
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
                       <img
-                        src="/assets/images/servico_existente.png"
+                        src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
                         className="w-full h-full object-cover"
                       />
@@ -945,7 +975,7 @@ const GerenciaPanel = () => {
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
                       <img
-                        src="/assets/images/novo_servico_gerado.png"
+                        src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
                         className="w-full h-full object-cover"
                       />
@@ -1005,8 +1035,37 @@ const GerenciaPanel = () => {
     }));
 
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho";
-    const servicosExistentes = servicos.filter((s) => s.tipoContratacao !== "Novo");
-    const servicosNovos = servicos.filter((s) => s.tipoContratacao === "Novo");
+    const catalogoItemsSet = new Set((servicosCatalogoData as any[]).map(c => c.item));
+    
+    // Serviços Existentes vêm do catálogo (Painel Administrativo)
+    const servicosExistentes: ServicoItem[] = (servicosCatalogoData as any[]).map((catalogoItem) => {
+      const servicoDb = servicos.find(s => s.item === catalogoItem.item);
+      if (servicoDb) {
+        return servicoDb;
+      }
+      // Virtual item if it doesn't exist in the database yet
+      return {
+        id: undefined, // undefined indicates it needs to be created
+        item: catalogoItem.item,
+        tipoContratacao: catalogoItem.tipo_contratacao || "",
+        unidadeDemandante: gerenciaUpper,
+        objeto: catalogoItem.objeto || "",
+        justificativa: "",
+        previsaoInicio: null,
+        estimativaValor: catalogoItem.estimativa_valor || 0,
+        dotacaoOrcamentaria: 0,
+        grauPrioridade: catalogoItem.grau_prioridade || "Médio",
+        vinculacao: catalogoItem.vinculacao || "Não",
+        dependenciaDescricao: null,
+        gerencia: gerenciaUpper,
+        diretoriaSigla: siglaUpper,
+        status: "rascunho",
+        observacao: "",
+      } as ServicoItem;
+    });
+    
+    // Novos Serviços são aqueles criados diretamente pela Gerência (não estão no catálogo)
+    const servicosNovos = servicos.filter((s) => !catalogoItemsSet.has(s.item));
     const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
     const canSendServicos = displayedServicos.some((s) => !isServicoReadOnly(s));
     const servicosEditaveis = displayedServicos.filter((s) => !isServicoReadOnly(s));
@@ -1238,12 +1297,12 @@ const GerenciaPanel = () => {
                         </td>
                         {!isAllSent && (
                           <td className="p-3 text-right">
-                            {!readOnly && servico.id ? (
+                            {!readOnly ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-destructive"
-                                onClick={() => handleDeleteServico(servico.id!)}
+                                onClick={() => handleDeleteServico(servico.id, servico.item)}
                                 title="Excluir serviço"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1715,8 +1774,8 @@ const GerenciaPanel = () => {
         onPrioridadeChange={setPrioridade}
         categorias={categoriasDisponiveis}
       />
-      {/* Resultados da busca — só mostra quando o usuário digitar algo */}
-      {searchTerm.trim() === "" ? (
+      {/* Resultados da busca — só mostra quando o usuário digitar algo, ou se ativar um dos filtros específicos */}
+      {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlySent ? (
         <div className="px-6 py-12 text-center">
           <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
             <span className="text-5xl">🔍</span>
@@ -1780,8 +1839,18 @@ const GerenciaPanel = () => {
                               type="number"
                               min="0"
                               defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
-                              onBlur={(e) => handleUpdateQtdEstimada(item.id!, Number(e.target.value) || 0)}
-                              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              onBlur={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                if (val !== item.qtdEstimada) {
+                                  handleUpdateQtdEstimada(item.id!, val);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
                               className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
                             />
                           )}

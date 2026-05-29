@@ -192,7 +192,6 @@ serve(async (req: Request) => {
           periodo_id: periodoAtivo.id,
           diretoria_id: g.diretoria_id,
           gerencia_id: g.id,
-          servico_catalogo_id: servicoCatalogo.id,
           item: servicoCatalogo.item,
           tipo_contratacao: servicoCatalogo.tipo_contratacao,
           unidade_demandante: g.sigla || "N/A",
@@ -205,7 +204,7 @@ serve(async (req: Request) => {
         }));
 
         const { error: distError } = await supabase
-          .from("servicos_solicitados")
+          .from("servicos")
           .insert(solicitacoes);
         
         if (distError) {
