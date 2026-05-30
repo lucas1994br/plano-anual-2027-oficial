@@ -11,9 +11,9 @@ import { PlanTable } from "@/components/tables/PlanTable.tsx";
 import { Diretoria, Gerencia } from "@/types/plan.ts";
 import { PlanItem } from "@/types/plan.ts";
 import { resolveGerenciaNome } from "@/data/gerencias.ts";
-import { getDiretorias, getGerenciasByDiretoria, getPeriodosAtivos } from "@/lib/services.ts";
-import { useQuery } from "@tanstack/react-query";
-
+import getItensCatalogo, { getDiretorias, getGerenciasByDiretoria, getPeriodosAtivos, getSolicitacoesByDiretoria } from "@/lib/services.ts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import DOMPurify from 'dompurify';
 type TipoPlano = "aquisicao" | "servicos" | null;
 
@@ -55,7 +55,6 @@ const DiretoriaPlano = () => {
     enabled: !!diretoria,
   });
 
-  // Buscar período ativo
   const { data: periodos = [] } = useQuery<any[]>({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
@@ -63,6 +62,21 @@ const DiretoriaPlano = () => {
 
   const periodAtivo = periodos[0];
   const prazo = periodAtivo ? new Date(periodAtivo.fim as string) : null;
+
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (diretoria?.id && periodAtivo?.id) {
+      queryClient.prefetchQuery({
+        queryKey: ["solicitacoes-diretoria", diretoria.id, periodAtivo.id],
+        queryFn: () => getSolicitacoesByDiretoria(diretoria.id, periodAtivo.id),
+      });
+      queryClient.prefetchQuery({
+        queryKey: ["itens-catalogo"],
+        queryFn: getItensCatalogo,
+      });
+    }
+  }, [diretoria, periodAtivo, queryClient]);
 
   // Dados mockados por enquanto
   const items: PlanItem[] = [];

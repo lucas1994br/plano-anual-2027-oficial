@@ -388,7 +388,7 @@ export async function getServicosCompras(periodoId: string): Promise<unknown[]> 
   return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos")
-      .select("*, diretorias(sigla), gerencias(sigla)")
+      .select("*, diretorias!fk_servicos_diretoria(sigla), gerencias!fk_servicos_gerencia(sigla)")
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("item")
@@ -525,48 +525,40 @@ export async function validateAccessCode(
   }
 
   try {
-    const { data, error } = await supabase.functions.invoke(
-      "validate-access-code",
-      {
-        body: { code: normalizedCode, scope },
-      }
-    );
+    // Busca direta no banco de dados (ignorando a Edge Function)
+    const { data, error } = await supabase
+      .from("codigos_acesso")
+      .select("*")
+      .eq("ativo", true)
+      .eq("scope", scope)
+      .ilike("codigo_hash", normalizedCode)
+      .order("created_at", { ascending: false })
+      .limit(1);
 
     if (error) {
       throw error;
     }
 
-    if (data?.success && data?.access) {
+    if (data && data.length > 0) {
+      const match = data[0];
+      
+      // Verifica se expirou
+      if (match.expira_em && new Date(match.expira_em) < new Date()) {
+        throw new Error("Código de acesso expirado");
+      }
+
       return {
-        scope: data.access.scope,
-        diretoria_id: data.access.diretoria_id,
-        gerencia_id: data.access.gerencia_id,
-        expired_at: data.access.expired_at,
+        scope: match.scope,
+        diretoria_id: match.diretoria_id,
+        gerencia_id: match.gerencia_id,
+        expired_at: match.expira_em,
       };
     }
 
-    throw new Error(data?.error || "Invalid access code");
-  } catch (edgeErr: unknown) {
-    const error = edgeErr as { message?: string; name?: string };
-    const fallbackMessage = String(error?.message || "").toLowerCase();
-    const fallbackName = String(error?.name || "").toLowerCase();
-    const isConnectivityIssue =
-      fallbackName.includes("functionsfetcherror") ||
-      fallbackName.includes("functionsfetch") ||
-      fallbackMessage.includes("failed to fetch") ||
-      fallbackMessage.includes("failed to send a request to the edge function") ||
-      fallbackMessage.includes("function not found") ||
-      fallbackMessage.includes("functions invoke") ||
-      fallbackMessage.includes("network");
-
-    if (!isConnectivityIssue) {
-      console.error("Erro ao validar código via Edge Function:", edgeErr);
-      throw edgeErr;
-    }
-
-    throw new Error(
-      "Falha ao validar código com o servidor de autenticação. Verifique se a Edge Function validate-access-code está publicada."
-    );
+    throw new Error("Invalid access code");
+  } catch (err: any) {
+    console.error("Erro ao validar código:", err);
+    throw new Error(err.message || "Invalid access code");
   }
 }
 
@@ -1025,9 +1017,6 @@ function mapServicoItemToDb(item: any): any {
   if (item.status !== undefined) dbRow.status = item.status;
   if (item.observacao !== undefined) dbRow.observacao = item.observacao;
   
-  const justificativaRejeicao = item.justificativa_rejeicao ?? item.justificativaRejeicao;
-  if (justificativaRejeicao !== undefined) dbRow.justificativa_rejeicao = justificativaRejeicao;
-  
   if (item.created_at !== undefined) dbRow.created_at = item.created_at;
   if (item.updated_at !== undefined) dbRow.updated_at = item.updated_at;
   
@@ -1069,7 +1058,7 @@ export async function getServicosByDiretoria(
     supabase
       .from("servicos")
       .select(
-        "*, gerencias(sigla, nome), diretorias(sigla, nome)"
+        "*, gerencias!fk_servicos_gerencia(sigla, nome), diretorias!fk_servicos_diretoria(sigla, nome)"
       )
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)

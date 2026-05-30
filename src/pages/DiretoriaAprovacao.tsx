@@ -1,13 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogoByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
 import { PlanTable } from "@/components/tables/PlanTable";
@@ -23,6 +22,8 @@ import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } 
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDebounce } from "@/hooks/useDebounce";
+
 
 /** Itens aguardando decisão da diretoria (podem ser aprovados ou rejeitados em massa). */
 function isPendenteDiretoriaAprovacao(item: PlanItem) {
@@ -31,7 +32,7 @@ function isPendenteDiretoriaAprovacao(item: PlanItem) {
 
 /** Serviços aguardando decisão da diretoria */
 function isPendenteServicoAprovacao(servico: ServicoItem) {
-  return servico.status === "rascunho" || servico.status === "enviado";
+  return servico.status === "enviado" || servico.status === "em_analise";
 }
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string) => {
@@ -56,6 +57,7 @@ const DiretoriaAprovacao = () => {
   const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | null>(null);
   const [approvalTab, setApprovalTab] = useState<"aquisicao" | "servicos" | null>(null);
   const [ownSearchTerm, setOwnSearchTerm] = useState("");
+  const debouncedOwnSearchTerm = useDebounce(ownSearchTerm, 300);
   const [ownCategoria, setOwnCategoria] = useState("");
   const [ownPrioridade, setOwnPrioridade] = useState("todas");
   const [ownGerenciaId, setOwnGerenciaId] = useState<string>("diretoria");
@@ -64,6 +66,7 @@ const DiretoriaAprovacao = () => {
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [selectedOwnItems, setSelectedOwnItems] = useState<Set<string | number>>(new Set());
   /** Lista exibida em "Recebidos das Gerências": separa pendentes, aprovados, rejeitados e fluxo de compras. */
   const [recebidosStatusTab, setRecebidosStatusTab] = useState<
     "pendentes" | "aprovados" | "rejeitados" | "em_compra"
@@ -77,6 +80,8 @@ const DiretoriaAprovacao = () => {
   const [expandedJustificativas, setExpandedJustificativas] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const debouncedCatalogSearch = useDebounce(catalogSearch, 300);
+
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<PlanItem | null>(null);
   const [selectedGerenciaId, setSelectedGerenciaId] = useState<string>("");
   const [addQtd, setAddQtd] = useState<number>(1);
@@ -88,13 +93,13 @@ const DiretoriaAprovacao = () => {
   const ITEMS_PER_PAGE = 50;
   const [actionDialog, setActionDialog] = useState<{
     open: boolean;
-    action: "aprovar" | "rejeitar" | null;
+    action: "aprovar" | "rejeitar" | "devolver" | "analisar" | null;
     isBulk: boolean;
   }>({ open: false, action: null, isBulk: false });
   const [justificativa, setJustificativa] = useState("");
   const [actionServicosDialog, setActionServicosDialog] = useState<{
     open: boolean;
-    action: "aprovar" | "rejeitar" | "enviar_compras" | null;
+    action: "aprovar" | "rejeitar" | "enviar_compras" | "devolver" | "analisar" | null;
   }>({ open: false, action: null });
   const [confirmComprasOpen, setConfirmComprasOpen] = useState(false);
 
@@ -117,6 +122,16 @@ const DiretoriaAprovacao = () => {
     vinculacao: "Não" as "Sim" | "Não",
     dependenciaDescricao: "",
   });
+
+  const isAuthenticated = () => {
+    return localStorage.getItem("@pga:user") !== null;
+  };
+
+  useEffect(() => {
+    if (isAuthenticated()) {
+      setAuthenticated(true);
+    }
+  }, []);
 
   // Buscar diretorias
   const { data: diretorias = [], isLoading: isDiretoriasLoading, isError: isDiretoriasError } = useQuery<any[]>({
@@ -144,6 +159,15 @@ const DiretoriaAprovacao = () => {
     });
     return map;
   }, [gerenciasData]);
+
+  useEffect(() => {
+    if (ownGerenciaId === "diretoria" && gerenciasData.length > 0) {
+      const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+      if (dgGerencia) {
+        setOwnGerenciaId(dgGerencia.id);
+      }
+    }
+  }, [gerenciasData, ownGerenciaId, siglaUpper]);
 
   // Criar mapa de sigla -> nome de gerência
   const siglaToNome = useMemo(() => {
@@ -180,18 +204,21 @@ const DiretoriaAprovacao = () => {
   // independentemente de regras de roteamento orçamentário
   // Pré-carrega solicitações assim que diretoria + período estão disponíveis
   // (não aguarda selectedOption para evitar atraso após autenticação)
-  const { data: solicitacoes = [] } = useQuery({
+  const { data: solicitacoes = [], isLoading: isSolicitacoesLoading } = useQuery({
     queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id],
     queryFn: () => (diretoria && periodAtivo) ? getSolicitacoesByDiretoria(diretoria.id, periodAtivo.id) : [],
     enabled: !!diretoria && !!periodAtivo,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
-  const { data: servicosData = [], isFetching: isServicosLoading } = useQuery({
+  const { data: servicosData = [], isLoading: isServicosLoading } = useQuery({
     queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id],
     queryFn: () => (diretoria && periodAtivo) ? getServicosByDiretoria(diretoria.id, periodAtivo.id) : [],
     enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") && !!diretoria && !!periodAtivo,
     staleTime: 0,
     refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
 
@@ -334,7 +361,7 @@ const DiretoriaAprovacao = () => {
   const existingCodigos = useMemo(() => new Set([...items, ...itensProprios].map((item) => item.codigo)), [items, itensProprios]);
 
   const filteredCatalogItems = useMemo(() => {
-    const term = catalogSearch.trim().toLowerCase();
+    const term = debouncedCatalogSearch.trim().toLowerCase();
     return catalogItems.filter((item) => {
       if (existingCodigos.has(item.codigo)) return false;
       if (!term) return true;
@@ -342,7 +369,7 @@ const DiretoriaAprovacao = () => {
       const matchesCodigo = item.codigo.toString().includes(term);
       return matchesDescricao || matchesCodigo;
     });
-  }, [catalogItems, catalogSearch, existingCodigos]);
+  }, [catalogItems, debouncedCatalogSearch, existingCodigos]);
 
   useEffect(() => {
     if (addDialogOpen && !selectedGerenciaId && gerenciasData.length > 0) {
@@ -402,7 +429,7 @@ const DiretoriaAprovacao = () => {
   useEffect(() => {
     setCurrentPage(1);
     setSelectedItems(new Set());
-  }, [recebidosStatusTab, selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
+  }, [selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
 
   const categoriasItensProprios = useMemo(() => {
     const unique = Array.from(new Set(catalogItems.map((item) => item.categoria))).filter(Boolean);
@@ -414,7 +441,13 @@ const DiretoriaAprovacao = () => {
   }, [itensProprios]);
 
   const filteredOwnItems = useMemo(() => {
-    const term = ownSearchTerm.trim().toLowerCase();
+    const term = debouncedOwnSearchTerm.trim().toLowerCase();
+    
+    // Otimização extrema de performance: se a UI vai esconder a tabela, nem processe os 4000 itens
+    if (term === "" && !ownShowOnlyComQuantidade) {
+      return [];
+    }
+
     const gerenciaSelecionada = ownGerenciaId === "diretoria"
       ? `DIRETORIA ${siglaUpper}`
       : (gerenciaMap[ownGerenciaId] || "N/A");
@@ -433,6 +466,12 @@ const DiretoriaAprovacao = () => {
       if (!matchesCategoria) continue;
 
       const existente = itensPropriosMap.get(item.codigo);
+
+      // Otimização: Se só quer itens com quantidade e não existe em itensProprios, pula a criação do objeto
+      if (ownShowOnlyComQuantidade && !existente) {
+        continue;
+      }
+
       const planItem = existente || {
         ...item,
         gerencia: gerenciaSelecionada,
@@ -449,11 +488,9 @@ const DiretoriaAprovacao = () => {
     }
 
     return results;
-  }, [catalogItems, itensPropriosMap, ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade]);
+  }, [catalogItems, itensPropriosMap, ownGerenciaId, debouncedOwnSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade]);
 
-  useEffect(() => {
-    setOwnCurrentPage(1);
-  }, [ownGerenciaId, ownSearchTerm, ownCategoria, ownPrioridade, ownShowOnlyComQuantidade]);
+
 
   const ownPaginationData = useMemo(() => {
     const totalPages = Math.ceil(filteredOwnItems.length / ITEMS_PER_PAGE);
@@ -518,19 +555,25 @@ const DiretoriaAprovacao = () => {
     [servicosData],
   );
 
-  // Mostrar rascunhos da própria diretoria + serviços de gerências (não rascunho)
-  const servicosVisiveis = useMemo(() => {
-    const baseData: ServicoItem[] = servicosData;
-
-    return baseData.filter((s: ServicoItem) => 
-      s.status !== "rascunho" || s.unidadeDemandante === siglaUpper
+  // Serviços da própria diretoria (apenas rascunhos)
+  const servicosProprios: ServicoItem[] = useMemo(() => {
+    if (!diretoria) return [];
+    return servicosData.filter((s: ServicoItem) => 
+      s.status === "rascunho" && s.unidadeDemandante === siglaUpper
     );
-  }, [servicosData, siglaUpper]);
+  }, [servicosData, diretoria, siglaUpper]);
+
+  // Mostrar serviços de gerências (não rascunho)
+  const servicosRecebidosBase = useMemo(() => {
+    return servicosData.filter((s: ServicoItem) => 
+      s.status !== "rascunho"
+    );
+  }, [servicosData]);
 
   const filteredServicos = useMemo(() => {
     const list = selectedGerencia === "todas"
-      ? servicosVisiveis
-      : servicosVisiveis.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
+      ? servicosRecebidosBase
+      : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
       return list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
@@ -539,7 +582,9 @@ const DiretoriaAprovacao = () => {
       return list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
     }
     return list;
-  }, [servicosVisiveis, selectedGerencia, selectedOption]);
+  }, [servicosRecebidosBase, selectedGerencia, selectedOption]);
+
+
 
   /** Contadores de serviços por status */
   const servicosTabCounts = useMemo(() => {
@@ -570,6 +615,14 @@ const DiretoriaAprovacao = () => {
         return filteredServicos;
     }
   }, [filteredServicos, servicosStatusTab]);
+
+  const totalPagesServicos = Math.ceil(servicosFiltradasPorStatus.length / ITEMS_PER_PAGE);
+
+  const servicosPaginados = useMemo(() => {
+    const startIdx = (servicosCurrentPage - 1) * ITEMS_PER_PAGE;
+    const endIdx = startIdx + ITEMS_PER_PAGE;
+    return servicosFiltradasPorStatus.slice(startIdx, endIdx);
+  }, [servicosFiltradasPorStatus, servicosCurrentPage]);
 
   // Listas únicas de categorias
   const categorias = useMemo(() => [...new Set(items.map(i => i.categoria))].sort(), [items]);
@@ -1012,7 +1065,7 @@ const DiretoriaAprovacao = () => {
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast({
         title: "Enviado para Compras",
-        description: `${selectedApprovedItems.length} item(ns) enviado(s) para o setor de compras.`,
+        description: `${selectedApprovedItems.length} item(ns) enviado(s) para o setor de Compras.`,
       });
     } catch (error) {
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
@@ -1070,6 +1123,8 @@ const DiretoriaAprovacao = () => {
     const actionMap = {
       aprovar: "aprovado" as SolicitacaoStatus,
       rejeitar: "rejeitado" as SolicitacaoStatus,
+      devolver: "rascunho" as SolicitacaoStatus,
+      analisar: "em_analise" as SolicitacaoStatus,
     };
 
     const newStatus = actionMap[actionDialog.action];
@@ -1100,9 +1155,16 @@ const DiretoriaAprovacao = () => {
           .map((item) => updateSolicitacaoStatus(item.id!, newStatus, justificativa || undefined))
       );
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      
+      let actionText = "processado(s)";
+      if (actionDialog.action === "aprovar") actionText = "aprovado(s)";
+      else if (actionDialog.action === "rejeitar") actionText = "rejeitado(s)";
+      else if (actionDialog.action === "devolver") actionText = "devolvido(s) ao rascunho";
+      else if (actionDialog.action === "analisar") actionText = "retornado(s) para análise";
+
       toast({
         title: "Ação executada",
-        description: `${itemsToUpdate.length} item(ns) ${actionDialog.action === "aprovar" ? "aprovado(s)" : "rejeitado(s)"} com sucesso.`,
+        description: `${itemsToUpdate.length} item(ns) ${actionText} com sucesso.`,
       });
     } catch (error) {
       console.error("Erro ao executar ação:", error);
@@ -1284,6 +1346,8 @@ const DiretoriaAprovacao = () => {
       aprovar: "aprovado" as SolicitacaoStatus,
       rejeitar: "rejeitado" as SolicitacaoStatus,
       enviar_compras: "em_compra" as SolicitacaoStatus,
+      devolver: "rascunho" as SolicitacaoStatus,
+      analisar: "enviado" as SolicitacaoStatus,
     };
 
     const newStatus = actionMap[actionServicosDialog.action];
@@ -1309,7 +1373,14 @@ const DiretoriaAprovacao = () => {
       await Promise.all(
         servicosToUpdate
           .filter((s: any) => s.id)
-          .map((s: any) => updateServico(s.id, { status: newStatus, justificativa_rejeicao: actionServicosDialog.action === "rejeitar" ? justificativa : undefined }))
+          .map((s: any) => {
+            const updates: any = { status: newStatus };
+            if (justificativa && (actionServicosDialog.action === "rejeitar" || actionServicosDialog.action === "devolver")) {
+              const prefix = actionServicosDialog.action === "rejeitar" ? "Motivo Rejeição: " : "Motivo Devolução: ";
+              updates.observacao = s.observacao ? `${s.observacao}\n${prefix}${justificativa}` : `${prefix}${justificativa}`;
+            }
+            return updateServico(s.id, updates);
+          })
       );
       queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast({
@@ -1319,6 +1390,8 @@ const DiretoriaAprovacao = () => {
             ? "aprovado(s)"
             : actionServicosDialog.action === "rejeitar"
             ? "rejeitado(s)"
+            : actionServicosDialog.action === "devolver"
+            ? "devolvido(s) ao rascunho"
             : "enviado(s) para Compras"
         } com sucesso.`,
       });
@@ -1817,20 +1890,78 @@ const DiretoriaAprovacao = () => {
             </div>
           </div>
 
-          <div className="max-w-7xl mx-auto px-6 py-6">
+                    <div className="max-w-7xl mx-auto px-6 py-6">
             <BudgetConsumptionCard
               titulo={`Orçamento da Diretoria ${siglaUpper} (serviços)`}
               orcamento={orcamentoDiretoriaServicos}
               gasto={gastoServicosDiretoria}
             />
 
-            {/* Tabs de Status para Serviços */}
-            <div className="px-0 pb-4">
+            {/* Seus Serviços - adicionados diretamente pela diretoria */}
+            <div className="px-6 py-4 mt-6 bg-card rounded-lg border">
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-foreground">Seus Serviços</h3>
+                <p className="text-xs text-muted-foreground">Serviços adicionados pela diretoria (Rascunhos)</p>
+              </div>
+
+              {servicosProprios.length === 0 ? (
+                <div className="text-center py-8 bg-background rounded-lg border border-dashed">
+                  <p className="text-sm text-muted-foreground">Nenhum serviço em rascunho adicionado pela diretoria.</p>
+                </div>
+              ) : (
+                renderServicosTable("Rascunhos", servicosProprios)
+              )}
+
+              {/* Botão Adicionar Novo Serviço da Diretoria */}
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
+                  onClick={() => setNovoServicoOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Adicionar Novo Serviço da Diretoria
+                </Button>
+              </div>
+            </div>
+
+            {/* Recebidos das Gerências */}
+            <div className="px-6 pt-8 pb-1">
+              <h3 className="text-sm font-semibold text-foreground">Recebidos das Gerências</h3>
+              <p className="text-xs text-muted-foreground">Serviços enviados pelas gerências para análise e aprovação</p>
+            </div>
+
+            {/* Filtros para Recebidos */}
+            <div className="px-6 py-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Gerência:</span>
+                  <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
+                    <SelectTrigger className="w-[200px] bg-card">
+                      <SelectValue placeholder="Todas as gerências" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todas">Todas as gerências</SelectItem>
+                      {gerenciasData.map((g: any) => (
+                        <SelectItem key={g.id} value={g.sigla}>
+                          {g.sigla}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Tabs de Status para Serviços Recebidos */}
+            <div className="px-6 pb-2">
               <Tabs
                 value={servicosStatusTab}
-                onValueChange={(v) =>
-                  setServicosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra")
-                }
+                onValueChange={(v) => {
+                  setServicosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra");
+                  setSelectedServicos(new Set());
+                  setServicosCurrentPage(1);
+                }}
               >
                 <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 p-1">
                   <TabsTrigger value="pendentes" className="gap-2">
@@ -1865,138 +1996,213 @@ const DiretoriaAprovacao = () => {
               </Tabs>
               <p className="mt-2 text-xs text-muted-foreground">
                 {servicosStatusTab === "pendentes" &&
-                  "Serviços em rascunho ou enviados: aprove/rejeite em massa usando os checkboxes."}
+                  "Serviços com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar."}
                 {servicosStatusTab === "aprovados" &&
                   "Serviços aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
                 {servicosStatusTab === "rejeitados" &&
-                  "Serviços rejeitados: você pode reaprová-los ou excluir permanentemente da lista."}
+                  "Serviços rejeitados: você pode selecionar itens para excluir permanentemente da lista."}
                 {servicosStatusTab === "em_compra" &&
                   "Serviços já encaminhados às compras ou concluídos (somente consulta)."}
               </p>
             </div>
 
-            {/* Filtro de gerência */}
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Gerência:</span>
-                <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
-                  <SelectTrigger className="w-[260px]">
-                    <SelectValue placeholder="Selecione a gerência" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todas">Todas as gerências</SelectItem>
-                    {gerenciasData.map((g: any) => (
-                      <SelectItem key={g.id} value={g.sigla}>
-                        {g.sigla}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {servicosFiltradasPorStatus.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-muted-foreground bg-white rounded-lg border mt-4 mx-6">
+                {isServicosLoading ? "Carregando serviços..." : "Nenhum serviço nesta lista para os filtros atuais. Escolha outra aba acima."}
               </div>
+            ) : (
+              <>
+                {/* Botões de Ação de Serviços Recebidos */}
+                <div className="px-6 py-4 border-b bg-white mx-6 rounded-t-lg border-t border-l border-r mt-4">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Checkbox 
+                        checked={selectedServicos.size === servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length && servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length > 0}
+                        onCheckedChange={() => {
+                          const selectableIds = servicosFiltradasPorStatus
+                            .filter((s: any) => s.id && !isServicoReadOnly(s))
+                            .map((s: any) => s.id as string);
+                          if (selectedServicos.size === selectableIds.length && selectableIds.length > 0) {
+                            setSelectedServicos(new Set());
+                          } else {
+                            setSelectedServicos(new Set(selectableIds));
+                          }
+                        }}
+                        disabled={servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length === 0}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {selectedServicos.size > 0 ? `${selectedServicos.size} selecionado(s)` : "Selecionar todos"}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 flex-wrap w-full md:w-auto">
+                      {selectedServicos.size > 0 && servicosStatusTab === "pendentes" && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                          onClick={() => setActionServicosDialog({ open: true, action: "aprovar" })}
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                          Aprovar Selecionados ({selectedServicos.size})
+                        </Button>
+                      )}
 
-              {servicosFiltradasPorStatus.length > 0 && (
-                <div className="flex gap-2">
-                  {servicosStatusTab === "pendentes" && (
-                    <>
                       <Button
+                        size="sm"
+                        variant="secondary"
                         className="gap-2"
-                        disabled={selectedServicos.size === 0}
-                        onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "aprovar" })}
+                        onClick={() => setActionServicosDialog({ open: true, action: "enviar_compras" })}
+                        disabled={selectedServicos.size === 0 || servicosStatusTab !== "aprovados"}
                       >
-                        <Check className="h-4 w-4" />
-                        Aprovar Seleção ({selectedServicos.size})
+                        <Send className="h-4 w-4" />
+                        Enviar para Compras ({selectedServicos.size})
                       </Button>
-                      <Button
+
+                      {servicosStatusTab === "pendentes" && selectedServicos.size === 0 && (
+                        <Button 
+                          size="sm" 
+                          variant="default" 
+                          className="gap-2"
+                          onClick={() => {
+                            // Seleciona todos os pendentes e abre dialog
+                            const pendentes = servicosFiltradasPorStatus.filter(isPendenteServicoAprovacao);
+                            setSelectedServicos(new Set(pendentes.map(s => s.id).filter(Boolean) as string[]));
+                            setActionServicosDialog({ open: true, action: "aprovar" });
+                          }}
+                          disabled={!servicosFiltradasPorStatus.some(isPendenteServicoAprovacao)}
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                          Aprovar todos
+                        </Button>
+                      )}
+
+                      <Button 
+                        size="sm" 
+                        variant="destructive" 
+                        className="gap-2"
+                        onClick={() => setActionServicosDialog({ open: true, action: "rejeitar" })}
+                        disabled={selectedServicos.size === 0 || servicosStatusTab === "rejeitados"}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Rejeitar ({selectedServicos.size})
+                      </Button>
+
+                      {(servicosStatusTab === "pendentes" || servicosStatusTab === "rejeitados") && (
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                          onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
+                          disabled={selectedServicos.size === 0}
+                        >
+                          <Undo2 className="h-4 w-4" />
+                          Devolver para Rascunho ({selectedServicos.size})
+                        </Button>
+                      )}
+
+                      {servicosStatusTab === "rejeitados" && (
+                        <>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                            onClick={() => setActionServicosDialog({ open: true, action: "analisar" })}
+                            disabled={selectedServicos.size === 0}
+                          >
+                            <Undo2 className="h-4 w-4" />
+                            Voltar para Pendentes ({selectedServicos.size})
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="gap-2"
+                            onClick={handleBulkDeleteRejectedServicos}
+                            disabled={selectedServicos.size === 0}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Excluir Selecionados ({selectedServicos.size})
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 md:ml-auto">
+                      <Button 
+                        size="sm" 
                         variant="outline"
                         className="gap-2"
-                        disabled={selectedServicos.size === 0}
-                        onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "rejeitar" })}
+                        onClick={exportServicosToPDF}
+                        disabled={servicosFiltradasPorStatus.length === 0}
                       >
-                        <X className="h-4 w-4" />
-                        Rejeitar Seleção ({selectedServicos.size})
+                        <FileText className="h-4 w-4" />
+                        Exportar PDF
                       </Button>
-                    </>
-                  )}
-
-                  {servicosStatusTab === "aprovados" && (
-                    <Button
-                      variant="outline"
-                      className="gap-2"
-                      disabled={selectedServicos.size === 0}
-                      onClick={() => setActionServicosDialog({ ...actionServicosDialog, open: true, action: "enviar_compras" })}
-                    >
-                      <Send className="h-4 w-4" />
-                      Enviar para Compras ({selectedServicos.size})
-                    </Button>
-                  )}
-
-                  {servicosStatusTab === "rejeitados" && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="gap-2"
-                      onClick={handleBulkDeleteRejectedServicos}
-                      disabled={selectedServicos.size === 0}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Excluir Selecionados ({selectedServicos.size})
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Serviços Table */}
-            {isServicosLoading && servicosFiltradasPorStatus.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg border">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-gray-500">Carregando serviços...</p>
-                </div>
-              </div>
-            ) : servicosFiltradasPorStatus.length > 0 ? (
-              <>
-                {isServicosLoading && (
-                  <div className="flex items-center gap-2 text-xs text-blue-600 mb-2">
-                    <div className="h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    Atualizando...
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="gap-2"
+                        onClick={exportServicosToExcel}
+                        disabled={servicosFiltradasPorStatus.length === 0}
+                      >
+                        <Download className="h-4 w-4" />
+                        Exportar Excel
+                      </Button>
+                    </div>
                   </div>
-                )}
-                {/* Filtra serviços por gerência e tipo de contratação */}
-                {(() => {
-                  const existentes = servicosFiltradasPorStatus.filter((s: any) => s.tipoContratacao !== "Novo");
-                  const novos = servicosFiltradasPorStatus.filter((s: any) => s.tipoContratacao === "Novo");
+                </div>
 
-                  return (
-                    <>
-                      {existentes.length > 0 && renderServicosTable("Serviços Existentes", existentes)}
-                      {novos.length > 0 && renderServicosTable("Serviços Novos", novos)}
-                    </>
-                  );
-                })()}
+                {/* Tabela de Serviços Recebidos */}
+                <div className="px-6 pb-6">
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    {servicosFiltradasPorStatus.length} serviço(s) nesta aba
+                    {totalPagesServicos > 1 ? ` — página ${servicosCurrentPage} de ${totalPagesServicos}` : ""}
+                  </p>
+                  
+                  {(() => {
+                    const titulo = selectedOption === "servicos_novos" ? "Serviços Novos" : "Serviços Existentes";
+                    return renderServicosTable(titulo, servicosPaginados);
+                  })()}
+
+                  {/* Paginação Serviços */}
+                  {totalPagesServicos > 1 && (
+                    <div className="mt-4 flex justify-center">
+                      <Pagination>
+                        <PaginationContent>
+                          <PaginationItem>
+                            <PaginationPrevious 
+                              onClick={() => setServicosCurrentPage(Math.max(1, servicosCurrentPage - 1))}
+                              className={servicosCurrentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                          </PaginationItem>
+
+                          {Array.from({ length: totalPagesServicos }, (_, i) => i + 1).map((page) => (
+                            <PaginationItem key={page}>
+                              <PaginationLink 
+                                onClick={() => setServicosCurrentPage(page)}
+                                isActive={page === servicosCurrentPage}
+                                className="cursor-pointer"
+                              >
+                                {page}
+                              </PaginationLink>
+                            </PaginationItem>
+                          ))}
+
+                          <PaginationItem>
+                            <PaginationNext 
+                              onClick={() => setServicosCurrentPage(Math.min(totalPagesServicos, servicosCurrentPage + 1))}
+                              className={servicosCurrentPage === totalPagesServicos ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                          </PaginationItem>
+                        </PaginationContent>
+                      </Pagination>
+                    </div>
+                  )}
+                </div>
               </>
-            ) : (
-              <div className="text-center py-12 bg-white rounded-lg border">
-                <p className="text-gray-500">
-                  {isServicosLoading ? "Carregando..." : `Nenhum serviço ${servicosStatusTab === "pendentes" ? "pendente" : servicosStatusTab === "aprovados" ? "aprovado" : servicosStatusTab === "rejeitados" ? "rejeitado" : "em compras"} para os filtros atuais`}
-                </p>
-              </div>
             )}
-
-            {/* Botão Adicionar Novo Serviço da Diretoria */}
-            <div className="mt-4 flex justify-center">
-              <Button
-                variant="outline"
-                className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
-                onClick={() => setNovoServicoOpen(true)}
-              >
-                <Plus className="h-4 w-4" />
-                Adicionar Novo Serviço da Diretoria
-              </Button>
-            </div>
           </div>
 
-            {/* Dialog Novo Serviço da Diretoria */}
+          {/* Dialog Novo Serviço da Diretoria{/* Dialog Novo Serviço da Diretoria */}
             <Dialog open={novoServicoOpen} onOpenChange={setNovoServicoOpen}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
@@ -2156,18 +2362,22 @@ const DiretoriaAprovacao = () => {
                   <DialogTitle>
                     {actionServicosDialog.action === "aprovar" && "Aprovar Serviços"}
                     {actionServicosDialog.action === "rejeitar" && "Rejeitar Serviços"}
+                    {actionServicosDialog.action === "devolver" && "Devolver para Rascunho"}
                     {actionServicosDialog.action === "enviar_compras" && "Enviar para Compras"}
+                    {actionServicosDialog.action === "analisar" && "Voltar Serviços para Análise"}
                   </DialogTitle>
                   <DialogDescription>
                     {actionServicosDialog.action === "aprovar" && `Aprovar ${selectedServicos.size} serviço(s) selecionado(s)?`}
-                    {actionServicosDialog.action === "rejeitar" && `Rejeitar ${selectedServicos.size} serviço(s) selecionado(s)?`}
+                    {actionServicosDialog.action === "rejeitar" && `Rejeitar ${selectedServicos.size} serviço(s) selecionado(s)? Por favor, forneça uma justificativa:`}
+                    {actionServicosDialog.action === "devolver" && `Devolver ${selectedServicos.size} serviço(s) selecionado(s) para Rascunho? Por favor, forneça uma justificativa:`}
                     {actionServicosDialog.action === "enviar_compras" && `Enviar ${selectedServicos.size} serviço(s) para o setor de Compras?`}
+                    {actionServicosDialog.action === "analisar" && `Tem certeza que deseja desfazer a rejeição e retornar os ${selectedServicos.size} serviço(s) selecionado(s) para a aba de Pendentes?`}
                   </DialogDescription>
                 </DialogHeader>
-                {actionServicosDialog.action === "rejeitar" && (
+                {(actionServicosDialog.action === "rejeitar" || actionServicosDialog.action === "devolver") && (
                   <div className="py-4">
                     <Textarea
-                      placeholder="Motivo da rejeição..."
+                      placeholder="Motivo da ação..."
                       value={justificativa}
                       onChange={(e) => setJustificativa(e.target.value)}
                       rows={4}
@@ -2183,7 +2393,7 @@ const DiretoriaAprovacao = () => {
                   </Button>
                   <Button
                     onClick={handleActionServicos}
-                    disabled={actionServicosDialog.action === "rejeitar" && !justificativa.trim()}
+                    disabled={(actionServicosDialog.action === "rejeitar" || actionServicosDialog.action === "devolver") && !justificativa.trim()}
                   >
                     Confirmar
                   </Button>
@@ -2278,12 +2488,14 @@ const DiretoriaAprovacao = () => {
           <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center px-6">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Gerência responsável:</span>
-              <Select value={ownGerenciaId} onValueChange={setOwnGerenciaId}>
+              <Select value={ownGerenciaId} onValueChange={(v) => { setOwnGerenciaId(v); setOwnCurrentPage(1); }}>
                 <SelectTrigger className="w-[240px] bg-card">
                   <SelectValue placeholder="Selecione a gerência" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="diretoria">Diretoria ({siglaUpper})</SelectItem>
+                  {!gerenciasData.some((g: any) => g.sigla === siglaUpper) && (
+                    <SelectItem value="diretoria">Diretoria ({siglaUpper})</SelectItem>
+                  )}
                   {gerenciasData.map((g: any) => (
                     <SelectItem key={g.id} value={g.id}>
                       {g.sigla} - {g.nome}
@@ -2296,7 +2508,7 @@ const DiretoriaAprovacao = () => {
               variant={ownShowOnlyComQuantidade ? "default" : "outline"}
               size="sm"
               className="gap-2"
-              onClick={() => setOwnShowOnlyComQuantidade(!ownShowOnlyComQuantidade)}
+              onClick={() => { setOwnShowOnlyComQuantidade(!ownShowOnlyComQuantidade); setOwnCurrentPage(1); }}
             >
               {ownShowOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
             </Button>
@@ -2305,11 +2517,11 @@ const DiretoriaAprovacao = () => {
 
         <PlanFilters
           searchTerm={ownSearchTerm}
-          onSearchChange={setOwnSearchTerm}
+          onSearchChange={(v) => { setOwnSearchTerm(v); setOwnCurrentPage(1); }}
           categoria={ownCategoria}
-          onCategoriaChange={setOwnCategoria}
+          onCategoriaChange={(v) => { setOwnCategoria(v); setOwnCurrentPage(1); }}
           prioridade={ownPrioridade}
-          onPrioridadeChange={setOwnPrioridade}
+          onPrioridadeChange={(v) => { setOwnPrioridade(v); setOwnCurrentPage(1); }}
           categorias={categoriasItensProprios}
         />
 
@@ -2323,6 +2535,28 @@ const DiretoriaAprovacao = () => {
           </div>
         ) : (
           <>
+            {selectedOwnItems.size > 0 && (
+              <div className="mb-4 flex items-center gap-2">
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={async () => {
+                    if (confirm(`Deseja realmente excluir ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
+                      for (const id of selectedOwnItems) {
+                        if (typeof id === 'string') {
+                          await handleDeleteSolicitacao(id);
+                        }
+                      }
+                      setSelectedOwnItems(new Set());
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir Selecionados ({selectedOwnItems.size})
+                </Button>
+              </div>
+            )}
             <PlanTable
               items={ownPaginationData.paginatedItems}
               onUpdateQtdEstimada={handleUpdateQtdEstimadaDiretoria}
@@ -2331,6 +2565,21 @@ const DiretoriaAprovacao = () => {
               onUpdatePrioridade={handleUpdatePrioridadeDiretoria}
               onDeleteItem={handleDeleteSolicitacao}
               valorTotal={itensProprios.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
+              selectedItems={selectedOwnItems}
+              onToggleSelect={(id) => {
+                const newSet = new Set(selectedOwnItems);
+                if (newSet.has(id)) newSet.delete(id);
+                else newSet.add(id);
+                setSelectedOwnItems(newSet);
+              }}
+              onToggleSelectAll={() => {
+                const validIds = ownPaginationData.paginatedItems.map(i => i.id || i.codigo).filter(Boolean);
+                if (selectedOwnItems.size === validIds.length && validIds.length > 0) {
+                  setSelectedOwnItems(new Set());
+                } else {
+                  setSelectedOwnItems(new Set(validIds));
+                }
+              }}
             />
 
             {ownPaginationData.totalPages > 1 && (
@@ -2446,69 +2695,64 @@ const DiretoriaAprovacao = () => {
         </div>
       </div>
 
-      {/* Mensagem inicial ou sem itens das gerências */}
-      {filteredItems.length === 0 ? (
-        <div className="px-6 py-8 text-center text-muted-foreground">
-          Nenhum item recebido das gerências para os filtros selecionados.
+      <div className="px-6 pb-2">
+        <Tabs
+          value={recebidosStatusTab}
+          onValueChange={(v) => {
+            setRecebidosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra");
+            setCurrentPage(1);
+            setSelectedItems(new Set());
+          }}
+        >
+          <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 p-1">
+            <TabsTrigger value="pendentes" className="gap-2">
+              <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+              Pendentes
+              <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                {recebidosTabCounts.pendentes}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="aprovados" className="gap-2">
+              <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+              Aprovados
+              <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                {recebidosTabCounts.aprovados}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="rejeitados" className="gap-2">
+              <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+              Rejeitados
+              <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                {recebidosTabCounts.rejeitados}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="em_compra" className="gap-2">
+              <ShoppingCart className="h-4 w-4 shrink-0 text-sky-600" />
+              Em compras
+              <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
+                {recebidosTabCounts.em_compra}
+              </span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {recebidosStatusTab === "pendentes" &&
+            "Itens com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar. Itens já rejeitados ou em compras aparecem nas outras abas."}
+          {recebidosStatusTab === "aprovados" &&
+            "Itens aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
+          {recebidosStatusTab === "rejeitados" &&
+            "Itens rejeitados: você pode selecionar itens para aprovar (recuperar) ou excluir permanentemente da lista."}
+          {recebidosStatusTab === "em_compra" &&
+            "Itens já encaminhados às compras ou concluídos (somente consulta)."}
+        </p>
+      </div>
+
+      {recebidosTableItems.length === 0 ? (
+        <div className="px-6 py-8 text-center text-sm text-muted-foreground bg-white rounded-lg border mt-4 mx-6">
+          {isSolicitacoesLoading ? "Carregando solicitações..." : "Nenhum item nesta lista para os filtros atuais."}
         </div>
       ) : (
         <>
-          <div className="px-6 pb-2">
-            <Tabs
-              value={recebidosStatusTab}
-              onValueChange={(v) =>
-                setRecebidosStatusTab(v as "pendentes" | "aprovados" | "rejeitados" | "em_compra")
-              }
-            >
-              <TabsList className="flex h-auto min-h-10 w-full flex-wrap justify-start gap-1 p-1">
-                <TabsTrigger value="pendentes" className="gap-2">
-                  <Clock className="h-4 w-4 shrink-0 text-amber-600" />
-                  Pendentes
-                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
-                    {recebidosTabCounts.pendentes}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="aprovados" className="gap-2">
-                  <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-                  Aprovados
-                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
-                    {recebidosTabCounts.aprovados}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="rejeitados" className="gap-2">
-                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
-                  Rejeitados
-                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
-                    {recebidosTabCounts.rejeitados}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="em_compra" className="gap-2">
-                  <ShoppingCart className="h-4 w-4 shrink-0 text-sky-600" />
-                  Em compras
-                  <span className="rounded-full bg-background/80 px-1.5 text-xs tabular-nums">
-                    {recebidosTabCounts.em_compra}
-                  </span>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {recebidosStatusTab === "pendentes" &&
-                "Itens com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar. Itens já rejeitados ou em compras aparecem nas outras abas."}
-              {recebidosStatusTab === "aprovados" &&
-                "Itens aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
-              {recebidosStatusTab === "rejeitados" &&
-                "Itens rejeitados: você pode selecionar itens para aprovar (recuperar) ou excluir permanentemente da lista."}
-              {recebidosStatusTab === "em_compra" &&
-                "Itens já encaminhados às compras ou concluídos (somente consulta)."}
-            </p>
-          </div>
-
-          {recebidosTableItems.length === 0 ? (
-            <div className="px-6 py-8 text-center text-sm text-muted-foreground">
-              Nenhum item nesta lista para os filtros atuais. Escolha outra aba acima.
-            </div>
-          ) : (
-            <>
           {/* Botões de Ação */}
           <div className="px-6 py-4 border-b">
             <div className="flex items-center gap-4 flex-wrap">
@@ -2571,17 +2815,42 @@ const DiretoriaAprovacao = () => {
                   Rejeitar ({selectedItems.size})
                 </Button>
 
-                {recebidosStatusTab === "rejeitados" && (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="gap-2"
-                    onClick={handleBulkDeleteRejected}
+                {(recebidosStatusTab === "pendentes" || recebidosStatusTab === "rejeitados") && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                    onClick={() => setActionDialog({ open: true, action: "devolver", isBulk: false })}
                     disabled={selectedItems.size === 0}
                   >
-                    <Trash2 className="h-4 w-4" />
-                    Excluir Selecionados ({selectedItems.size})
+                    <Undo2 className="h-4 w-4" />
+                    Devolver para Rascunho ({selectedItems.size})
                   </Button>
+                )}
+
+                {recebidosStatusTab === "rejeitados" && (
+                  <>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                      onClick={() => setActionDialog({ open: true, action: "analisar", isBulk: false })}
+                      disabled={selectedItems.size === 0}
+                    >
+                      <Undo2 className="h-4 w-4" />
+                      Voltar para Pendentes ({selectedItems.size})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="gap-2"
+                      onClick={handleBulkDeleteRejected}
+                      disabled={selectedItems.size === 0}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Excluir Selecionados ({selectedItems.size})
+                    </Button>
+                  </>
                 )}
               </div>
               <div className="flex items-center gap-2 md:ml-auto">
@@ -2780,8 +3049,6 @@ const DiretoriaAprovacao = () => {
               </div>
             )}
           </div>
-            </>
-          )}
         </>
       )}
 
@@ -2920,15 +3187,18 @@ const DiretoriaAprovacao = () => {
             <DialogTitle>
               {actionDialog.action === "aprovar" && "Aprovar Solicitações"}
               {actionDialog.action === "rejeitar" && "Rejeitar Solicitações"}
+              {actionDialog.action === "devolver" && "Devolver Solicitações para Rascunho"}
+              {actionDialog.action === "analisar" && "Voltar Solicitações para Análise"}
             </DialogTitle>
             <DialogDescription>
-              {actionDialog.action === "aprovar" &&
-                `Aprovar ${recebidosTabCounts.pendentes} solicitação(ões) com status Enviado/Em análise?`}
-              {actionDialog.action === "rejeitar" && `Rejeitar ${selectedItems.size} solicitação(ões) selecionada(s)? Informe uma justificativa:`}
+              {actionDialog.action === "aprovar" && `Tem certeza que deseja aprovar ${actionDialog.isBulk ? 'todas as solicitações pendentes' : 'as solicitações selecionadas'}?`}
+              {actionDialog.action === "rejeitar" && `Por favor, forneça uma justificativa para a rejeição (opcional):`}
+              {actionDialog.action === "devolver" && `Tem certeza que deseja devolver as solicitações selecionadas para Rascunho (retornando-as para a Gerência)?`}
+              {actionDialog.action === "analisar" && `Tem certeza que deseja desfazer a rejeição e retornar os itens selecionados para a aba de Pendentes?`}
             </DialogDescription>
           </DialogHeader>
 
-          {actionDialog.action === "rejeitar" && (
+          {(actionDialog.action === "rejeitar" || actionDialog.action === "devolver") && (
             <div className="py-4">
               <Textarea
                 placeholder="Motivo da rejeição..."
@@ -2948,7 +3218,7 @@ const DiretoriaAprovacao = () => {
             </Button>
             <Button 
               onClick={handleAction}
-              disabled={actionDialog.action === "rejeitar" && !justificativa.trim()}
+              disabled={(actionDialog.action === "rejeitar" || actionDialog.action === "devolver") && !justificativa.trim()}
             >
               Confirmar
             </Button>

@@ -58,7 +58,7 @@ import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } f
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabaseClient";
 import { resolveGerenciaNome } from "@/data/gerencias";
 
 // Mapeamento de ícones por sigla
@@ -110,8 +110,7 @@ const GerenciaPanel = () => {
   const ITEMS_PER_PAGE = 100;
   const queryClient = useQueryClient();
   const { toast } = useToast();
-
-  // Buscar diretorias
+  const [selectedAquisicaoIds, setSelectedAquisicaoIds] = useState<Set<string>>(new Set());
   const { data: diretorias = [] } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
@@ -241,7 +240,7 @@ const GerenciaPanel = () => {
       const matchesCategoria = !categoria || categoria === "" || item.categoria === categoria;
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || item.qtdEstimada > 0;
+      const matchesComQuantidade = !showOnlyComQuantidade || (item.qtdEstimada > 0 && item.status === "rascunho");
       const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
       return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
@@ -417,10 +416,7 @@ const GerenciaPanel = () => {
     if (!gerenciaAtual || !periodAtivo) return;
 
     try {
-      const idsParaEnviar = items
-        .filter((item) => item.qtdEstimada > 0 && item.status === "rascunho")
-        .map((item) => item.id)
-        .filter(Boolean) as string[];
+      const idsParaEnviar = Array.from(selectedAquisicaoIds);
 
       if (idsParaEnviar.length === 0) {
         setConfirmSendOpen(false);
@@ -923,12 +919,12 @@ const GerenciaPanel = () => {
                 Página inicial
               </Button>
               <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-green-50 text-green-700">Serviços</Badge>
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">Serviços</Badge>
             </div>
           </div>
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-green-600 to-green-800 px-6 py-8">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(siglaUpper) && (
@@ -1047,21 +1043,21 @@ const GerenciaPanel = () => {
       return {
         id: undefined, // undefined indicates it needs to be created
         item: catalogoItem.item,
-        tipoContratacao: catalogoItem.tipo_contratacao || "",
+        tipoContratacao: catalogoItem.tipo_contratacao || "Serviço",
         unidadeDemandante: gerenciaUpper,
         objeto: catalogoItem.objeto || "",
         justificativa: "",
-        previsaoInicio: null,
+        previsaoInicio: catalogoItem.previsao_inicio || undefined,
         estimativaValor: catalogoItem.estimativa_valor || 0,
-        dotacaoOrcamentaria: 0,
+        dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
         grauPrioridade: catalogoItem.grau_prioridade || "Médio",
         vinculacao: catalogoItem.vinculacao || "Não",
-        dependenciaDescricao: null,
+        dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
+        status: catalogoItem.status || "rascunho",
+        observacao: catalogoItem.observacao || "",
         gerencia: gerenciaUpper,
         diretoriaSigla: siglaUpper,
-        status: "rascunho",
-        observacao: "",
-      } as ServicoItem;
+      } as unknown as ServicoItem;
     });
     
     // Novos Serviços são aqueles criados diretamente pela Gerência (não estão no catálogo)
@@ -1634,11 +1630,11 @@ const GerenciaPanel = () => {
             {hasRascunhoItems && !hasApprovedItems && (
               <Button
                 className="gap-2"
-                disabled={!canSend}
+                disabled={!canSend || selectedAquisicaoIds.size === 0}
                 onClick={() => setConfirmSendOpen(true)}
               >
                 <Send className="h-4 w-4" />
-                Enviar para Diretoria
+                Enviar Selecionados ({selectedAquisicaoIds.size})
               </Button>
             )}
             {hasApprovedItems && (
@@ -1804,6 +1800,26 @@ const GerenciaPanel = () => {
               <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                   <tr>
+                    {!isReadOnly && (
+                      <th className="p-3 text-left w-10">
+                        <input
+                          type="checkbox"
+                          className="rounded border-gray-300"
+                          checked={paginationData.paginatedItems.filter(i => i.status === "rascunho").length > 0 && paginationData.paginatedItems.filter(i => i.status === "rascunho").every(i => selectedAquisicaoIds.has(i.id!))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const newSet = new Set(selectedAquisicaoIds);
+                              paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.add(i.id!));
+                              setSelectedAquisicaoIds(newSet);
+                            } else {
+                              const newSet = new Set(selectedAquisicaoIds);
+                              paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.delete(i.id!));
+                              setSelectedAquisicaoIds(newSet);
+                            }
+                          }}
+                        />
+                      </th>
+                    )}
                     <th className="p-3 text-left text-xs font-medium text-muted-foreground w-16">Código</th>
                     <th className="p-3 text-left text-xs font-medium text-muted-foreground">Descrição</th>
                     <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Unid.</th>
@@ -1820,6 +1836,23 @@ const GerenciaPanel = () => {
                     const readOnly = item.status !== "rascunho";
                     return (
                       <tr key={item.id ?? `item-${item.codigo}-${idx}`} className={`border-b hover:bg-muted/30 ${idx % 2 === 0 ? "bg-background" : "bg-muted/10"}`}>
+                        {!isReadOnly && (
+                          <td className="p-3 text-center">
+                            {item.status === "rascunho" && (
+                              <input
+                                type="checkbox"
+                                className="rounded border-gray-300"
+                                checked={selectedAquisicaoIds.has(item.id!)}
+                                onChange={(e) => {
+                                  const newSet = new Set(selectedAquisicaoIds);
+                                  if (e.target.checked) newSet.add(item.id!);
+                                  else newSet.delete(item.id!);
+                                  setSelectedAquisicaoIds(newSet);
+                                }}
+                              />
+                            )}
+                          </td>
+                        )}
                         <td className="p-3 text-sm font-mono text-primary">{item.codigo}</td>
                         <td className="p-3 text-sm">
                           <p className="font-medium">{item.descricao}</p>
@@ -1882,7 +1915,7 @@ const GerenciaPanel = () => {
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
-                            {(item.status === "rascunho" || item.status === "rejeitado" || item.status === "enviado" || item.status === "em_analise") && item.id && (
+                            {(item.status === "rascunho" || item.status === "rejeitado") && item.id && (
                               <Button
                                 variant="ghost"
                                 size="icon"

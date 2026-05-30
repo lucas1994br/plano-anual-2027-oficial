@@ -40,9 +40,14 @@ interface PlanTableProps {
   onUpdatePrioridade: (codigo: number, prioridade: PlanItem["prioridade"]) => void;
   onDeleteItem?: (itemId: string) => void;
   valorTotal?: number;
+  selectedItems?: Set<string | number>;
+  onToggleSelect?: (id: string | number) => void;
+  onToggleSelectAll?: () => void;
 }
 
-export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, valorTotal }: PlanTableProps) {
+import { Checkbox } from "@/components/ui/checkbox.tsx";
+
+export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
   const [editingCodigo, setEditingCodigo] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const editInputRef = useRef<HTMLInputElement | null>(null);
@@ -274,6 +279,15 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
+                {onToggleSelectAll && (
+                  <TableHead className="w-[40px] px-4 text-center">
+                    <Checkbox
+                      checked={items.length > 0 && items.filter(i => i.id).length > 0 && selectedItems?.size === items.filter(i => i.id).length}
+                      onCheckedChange={onToggleSelectAll}
+                      disabled={items.filter(i => i.id).length === 0}
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="w-[80px]">Código</TableHead>
                 <TableHead className="min-w-[200px]">Descrição</TableHead>
                 <TableHead className="text-center w-[90px]">Unid.</TableHead>
@@ -288,6 +302,15 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
             <TableBody>
               {items.map((item) => (
                 <TableRow key={item.codigo} className="hover:bg-muted/30">
+                  {onToggleSelect && (
+                    <TableCell className="px-4 text-center">
+                      <Checkbox
+                        checked={selectedItems?.has(item.id || item.codigo) || false}
+                        onCheckedChange={() => onToggleSelect(item.id || item.codigo)}
+                        disabled={!item.id}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium text-primary">
                     {item.codigo}
                   </TableCell>

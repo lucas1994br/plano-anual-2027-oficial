@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table.tsx";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, getServicosCatalogoCompras } from "@/lib/services.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, getServicosCatalogo } from "@/lib/services.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery } from "@tanstack/react-query";
 import jsPDF from "jspdf";

@@ -49,23 +49,20 @@ serve(async (req: Request) => {
 
     const normalizedCode = String(code).trim().toLowerCase();
 
-    // 🔐 HASH
-    const encoded = new TextEncoder().encode(normalizedCode);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
-    const hashHex = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    // ✅ 1) Tenta por hash direto
-    const { data: hashedMatches } = await supabase
+    // ✅ 1) Tenta por texto direto
+    const { data: textMatches, error: textError } = await supabase
       .from("codigos_acesso")
       .select("*")
       .eq("ativo", true)
       .eq("scope", scope)
-      .eq("codigo_hash", hashHex);
+      .eq("codigo", code); // busca exata, sem ilike para evitar problemas no supabase
 
-    if (hashedMatches && hashedMatches.length > 0) {
-      return successResponse(hashedMatches[0]);
+    if (textError) {
+      console.error("Erro na busca por texto:", textError);
+    }
+
+    if (textMatches && textMatches.length > 0) {
+      return successResponse(textMatches[0]);
     }
 
     // ✅ 2) Fallback por sigla
