@@ -58,7 +58,7 @@ import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } f
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabaseClient";
 import { resolveGerenciaNome } from "@/data/gerencias";
 
 // Mapeamento de ícones por sigla
@@ -923,12 +923,12 @@ const GerenciaPanel = () => {
                 Página inicial
               </Button>
               <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-green-50 text-green-700">Serviços</Badge>
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">Serviços</Badge>
             </div>
           </div>
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-green-600 to-green-800 px-6 py-8">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(siglaUpper) && (
