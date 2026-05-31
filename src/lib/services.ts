@@ -141,6 +141,16 @@ export async function getGerenciasByDiretoria(
   return data || [];
 }
 
+export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabase
+    .from("gerencias")
+    .select("*")
+    .order("sigla");
+
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getDiretoriasComDetalhes(): Promise<
   (Diretoria & { totalGerencias: number; totalItens: number })[]
 > {
@@ -485,6 +495,43 @@ export async function updateSolicitacaoStatus(
   }
 
   return data as PlanItem;
+}
+
+export async function updateSolicitacaoStatusBulk(
+  ids: string[],
+  status: SolicitacaoStatus,
+  justificativa?: string
+): Promise<void> {
+  const updates: Record<string, unknown> = { status };
+
+  if (status === "enviado") {
+    updates.enviado_em = new Date().toISOString();
+  } else if (status === "aprovado") {
+    updates.aprovado_em = new Date().toISOString();
+  } else if (status === "rejeitado" && justificativa) {
+    updates.justificativa_rejeicao = justificativa;
+  }
+
+  const { error } = await supabase
+    .from("solicitacoes")
+    .update(updates)
+    .in("id", ids);
+
+  if (error) throw error;
+
+  const historicoRecords = ids.map((id) => ({
+    solicitacao_id: id,
+    status_novo: status,
+    acao: `Status alterado para ${status}`,
+    autor_tipo: "sistema",
+    justificativa: justificativa || null,
+  }));
+
+  const { error: histError } = await supabase
+    .from("solicitacao_historico")
+    .insert(historicoRecords);
+
+  if (histError) console.error("Erro ao registrar histórico em lote:", histError);
 }
 
 // ============ HISTÓRICO ============

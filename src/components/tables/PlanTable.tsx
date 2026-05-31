@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useState } from "react";
-import { Pencil, MessageSquare, FileDown, FileSpreadsheet, Check, X, Trash2 } from "lucide-react";
+import { Pencil, MessageSquare, FileDown, FileSpreadsheet, Check, X, Undo2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -472,11 +472,11 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-destructive"
-                              title="Excluir item"
+                              className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                              title="Devolver para Rascunho"
                               onClick={() => onDeleteItem(item.id!)}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Undo2 className="h-4 w-4" />
                             </Button>
                           )}
                         </>

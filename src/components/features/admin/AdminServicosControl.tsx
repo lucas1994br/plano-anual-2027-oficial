@@ -1,5 +1,5 @@
 // AdminServicosControl.tsx - Versão CORRIGIDA SEM ANY
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { PlusCircle, Pencil, Trash2 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -40,8 +40,19 @@ import {
   deleteServicoCatalogoAdmin,
   getDiretorias,
   getGerenciasByDiretoria,
+  getTodasGerencias,
 } from "@/lib/services.ts";
 import { GrauPrioridade } from "@/types/plan.ts";
+import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination.tsx";
 
 // ==================== TIPOS ====================
 type ServicoCatalogo = {
@@ -102,6 +113,10 @@ export function AdminServicosControl() {
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
 
   // Formulário de criação
   const [formData, setFormData] = useState({
@@ -150,6 +165,21 @@ export function AdminServicosControl() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Buscar todas as gerências (para exibição na tabela)
+  const { data: todasGerencias = [] } = useQuery({
+    queryKey: ["todas-gerencias-admin"],
+    queryFn: async (): Promise<Gerencia[]> => {
+      const result = await getTodasGerencias();
+      return (result as any[]).map((ger: any): Gerencia => ({
+        id: ger.id,
+        sigla: ger.sigla,
+        nome: ger.nome || ger.sigla,
+        diretoria_id: ger.diretoria_id,
+      }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Buscar gerências quando diretoria for selecionada (para criação)
   const { data: gerenciasCreate = [] } = useQuery({
     queryKey: ["gerencias-create", formData.diretoria_id],
@@ -183,6 +213,19 @@ export function AdminServicosControl() {
         : Promise.resolve([]),
     enabled: !!editFormData.diretoria_id && !!editingServico,
   });
+
+  const paginationData = useMemo(() => {
+    const totalPages = Math.ceil(servicos.length / ITEMS_PER_PAGE);
+    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIdx = startIdx + ITEMS_PER_PAGE;
+    const paginatedItems = (servicos as ServicoCatalogo[]).slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems };
+  }, [servicos, currentPage]);
+
+  const summary = useMemo(() => ({
+    totalItens: servicos.length,
+    valorTotal: (servicos as ServicoCatalogo[]).reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0),
+  }), [servicos]);
 
   const resetForm = () => {
     setFormData({
@@ -343,6 +386,11 @@ export function AdminServicosControl() {
     return dir?.sigla || diretoriaId;
   };
 
+  const getGerenciaSigla = (gerenciaId: string): string => {
+    const ger = todasGerencias.find((g: Gerencia) => g.id === gerenciaId);
+    return ger?.sigla || gerenciaId.slice(0, 8);
+  };
+
   const getPrioridadeColor = (prioridade: GrauPrioridade): string => {
     const colors: Record<GrauPrioridade, string> = {
       "Baixo": "bg-blue-100 text-blue-800",
@@ -371,6 +419,9 @@ export function AdminServicosControl() {
         </p>
       </Card>
 
+      {/* KPI Cards */}
+      <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
+
       {/* Lista de Serviços */}
       <Card className="p-6 card-shadow">
         <h2 className="text-lg font-semibold text-foreground mb-4">Serviços Cadastrados</h2>
@@ -397,7 +448,7 @@ export function AdminServicosControl() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(servicos as ServicoCatalogo[]).map((servico) => (
+                {paginationData.paginatedItems.map((servico) => (
                   <TableRow key={servico.id}>
                     <TableCell className="font-mono">{servico.item}</TableCell>
                     <TableCell className="max-w-md">
@@ -429,7 +480,7 @@ export function AdminServicosControl() {
                       <Badge variant="outline">{getDiretoriaSigla(servico.diretoria_id)}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{servico.gerencia_id.slice(0, 8)}</Badge>
+                      <Badge variant="outline">{getGerenciaSigla(servico.gerencia_id)}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={servico.ativo ? "default" : "destructive"}>
@@ -460,6 +511,58 @@ export function AdminServicosControl() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        )}
+
+        {/* Controles de Paginação */}
+        {paginationData.totalPages > 1 && (
+          <div className="py-6 border-t mt-4">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+                {currentPage > 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
+                      {currentPage - 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationLink isActive>{currentPage}</PaginationLink>
+                </PaginationItem>
+                {currentPage < paginationData.totalPages && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
+                      {currentPage + 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                {currentPage < paginationData.totalPages - 1 && (
+                  <PaginationItem><PaginationEllipsis /></PaginationItem>
+                )}
+                {currentPage < paginationData.totalPages - 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(paginationData.totalPages)} className="cursor-pointer">
+                      {paginationData.totalPages}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
+                    className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
+              Página {currentPage} de {paginationData.totalPages} • Total: {summary.totalItens} serviços
+            </div>
           </div>
         )}
       </Card>

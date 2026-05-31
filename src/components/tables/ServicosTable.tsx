@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageSquare, FileDown, FileSpreadsheet, Trash2 } from "lucide-react";
+import { MessageSquare, FileDown, FileSpreadsheet, Undo2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -298,11 +298,11 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-destructive"
+                          className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                           onClick={() => handleDeleteServico(servico.id!)}
-                          title="Excluir serviço"
+                          title="Devolver para Rascunho"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Undo2 className="h-4 w-4" />
                         </Button>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>

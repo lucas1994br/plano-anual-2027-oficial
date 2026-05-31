@@ -46,8 +46,10 @@ import {
   getPeriodosAtivos,
   getSolicitacoesByGerencia,
   deleteSolicitacao,
+  deleteSolicitacoesBulk,
   updateSolicitacao,
   updateSolicitacaoStatus,
+  updateSolicitacaoStatusBulk,
   getServicosByGerencia,
   updateServico,
   createServico,
@@ -273,10 +275,10 @@ const GerenciaPanel = () => {
     : 0;
   const gastoAquisicaoGerencia = useMemo(
     () =>
-      items
+      filteredItems
         .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id)
         .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [items, diretoria?.id],
+    [filteredItems, diretoria?.id],
   );
   const summary = useMemo(
     () => ({
@@ -397,9 +399,15 @@ const GerenciaPanel = () => {
 
     try {
       // Atualização otimista: remove do cache imediatamente
-      queryClient.setQueryData(solicitacoesQueryKey, (current: PlanItem[] | undefined) => {
+      queryClient.setQueryData(solicitacoesQueryKey, (current: any[] | undefined) => {
         if (!Array.isArray(current)) return current;
         return current.filter(s => s.id !== itemId);
+      });
+      
+      setSelectedAquisicaoIds(prev => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
       });
       
       await deleteSolicitacao(itemId);
@@ -423,14 +431,8 @@ const GerenciaPanel = () => {
         return;
       }
 
-      // Atualizar cache imediatamente para feedback instantâneo
-      idsParaEnviar.forEach((id) => {
-        patchSolicitacaoInCache(id, { status: "enviado" });
-      });
-
-      // Executar updates em paralelo sem aguardar refetch
-      const updates = idsParaEnviar.map((id) => updateSolicitacaoStatus(id, "enviado"));
-      await Promise.all(updates);
+      // Executar update em massa sem aguardar refetch
+      await updateSolicitacaoStatusBulk(idsParaEnviar, "enviado");
       
       // Invalidar query apenas uma vez após todos os updates
       await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
@@ -1063,9 +1065,25 @@ const GerenciaPanel = () => {
     // Novos Serviços são aqueles criados diretamente pela Gerência (não estão no catálogo)
     const servicosNovos = servicos.filter((s) => !catalogoItemsSet.has(s.item));
     const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
-    const canSendServicos = displayedServicos.some((s) => !isServicoReadOnly(s));
-    const servicosEditaveis = displayedServicos.filter((s) => !isServicoReadOnly(s));
-    const isAllSent = displayedServicos.length > 0 && displayedServicos.every((s) => isServicoReadOnly(s));
+    
+    const filteredServicos = displayedServicos.filter((item) => {
+      const matchesSearch = searchTerm === "" || item.objeto.toLowerCase().includes(searchTerm.toLowerCase()) || item.item.toString().includes(searchTerm);
+      const matchesPrioridade = prioridade === "todas" || item.grauPrioridade === prioridade;
+      const val = item.estimativaValor || item.dotacaoOrcamentaria || 0;
+      const matchesZerado = !showOnlyZerados || val === 0;
+      const matchesComQuantidade = !showOnlyComQuantidade || val > 0;
+      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
+      return matchesSearch && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
+    });
+
+    const servicosSummary = {
+      totalItens: filteredServicos.length,
+      valorTotal: filteredServicos.reduce((acc, s) => acc + (s.estimativaValor || s.dotacaoOrcamentaria || 0), 0)
+    };
+
+    const canSendServicos = filteredServicos.some((s) => !isServicoReadOnly(s));
+    const servicosEditaveis = filteredServicos.filter((s) => !isServicoReadOnly(s));
+    const isAllSent = filteredServicos.length > 0 && filteredServicos.every((s) => isServicoReadOnly(s));
 
     const formatCurrency = (value?: number) =>
       value != null
@@ -1094,7 +1112,7 @@ const GerenciaPanel = () => {
       wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
       wsData.push([]);
       wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Dotação Orçamentária", "Grau Prioridade", "Vinculação", "Status"]);
-      displayedServicos.forEach((s) => {
+      filteredServicos.forEach((s) => {
         wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.dotacaoOrcamentaria || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -1113,7 +1131,7 @@ const GerenciaPanel = () => {
       doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
       autoTable(doc, {
         head: [["Item", "Tipo", "Objeto", "Estimativa", "Dotação", "Prioridade", "Status"]],
-        body: displayedServicos.map((s) => [
+        body: filteredServicos.map((s) => [
           s.item,
           s.tipoContratacao,
           s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
@@ -1142,36 +1160,34 @@ const GerenciaPanel = () => {
             <table className="w-full">
               <thead className="bg-muted/50 border-b">
                 <tr>
-                  {!isAllSent && (
-                    <th className="p-3 text-left w-10">
-                      <Checkbox
-                        checked={lista.filter(s => !isServicoReadOnly(s)).length > 0 && lista.filter(s => !isServicoReadOnly(s)).every(s => s.id && selectedServicos.has(s.id!))}
-                        onCheckedChange={() => {
-                          const editaveis = lista.filter(s => !isServicoReadOnly(s) && s.id);
-                          const allSelected = editaveis.every(s => selectedServicos.has(s.id!));
-                          const next = new Set(selectedServicos);
-                          editaveis.forEach(s => allSelected ? next.delete(s.id!) : next.add(s.id!));
-                          setSelectedServicos(next);
-                        }}
-                      />
-                    </th>
-                  )}
+                  <th className="p-3 text-left w-10">
+                    <Checkbox
+                      checked={lista.filter(s => !isServicoReadOnly(s)).length > 0 && lista.filter(s => !isServicoReadOnly(s)).every(s => s.id && selectedServicos.has(s.id!))}
+                      onCheckedChange={() => {
+                        const editaveis = lista.filter(s => !isServicoReadOnly(s) && s.id);
+                        const allSelected = editaveis.every(s => selectedServicos.has(s.id!));
+                        const next = new Set(selectedServicos);
+                        editaveis.forEach(s => allSelected ? next.delete(s.id!) : next.add(s.id!));
+                        setSelectedServicos(next);
+                      }}
+                      disabled={lista.filter(s => !isServicoReadOnly(s)).length === 0}
+                    />
+                  </th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-12">Nº</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground">Objeto</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground">Justificativa</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-36">Prioridade</th>
+                  <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Estimativa (R$)</th>
                   <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Dotação (R$)</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-28">Vinculação</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-24">Status</th>
-                  {!isAllSent && (
-                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Ações</th>
-                  )}
+                  <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {lista.length === 0 ? (
                   <tr>
-                    <td colSpan={isAllSent ? 7 : 9} className="text-center py-6 text-muted-foreground text-sm">
+                    <td colSpan={9} className="text-center py-6 text-muted-foreground text-sm">
                       Nenhum serviço nesta seção.
                     </td>
                   </tr>
@@ -1183,16 +1199,13 @@ const GerenciaPanel = () => {
                         key={servico.id || index}
                         className={`border-b ${readOnly ? "opacity-80" : "hover:bg-muted/20"} ${index % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
                       >
-                        {!isAllSent && (
-                          <td className="p-3">
-                            {!readOnly && (
-                              <Checkbox
-                                checked={servico.id ? selectedServicos.has(servico.id) : false}
-                                onCheckedChange={() => servico.id && toggleSelectServico(servico.id)}
-                              />
-                            )}
-                          </td>
-                        )}
+                        <td className="p-3">
+                          <Checkbox
+                            checked={servico.id ? selectedServicos.has(servico.id) : false}
+                            onCheckedChange={() => !readOnly && servico.id && toggleSelectServico(servico.id)}
+                            disabled={readOnly || !servico.id}
+                          />
+                        </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
                         <td className="p-3 text-sm max-w-xs">
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
@@ -1239,6 +1252,9 @@ const GerenciaPanel = () => {
                               </SelectContent>
                             </Select>
                           )}
+                        </td>
+                        <td className="p-3 text-right">
+                          <span className="text-sm">{formatCurrency(servico.estimativaValor)}</span>
                         </td>
                         <td className="p-3 text-right">
                           {readOnly ? (
@@ -1291,23 +1307,21 @@ const GerenciaPanel = () => {
                              servico.status || "—"}
                           </Badge>
                         </td>
-                        {!isAllSent && (
-                          <td className="p-3 text-right">
-                            {!readOnly ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                onClick={() => handleDeleteServico(servico.id, servico.item)}
-                                title="Excluir serviço"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </td>
-                        )}
+                        <td className="p-3 text-right">
+                          {!readOnly ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              onClick={() => handleDeleteServico(servico.id, servico.item)}
+                              title="Excluir serviço"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })
@@ -1365,13 +1379,97 @@ const GerenciaPanel = () => {
             prazo={prazo}
           />
 
+          <SummaryCards totalItens={servicosSummary.totalItens} valorTotal={servicosSummary.valorTotal} />
+
           <BudgetConsumptionCard
             titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={orcamentoGerenciaServicos}
-            gasto={gastoServicosGerencia}
+            gasto={displayedServicos.reduce(
+              (acc, servico) =>
+                acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
+              0,
+            )}
           />
 
-          {/* Ações gerais + exportação */}
+          <div className="px-6 pb-2 pt-4 flex flex-wrap justify-between items-center gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={showOnlyZerados ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !showOnlyZerados;
+                  setShowOnlyZerados(next);
+                  if (next) setShowOnlyComQuantidade(false);
+                }}
+              >
+                {showOnlyZerados ? "Mostrando apenas serviços zerados" : "Filtrar serviços zerados"}
+              </Button>
+              <Button
+                variant={showOnlyComQuantidade ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !showOnlyComQuantidade;
+                  setShowOnlyComQuantidade(next);
+                  if (next) {
+                    setShowOnlyZerados(false);
+                    setShowOnlySent(false);
+                  }
+                }}
+              >
+                {showOnlyComQuantidade ? "Mostrando apenas serviços com valor" : "Filtrar serviços com valor"}
+              </Button>
+              <Button
+                variant={showOnlySent ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !showOnlySent;
+                  setShowOnlySent(next);
+                  if (next) {
+                    setShowOnlyZerados(false);
+                    setShowOnlyComQuantidade(false);
+                  }
+                }}
+              >
+                <Send className="h-4 w-4" />
+                {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportExcel}
+                disabled={filteredServicos.length === 0}
+              >
+                <FileSpreadsheet className="h-4 w-4" />Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportPDF}
+                disabled={filteredServicos.length === 0}
+              >
+                <FileDown className="h-4 w-4" />PDF
+              </Button>
+            </div>
+          </div>
+
+          <PlanFilters
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            categoria={categoria}
+            onCategoriaChange={setCategoria}
+            prioridade={prioridade}
+            onPrioridadeChange={setPrioridade}
+            categorias={[]}
+          />
+
+          {/* Ações gerais */}
           <div className="px-6 py-3 border-b flex items-center justify-between">
             <div className="flex items-center gap-2">
               {!isAllSent && servicosEditaveis.length > 0 && (
@@ -1386,46 +1484,34 @@ const GerenciaPanel = () => {
                 </>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportExcel}>
-                <FileSpreadsheet className="h-4 w-4" />Excel
-              </Button>
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportPDF}>
-                <FileDown className="h-4 w-4" />PDF
-              </Button>
-            </div>
           </div>
 
           {/* Tabelas */}
           <div className="px-6 py-6">
-            {selectedOption === "servicos_existentes" && (
-              servicosExistentes.length > 0 ? (
-                <ServicosSection
-                  lista={servicosExistentes}
-                  titulo="Serviços Existentes"
-                  badge={<Badge variant="secondary" className="text-xs">Contratos vigentes / renovações</Badge>}
-                />
-              ) : (
-                <div className="text-center py-16 text-muted-foreground bg-card rounded-lg border border-dashed p-8">
-                  <p className="text-lg font-medium mb-1">Nenhum serviço existente cadastrado</p>
-                  <p className="text-sm">Não há contratos vigentes ou renovações registradas para esta gerência.</p>
-                </div>
-              )
-            )}
+            {filteredServicos.length === 0 ? (
+              <div className="px-6 py-8 text-center text-muted-foreground">
+                {searchTerm ? `Nenhum serviço encontrado para "${searchTerm}".` : "Nenhum serviço encontrado."}
+              </div>
+            ) : (
+              <>
+                {selectedOption === "servicos_existentes" && (
+                  <ServicosSection
+                    lista={filteredServicos}
+                    titulo="Serviços Existentes"
+                    badge={<Badge variant="secondary" className="text-xs">Contratos vigentes / renovações</Badge>}
+                  />
+                )}
 
-            {selectedOption === "servicos_novos" && (
-              servicosNovos.length > 0 ? (
-                <ServicosSection
-                  lista={servicosNovos}
-                  titulo="Novas Contratações"
-                  badge={<Badge variant="outline" className="text-xs bg-green-50 text-green-700">Novos serviços adicionados</Badge>}
-                />
-              ) : (
-                <div className="text-center py-16 text-muted-foreground bg-card rounded-lg border border-dashed p-8">
-                  <p className="text-lg font-medium mb-1">Nenhum novo serviço cadastrado</p>
-                  <p className="text-sm">Clique em "Adicionar Novo Serviço" abaixo para adicionar o primeiro.</p>
-                </div>
-              )
+                {selectedOption === "servicos_novos" && (
+                  filteredServicos.length > 0 ? (
+                    <ServicosSection
+                      lista={filteredServicos}
+                      titulo="Novas Contratações"
+                      badge={<Badge variant="outline" className="text-xs bg-green-50 text-green-700">Novos serviços adicionados</Badge>}
+                    />
+                  ) : null
+                )}
+              </>
             )}
 
             {/* Botão Novo Serviço — na parte de baixo apenas para novos serviços */}
@@ -1800,26 +1886,25 @@ const GerenciaPanel = () => {
               <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                   <tr>
-                    {!isReadOnly && (
-                      <th className="p-3 text-left w-10">
-                        <input
-                          type="checkbox"
-                          className="rounded border-gray-300"
-                          checked={paginationData.paginatedItems.filter(i => i.status === "rascunho").length > 0 && paginationData.paginatedItems.filter(i => i.status === "rascunho").every(i => selectedAquisicaoIds.has(i.id!))}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              const newSet = new Set(selectedAquisicaoIds);
-                              paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.add(i.id!));
-                              setSelectedAquisicaoIds(newSet);
-                            } else {
-                              const newSet = new Set(selectedAquisicaoIds);
-                              paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.delete(i.id!));
-                              setSelectedAquisicaoIds(newSet);
-                            }
-                          }}
-                        />
-                      </th>
-                    )}
+                    <th className="p-3 text-left w-10">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300"
+                        checked={paginationData.paginatedItems.filter(i => i.status === "rascunho").length > 0 && paginationData.paginatedItems.filter(i => i.status === "rascunho").every(i => selectedAquisicaoIds.has(i.id!))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            const newSet = new Set(selectedAquisicaoIds);
+                            paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.add(i.id!));
+                            setSelectedAquisicaoIds(newSet);
+                          } else {
+                            const newSet = new Set(selectedAquisicaoIds);
+                            paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.delete(i.id!));
+                            setSelectedAquisicaoIds(newSet);
+                          }
+                        }}
+                        disabled={paginationData.paginatedItems.filter(i => i.status === "rascunho").length === 0}
+                      />
+                    </th>
                     <th className="p-3 text-left text-xs font-medium text-muted-foreground w-16">Código</th>
                     <th className="p-3 text-left text-xs font-medium text-muted-foreground">Descrição</th>
                     <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Unid.</th>
@@ -1836,23 +1921,21 @@ const GerenciaPanel = () => {
                     const readOnly = item.status !== "rascunho";
                     return (
                       <tr key={item.id ?? `item-${item.codigo}-${idx}`} className={`border-b hover:bg-muted/30 ${idx % 2 === 0 ? "bg-background" : "bg-muted/10"}`}>
-                        {!isReadOnly && (
-                          <td className="p-3 text-center">
-                            {item.status === "rascunho" && (
-                              <input
-                                type="checkbox"
-                                className="rounded border-gray-300"
-                                checked={selectedAquisicaoIds.has(item.id!)}
-                                onChange={(e) => {
-                                  const newSet = new Set(selectedAquisicaoIds);
-                                  if (e.target.checked) newSet.add(item.id!);
-                                  else newSet.delete(item.id!);
-                                  setSelectedAquisicaoIds(newSet);
-                                }}
-                              />
-                            )}
-                          </td>
-                        )}
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={item.status === "rascunho" && selectedAquisicaoIds.has(item.id!)}
+                            disabled={item.status !== "rascunho" || !item.id}
+                            onChange={(e) => {
+                              if (item.status !== "rascunho" || !item.id) return;
+                              const newSet = new Set(selectedAquisicaoIds);
+                              if (e.target.checked) newSet.add(item.id!);
+                              else newSet.delete(item.id!);
+                              setSelectedAquisicaoIds(newSet);
+                            }}
+                          />
+                        </td>
                         <td className="p-3 text-sm font-mono text-primary">{item.codigo}</td>
                         <td className="p-3 text-sm">
                           <p className="font-medium">{item.descricao}</p>

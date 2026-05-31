@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";import { useQuery, useQueryClient } from "@tanstack/react-query";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
 import { PlanTable } from "@/components/tables/PlanTable";
@@ -540,20 +541,22 @@ const DiretoriaAprovacao = () => {
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos")
     : 0;
   const gastoAquisicaoDiretoria = useMemo(
-    () => [...items, ...itensProprios].reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [items, itensProprios],
+    () => [...filteredOwnItems, ...recebidosTableItems].reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+    [filteredOwnItems, recebidosTableItems],
   );
-  const gastoServicosDiretoria = useMemo(
-    () =>
-      servicosData
-        .filter((s: ServicoItem) => s.status !== "rascunho")
-        .reduce(
-          (acc: number, servico: ServicoItem) =>
-            acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
-          0,
-        ),
-    [servicosData],
-  );
+  const gastoServicosDiretoria = useMemo(() => {
+    let list = servicosData.filter((s: ServicoItem) => s.status !== "rascunho");
+    if (selectedOption === "servicos_novos") {
+      list = list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+    } else if (selectedOption === "servicos_existentes") {
+      list = list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
+    }
+    return list.reduce(
+      (acc: number, servico: ServicoItem) =>
+        acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
+      0
+    );
+  }, [servicosData, selectedOption]);
 
   // Serviços da própria diretoria (apenas rascunhos)
   const servicosProprios: ServicoItem[] = useMemo(() => {
@@ -779,14 +782,46 @@ const DiretoriaAprovacao = () => {
   };
 
   const handleDeleteSolicitacao = async (itemId: string) => {
-    if (!confirm("Deseja realmente excluir este item?")) return;
+    if (!confirm("Deseja realmente devolver este item para rascunho?")) return;
     try {
-      await deleteSolicitacao(itemId);
+      const itemToUpdate = [...items, ...itensProprios].find(i => i.id === itemId);
+      
+      // Atualização otimista
+      queryClient.setQueryData(["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+        if (!oldData) return oldData;
+        return oldData.map((s: any) => {
+          if (s.id === itemId) {
+            if (itemToUpdate && itemToUpdate.status === "rascunho") {
+              return { ...s, qtd_estimada: 0 };
+            }
+            return { ...s, status: "rascunho" };
+          }
+          return s;
+        });
+      });
+
+      if (itemToUpdate && itemToUpdate.status === "rascunho") {
+        await updateSolicitacao(itemId, { qtdEstimada: 0 });
+      } else {
+        await updateSolicitacao(itemId, { status: "rascunho" });
+      }
+      
+      setSelectedOwnItems(prev => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
+      setSelectedItems(prev => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
+
       await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id] });
-      toast({ title: "Item excluído", description: "Solicitação removida com sucesso." });
+      toast({ title: "Item devolvido", description: "Solicitação devolvida para rascunho com sucesso." });
     } catch (error) {
-      console.error("Erro ao excluir solicitação:", error);
-      toast({ title: "Erro ao excluir", description: "Não foi possível remover a solicitação.", variant: "destructive" });
+      console.error("Erro ao devolver solicitação:", error);
+      toast({ title: "Erro ao devolver", description: "Não foi possível devolver a solicitação.", variant: "destructive" });
     }
   };
 
@@ -825,14 +860,34 @@ const DiretoriaAprovacao = () => {
   };
 
   const handleDeleteServicoDiretoria = async (servicoId: string) => {
-    if (!confirm("Deseja realmente excluir este serviço?")) return;
+    if (!confirm("Deseja realmente devolver este serviço para rascunho?")) return;
     try {
-      await deleteServico(servicoId);
+      const srv = servicosData.find((s: any) => s.id === servicoId);
+      
+      // Atualização otimista
+      queryClient.setQueryData(["servicos-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+        if (!oldData) return oldData;
+        return oldData.map((s: any) => {
+          if (s.id === servicoId) {
+            if (srv && srv.status === "rascunho") {
+              return { ...s, estimativa_valor: 0, dotacao_orcamentaria: 0 };
+            }
+            return { ...s, status: "rascunho" };
+          }
+          return s;
+        });
+      });
+
+      if (srv && srv.status === "rascunho") {
+        await updateServico(servicoId, { estimativa_valor: 0, dotacao_orcamentaria: 0 });
+      } else {
+        await updateServico(servicoId, { status: "rascunho" });
+      }
       await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
-      toast({ title: "Serviço excluído", description: "Serviço removido com sucesso." });
+      toast({ title: "Serviço devolvido", description: "Serviço devolvido para rascunho com sucesso." });
     } catch (error) {
-      console.error("Erro ao excluir serviço:", error);
-      toast({ title: "Erro ao excluir", description: "Não foi possível remover o serviço.", variant: "destructive" });
+      console.error("Erro ao devolver serviço:", error);
+      toast({ title: "Erro ao devolver", description: "Não foi possível devolver o serviço.", variant: "destructive" });
     }
   };
 
@@ -1044,24 +1099,13 @@ const DiretoriaAprovacao = () => {
 
   const handleSendToCompras = async () => {
     if (selectedApprovedItems.length === 0) return;
-    const diretoriaQueryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
-    // Atualiza cache imediatamente para feedback visual instantâneo
-    selectedApprovedItems.forEach((item) => {
-      if (item.id) {
-        queryClient.setQueryData(diretoriaQueryKey, (current: any) => {
-          if (!Array.isArray(current)) return current;
-          return current.map((row: any) => row?.id === item.id ? { ...row, status: "em_compra" } : row);
-        });
-      }
-    });
     setConfirmComprasOpen(false);
     setSelectedItems(new Set());
     try {
-      await Promise.all(
-        selectedApprovedItems
-          .filter((item) => item.id)
-          .map((item) => updateSolicitacaoStatus(item.id!, "em_compra"))
-      );
+      const validIds = selectedApprovedItems.map(i => i.id!).filter(Boolean);
+      if (validIds.length > 0) {
+        await updateSolicitacaoStatusBulk(validIds, "em_compra");
+      }
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast({
         title: "Enviado para Compras",
@@ -1135,25 +1179,22 @@ const DiretoriaAprovacao = () => {
             (item) => item.id && selectedItems.has(item.id) && !isItemReadOnly(item),
           );
 
-    const diretoriaQueryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
-    // Atualiza cache imediatamente
-    itemsToUpdate.forEach((item) => {
-      if (item.id) {
-        queryClient.setQueryData(diretoriaQueryKey, (current: any) => {
-          if (!Array.isArray(current)) return current;
-          return current.map((row: any) => row?.id === item.id ? { ...row, status: newStatus } : row);
-        });
-      }
-    });
     setActionDialog({ open: false, action: null, isBulk: false });
     setJustificativa("");
     setSelectedItems(new Set());
     try {
-      await Promise.all(
-        itemsToUpdate
-          .filter((item) => item.id)
-          .map((item) => updateSolicitacaoStatus(item.id!, newStatus, justificativa || undefined))
-      );
+      const validIds = itemsToUpdate.map(i => i.id!).filter(Boolean);
+      if (validIds.length > 0) {
+        // Atualização otimista
+        queryClient.setQueryData(["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+          if (!oldData) return oldData;
+          return oldData.map((s: any) => 
+            validIds.includes(s.id) ? { ...s, status: newStatus } : s
+          );
+        });
+
+        await updateSolicitacaoStatusBulk(validIds, newStatus, justificativa || undefined);
+      }
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       
       let actionText = "processado(s)";
@@ -1177,34 +1218,7 @@ const DiretoriaAprovacao = () => {
     }
   };
 
-  const handleBulkDeleteRejected = async () => {
-    if (selectedItems.size === 0) return;
-    if (
-      !confirm(
-        `Deseja realmente excluir permanentemente os ${selectedItems.size} itens selecionados?`,
-      )
-    )
-      return;
 
-    try {
-      const ids = Array.from(selectedItems);
-      await deleteSolicitacoesBulk(ids);
-
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
-      setSelectedItems(new Set());
-      toast({
-        title: "Itens excluídos",
-        description: "Os itens rejeitados selecionados foram removidos com sucesso.",
-      });
-    } catch (error) {
-      console.error("Erro ao excluir itens em massa:", error);
-      toast({
-        title: "Erro ao excluir",
-        description: "Não foi possível remover alguns itens.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const toggleSelectServico = (servicoId: string) => {
     const newSelected = new Set(selectedServicos);
@@ -1370,6 +1384,15 @@ const DiretoriaAprovacao = () => {
     setJustificativa("");
     setSelectedServicos(new Set());
     try {
+      // Atualização otimista
+      queryClient.setQueryData(["servicos-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+        if (!oldData) return oldData;
+        const idsToUpdate = servicosToUpdate.map((s: any) => s.id);
+        return oldData.map((s: any) => 
+          idsToUpdate.includes(s.id) ? { ...s, status: newStatus } : s
+        );
+      });
+
       await Promise.all(
         servicosToUpdate
           .filter((s: any) => s.id)
@@ -1419,22 +1442,7 @@ const DiretoriaAprovacao = () => {
     }
   };
 
-  const handleBulkDeleteRejectedServicos = async () => {
-    if (selectedServicos.size === 0) return;
-    if (!confirm(`Deseja realmente excluir ${selectedServicos.size} serviço(s) rejeitado(s)?`)) return;
 
-    try {
-      await Promise.all(
-        Array.from(selectedServicos).map((id) => deleteServico(id))
-      );
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
-      setSelectedServicos(new Set());
-      toast({ title: "Serviços excluídos", description: "Serviços rejeitados removidos com sucesso." });
-    } catch (error) {
-      console.error("Erro ao excluir serviços:", error);
-      toast({ title: "Erro", description: "Não foi possível excluir os serviços.", variant: "destructive" });
-    }
-  };
 
   if (isDiretoriasLoading) {
     return (
@@ -1892,7 +1900,7 @@ const DiretoriaAprovacao = () => {
 
                     <div className="max-w-7xl mx-auto px-6 py-6">
             <BudgetConsumptionCard
-              titulo={`Orçamento da Diretoria ${siglaUpper} (serviços)`}
+              titulo={`Orçamento da Diretoria ${siglaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
               orcamento={orcamentoDiretoriaServicos}
               gasto={gastoServicosDiretoria}
             />
@@ -2112,16 +2120,6 @@ const DiretoriaAprovacao = () => {
                           >
                             <Undo2 className="h-4 w-4" />
                             Voltar para Pendentes ({selectedServicos.size})
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="gap-2"
-                            onClick={handleBulkDeleteRejectedServicos}
-                            disabled={selectedServicos.size === 0}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Excluir Selecionados ({selectedServicos.size})
                           </Button>
                         </>
                       )}
@@ -2538,11 +2536,11 @@ const DiretoriaAprovacao = () => {
             {selectedOwnItems.size > 0 && (
               <div className="mb-4 flex items-center gap-2">
                 <Button 
-                  variant="destructive" 
+                  variant="outline" 
                   size="sm" 
-                  className="gap-2"
+                  className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                   onClick={async () => {
-                    if (confirm(`Deseja realmente excluir ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
+                    if (confirm(`Deseja realmente devolver para rascunho ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
                       for (const id of selectedOwnItems) {
                         if (typeof id === 'string') {
                           await handleDeleteSolicitacao(id);
@@ -2552,8 +2550,8 @@ const DiretoriaAprovacao = () => {
                     }
                   }}
                 >
-                  <Trash2 className="h-4 w-4" />
-                  Excluir Selecionados ({selectedOwnItems.size})
+                  <Undo2 className="h-4 w-4" />
+                  Devolver para Rascunho ({selectedOwnItems.size})
                 </Button>
               </div>
             )}
@@ -2840,16 +2838,6 @@ const DiretoriaAprovacao = () => {
                       <Undo2 className="h-4 w-4" />
                       Voltar para Pendentes ({selectedItems.size})
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="gap-2"
-                      onClick={handleBulkDeleteRejected}
-                      disabled={selectedItems.size === 0}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Excluir Selecionados ({selectedItems.size})
-                    </Button>
                   </>
                 )}
               </div>
@@ -2997,10 +2985,10 @@ const DiretoriaAprovacao = () => {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7 text-destructive"
-                                    title="Excluir"
+                                    title="Devolver para Rascunho"
                                     onClick={() => handleDeleteSolicitacao(item.id!)}
                                   >
-                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <Undo2 className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
                               </>
