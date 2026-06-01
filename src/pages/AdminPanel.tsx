@@ -1,17 +1,26 @@
-import { useState, useEffect } from "react";
+// deno-lint-ignore-file no-explicit-any
+import React, { useState, useEffect } from "react";
+
+const DIRETORIA_GERENCIAS: Record<string, string[]> = {
+  "DG": ["GCFI", "GCON", "GEPE", "GESL", "GSAD"],
+  "DE": ["EMAR", "EOBR", "EPRE", "EPRO"],
+  "DC": ["CCRC", "CCRF", "CCRR"],
+  "DO": ["ODCD", "OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB", "OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"],
+  "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
+};
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Calendar, Save, Shield, Users, Clock, RefreshCw, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
-import { AdminBudgetControl } from "@/components/features/admin/AdminBudgetControl";
-import { AdminCatalogItemControl } from "@/components/features/admin/AdminCatalogItemControl";
-import { AdminServicosControl } from "@/components/features/admin/AdminServicosControl";
-import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "@/lib/services";
+import { Button } from "../components/ui/button.tsx";
+import { Badge } from "../components/ui/badge.tsx";
+import { Card } from "../components/ui/card.tsx";
+import { Input } from "../components/ui/input.tsx";
+import { Label } from "../components/ui/label.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.tsx";
+import { AccessCodeScreen } from "../components/ui/AccessCodeScreen.tsx";
+import { AdminBudgetControl } from "../components/features/admin/AdminBudgetControl.tsx";
+import { AdminCatalogItemControl } from "../components/features/admin/AdminCatalogItemControl.tsx";
+import { AdminServicosControl } from "../components/features/admin/AdminServicosControl.tsx";
+import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -36,6 +45,8 @@ interface Diretoria {
 const AdminPanel = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  const [expandedDir, setExpandedDir] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
 
   const { data: diretorias = [], isLoading: isLoadingDiretorias } = useQuery({
@@ -207,7 +218,7 @@ const AdminPanel = () => {
             <TabsList className="mb-5">
               <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
               <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
-              <TabsTrigger value="catalogo">Itens</TabsTrigger>
+              <TabsTrigger value="catalogo">Aquisição</TabsTrigger>
               <TabsTrigger value="servicos">Serviços</TabsTrigger>
             </TabsList>
 
@@ -392,19 +403,59 @@ const AdminPanel = () => {
                     <div className="col-span-full text-center text-muted-foreground">Nenhuma diretoria encontrada.</div>
                   ) : (
                     diretorias.map((dir: Diretoria) => (
-                      <div key={dir.sigla} className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md transition-shadow">
-                        <span className="text-2xl">📋</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
+                      <React.Fragment key={dir.sigla}>
+                        <div 
+                          className={`flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group ${expandedDir === dir.sigla ? 'ring-2 ring-primary border-primary' : ''}`}
+                          onClick={() => setExpandedDir(expandedDir === dir.sigla ? null : dir.sigla)}
+                        >
+                          <span className="text-2xl group-hover:scale-110 transition-transform">📋</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
+                            <div className="flex gap-3 mt-2 text-xs font-medium">
+                              <span className="text-primary">{dir.totalItens} itens</span>
+                              <span className="text-blue-600">{dir.totalGerencias} gerências</span>
+                            </div>
                           </div>
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
-                          <div className="flex gap-3 mt-2 text-xs font-medium">
-                            <span className="text-primary">{dir.totalItens} itens</span>
-                            <span className="text-blue-600">{dir.totalGerencias} gerências</span>
-                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={(e) => { e.stopPropagation(); navigate(`/admin/diretoria/${dir.id}`); }}
+                            className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+                          >
+                            Ir para Dashboard
+                          </Button>
                         </div>
-                      </div>
+
+                        {expandedDir === dir.sigla && (
+                          <div className="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-4 bg-slate-50/80 rounded-xl border border-slate-200 mt-2 animate-in fade-in slide-in-from-top-2">
+                            <div className="col-span-full flex items-center justify-between mb-1">
+                               <span className="text-sm font-semibold text-slate-700">
+                                 Selecione a Gerência (Visão Específica)
+                               </span>
+                               <Button variant="link" size="sm" onClick={() => navigate(`/admin/diretoria/${dir.id}`)} className="text-xs text-indigo-600">
+                                 Acessar Visão Geral ({dir.sigla})
+                               </Button>
+                            </div>
+                            {(DIRETORIA_GERENCIAS[dir.sigla] || ["Geral"]).map(ger => (
+                              <div 
+                                key={ger} 
+                                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border bg-white shadow-sm hover:shadow-md hover:border-indigo-400 transition-all cursor-pointer group text-center"
+                                onClick={() => navigate(`/admin/diretoria/${dir.id}?gerencia=${encodeURIComponent(ger)}`)}
+                              >
+                                <Badge variant="outline" className="text-indigo-700 bg-indigo-50 border-indigo-200 text-sm font-bold group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                  {ger.split(" - ")[0]}
+                                </Badge>
+                                <span className="text-xs text-slate-500 font-medium line-clamp-2">
+                                  {ger.split(" - ")[1] || ger}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </React.Fragment>
                     ))
                   )}
                 </div>

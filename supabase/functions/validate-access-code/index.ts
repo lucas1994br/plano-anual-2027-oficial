@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 // deno-lint-ignore-file
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";

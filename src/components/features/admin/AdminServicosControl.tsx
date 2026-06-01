@@ -1,6 +1,7 @@
+// deno-lint-ignore-file no-explicit-any
 // AdminServicosControl.tsx - Versão CORRIGIDA SEM ANY
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2 } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -15,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import {
   Dialog,
   DialogContent,
@@ -113,6 +115,11 @@ export function AdminServicosControl() {
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
+  // Estados de busca e seleção
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   // Paginação
   const [currentPage, setCurrentPage] = useState(1);
@@ -214,13 +221,23 @@ export function AdminServicosControl() {
     enabled: !!editFormData.diretoria_id && !!editingServico,
   });
 
+  const filteredServicos = useMemo(() => {
+    if (!searchTerm) return servicos;
+    const term = searchTerm.toLowerCase();
+    return (servicos as ServicoCatalogo[]).filter(servico => 
+      String(servico.item).toLowerCase().includes(term) ||
+      servico.objeto.toLowerCase().includes(term) ||
+      servico.tipo_contratacao.toLowerCase().includes(term)
+    );
+  }, [servicos, searchTerm]);
+
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(servicos.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(filteredServicos.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = (servicos as ServicoCatalogo[]).slice(startIdx, endIdx);
-    return { totalPages, currentPage, paginatedItems };
-  }, [servicos, currentPage]);
+    const paginatedItems = (filteredServicos as ServicoCatalogo[]).slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems, totalFiltered: filteredServicos.length };
+  }, [filteredServicos, currentPage]);
 
   const summary = useMemo(() => ({
     totalItens: servicos.length,
@@ -381,6 +398,42 @@ export function AdminServicosControl() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    
+    if (!confirm(`Tem certeza que deseja excluir ${selectedIds.length} serviços? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+
+    setIsDeletingBulk(true);
+    try {
+      await Promise.all(selectedIds.map(id => deleteServicoCatalogoAdmin(id)));
+      setSelectedIds([]);
+      await refetchServicos();
+      queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      toast.success(`${selectedIds.length} serviços removidos com sucesso.`);
+    } catch (_error: unknown) {
+      toast.error("Ocorreu um erro ao excluir um ou mais serviços.");
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === paginationData.paginatedItems.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(paginationData.paginatedItems.map(s => s.id));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(sId => sId !== id) : [...prev, id]
+    );
+  };
+
   const getDiretoriaSigla = (diretoriaId: string): string => {
     const dir = diretorias.find((d: Diretoria) => d.id === diretoriaId);
     return dir?.sigla || diretoriaId;
@@ -424,17 +477,52 @@ export function AdminServicosControl() {
 
       {/* Lista de Serviços */}
       <Card className="p-6 card-shadow">
-        <h2 className="text-lg font-semibold text-foreground mb-4">Serviços Cadastrados</h2>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+          <h2 className="text-lg font-semibold text-foreground">Serviços Cadastrados</h2>
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar serviço..."
+                className="pl-8"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                  setSelectedIds([]);
+                }}
+              />
+            </div>
+            {selectedIds.length > 0 && (
+              <Button 
+                variant="destructive" 
+                onClick={handleBulkDelete}
+                disabled={isDeletingBulk}
+                className="whitespace-nowrap w-full sm:w-auto"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {isDeletingBulk ? "Excluindo..." : `Excluir (${selectedIds.length})`}
+              </Button>
+            )}
+          </div>
+        </div>
 
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Carregando serviços...</div>
-        ) : servicos.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">Nenhum serviço cadastrado.</div>
+        ) : filteredServicos.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">Nenhum serviço encontrado.</div>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12 text-center">
+                    <Checkbox 
+                      checked={selectedIds.length === paginationData.paginatedItems.length && paginationData.paginatedItems.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Selecionar todos os serviços da página"
+                    />
+                  </TableHead>
                   <TableHead className="w-16">Item</TableHead>
                   <TableHead>Objeto</TableHead>
                   <TableHead className="w-32">Tipo</TableHead>
@@ -449,7 +537,14 @@ export function AdminServicosControl() {
               </TableHeader>
               <TableBody>
                 {paginationData.paginatedItems.map((servico) => (
-                  <TableRow key={servico.id}>
+                  <TableRow key={servico.id} className={selectedIds.includes(servico.id) ? "bg-muted/50" : ""}>
+                    <TableCell className="text-center">
+                      <Checkbox 
+                        checked={selectedIds.includes(servico.id)}
+                        onCheckedChange={() => toggleSelect(servico.id)}
+                        aria-label={`Selecionar serviço ${servico.item}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono">{servico.item}</TableCell>
                     <TableCell className="max-w-md">
                       <p className="font-medium truncate">{servico.objeto}</p>
@@ -561,7 +656,7 @@ export function AdminServicosControl() {
               </PaginationContent>
             </Pagination>
             <div className="flex justify-center mt-2 text-sm text-muted-foreground">
-              Página {currentPage} de {paginationData.totalPages} • Total: {summary.totalItens} serviços
+              Página {currentPage} de {paginationData.totalPages} • Exibindo {paginationData.totalFiltered} serviços
             </div>
           </div>
         )}

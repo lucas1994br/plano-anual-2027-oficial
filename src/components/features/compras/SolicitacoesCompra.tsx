@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import erpService from '@/lib/services-erp.ts';
 import type { SolicitacaoCompra } from '@/types/erp.ts';
 import { Card } from '@/components/ui/card.tsx';
@@ -17,11 +17,7 @@ export function SolicitacoesCompra({ diretoriaId, onSolicitacaoSelecionada }: So
   const [mostraFormulario, setMostraFormulario] = useState(false);
   const [novaDescricao, setNovaDescricao] = useState('');
 
-  useEffect(() => {
-    carregarSolicitacoes();
-  }, [diretoriaId]);
-
-  async function carregarSolicitacoes() {
+  const carregarSolicitacoes = useCallback(async () => {
     try {
       setCarregando(true);
       const dados = await erpService.listarSolicitacoesPorDiretoria(diretoriaId);
@@ -36,7 +32,11 @@ export function SolicitacoesCompra({ diretoriaId, onSolicitacaoSelecionada }: So
     } finally {
       setCarregando(false);
     }
-  }
+  }, [diretoriaId]);
+
+  useEffect(() => {
+    carregarSolicitacoes();
+  }, [carregarSolicitacoes]);
 
   async function handleCriarSolicitacao(e: React.FormEvent) {
     e.preventDefault();

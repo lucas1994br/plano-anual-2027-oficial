@@ -9,6 +9,7 @@ import DiretoriaAprovacao from "../pages/DiretoriaAprovacao.tsx";
 import GerenciaPanel from "../pages/GerenciaPanel.tsx";
 import ComprasPanel from "../pages/ComprasPanel.tsx";
 import AdminPanel from "../pages/AdminPanel.tsx";
+import AdminDiretoriaDashboard from "../pages/AdminDiretoriaDashboard.tsx";
 import ErpTest from "../pages/ErpTest.tsx";
 import NotFound from "../pages/NotFound.tsx";
 
@@ -29,6 +30,7 @@ const App = () => {
               <Route path="/diretoria/:sigla/gerencia/:gerencia" element={<GerenciaPanel />} />
               <Route path="/compras" element={<ComprasPanel />} />
               <Route path="/admin" element={<AdminPanel />} />
+              <Route path="/admin/diretoria/:id" element={<AdminDiretoriaDashboard />} />
               <Route path="/erp-test" element={<ErpTest />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

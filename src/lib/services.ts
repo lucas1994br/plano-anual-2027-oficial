@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import { supabase } from "./supabaseClient.ts";
 import type {
   PlanItem,
@@ -8,7 +9,6 @@ import type {
 import type { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig.ts";
 import type {
   PostgrestSingleResponse,
-  PostgrestFilterBuilder,
 } from "@supabase/supabase-js";
 
 const SUPABASE_PAGE_SIZE = 1000;
@@ -32,7 +32,7 @@ function loadDiretoriasCache(): DiretoriaRow[] | null {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(DIRETORIAS_CACHE_KEY);
+    const raw = globalThis.localStorage.getItem(DIRETORIAS_CACHE_KEY);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as CacheData<DiretoriaRow>;
@@ -49,7 +49,7 @@ function saveDiretoriasCache(data: DiretoriaRow[]): void {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    globalThis.localStorage.setItem(
       DIRETORIAS_CACHE_KEY,
       JSON.stringify({ updatedAt: Date.now(), data })
     );
@@ -1229,4 +1229,62 @@ export async function deleteServicoAdmin(servicoId: string): Promise<unknown> {
     accessCode: adminAccessCode,
     servicoId,
   });
+}
+
+export async function updateItemCatalogoAdmin(
+  itemId: string,
+  updates: Partial<{
+    codigo: number;
+    descricao: string;
+    categoria: string;
+    unidade: string;
+    valor_unitario: number;
+  }>
+): Promise<unknown> {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+
+  if (!adminAccessCode) {
+    throw new Error("Sessão admin não encontrada.");
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "admin-update-catalog-item",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        itemId,
+        updates,
+      },
+    }
+  );
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+export async function deleteItemCatalogoAdmin(
+  itemId: string
+): Promise<unknown> {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+
+  if (!adminAccessCode) {
+    throw new Error("Sessão admin não encontrada.");
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "admin-delete-catalog-item",
+    {
+      body: {
+        accessCode: adminAccessCode,
+        itemId,
+      },
+    }
+  );
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
 }

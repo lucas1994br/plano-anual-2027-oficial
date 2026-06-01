@@ -24,10 +24,10 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { accessCode, rules } = await req.json();
+    const { accessCode, itemId, updates } = await req.json();
 
-    if (!accessCode || !rules || typeof rules !== "object") {
-      return new Response(JSON.stringify({ error: "Missing accessCode or rules" }), {
+    if (!accessCode || !itemId || !updates) {
+      return new Response(JSON.stringify({ error: "Missing accessCode, itemId or updates" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -47,34 +47,30 @@ serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const accessHash = await hashCode(accessCode);
 
-    // Validar Admin - Busca por código direto OU código hash
-    const { data: accessRowsCode, error: errorCode } = await supabase
+    // Validar Admin
+    const { data: accessRowByCode, error: errorByCode } = await supabase
       .from("codigos_acesso")
       .select("id, scope, ativo, expira_em")
       .eq("scope", "admin")
       .eq("ativo", true)
       .eq("codigo_hash", accessCode)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .maybeSingle();
 
-    const { data: accessRowsHash, error: errorHash } = await supabase
+    const { data: accessRowByHash, error: errorByHash } = await supabase
       .from("codigos_acesso")
       .select("id, scope, ativo, expira_em")
       .eq("scope", "admin")
       .eq("ativo", true)
       .eq("codigo_hash", accessHash)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .maybeSingle();
 
-    const accessRows = (accessRowsCode && accessRowsCode.length > 0) ? accessRowsCode : accessRowsHash;
-    const accessError = errorCode || errorHash;
+    const accessRow = accessRowByCode || accessRowByHash;
+    const accessError = errorByCode || errorByHash;
 
     if (accessError) {
       console.error("Error validating access code:", accessError);
       throw accessError;
     }
-
-    const accessRow = accessRows?.[0] ?? null;
 
     if (!accessRow) {
       return new Response(JSON.stringify({ error: "Codigo admin invalido." }), {
@@ -90,56 +86,51 @@ serve(async (req: Request) => {
       });
     }
 
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // Preparar campos para atualização na tabela itens_catalogo
+    const updateData: any = {};
+    if (updates.codigo !== undefined) updateData.codigo = Number(updates.codigo);
+    if (updates.descricao !== undefined) updateData.descricao = String(updates.descricao).trim();
+    if (updates.categoria !== undefined) updateData.categoria = String(updates.categoria).trim();
+    if (updates.unidade !== undefined) updateData.unidade = String(updates.unidade).trim().toUpperCase();
+    if (updates.valor_unitario !== undefined) updateData.valor_unitario = Number(updates.valor_unitario);
 
-    const entries = Object.entries(rules as Record<string, string>).filter(
-      ([categoria, diretoriaId]) => categoria && diretoriaId && uuidPattern.test(diretoriaId),
-    );
+    const { data: itemData, error: itemError } = await supabase
+      .from("itens_catalogo")
+      .update(updateData)
+      .eq("id", itemId)
+      .select("*")
+      .single();
 
-    if (entries.length === 0) {
-      return new Response(JSON.stringify({ success: true, updated: 0 }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (itemError) {
+      throw itemError;
     }
 
-    // Validate that diretoria IDs actually exist in DB before upserting (avoids FK violations from stale localStorage)
-    const { data: diretorias, error: diretoriasError } = await supabase.from("diretorias").select("id");
-    if (diretoriasError) throw diretoriasError;
-     
-    const validDiretoriaIds = new Set((diretorias || []).map((d: any) => d.id));
-    const validEntries = entries.filter(([, id]) => validDiretoriaIds.has(id));
+    // Tentar atualizar as descrições e valores unitários das solicitações dependentes deste item 
+    // apenas em solicitações com status 'rascunho' ou 'pendente'.
+    // Valores unitários de solicitações podem ser atualizados junto, dependendo da regra de negócio.
+    const { error: solicitacoesError } = await supabase
+      .from("solicitacoes")
+      .update({
+        codigo: updateData.codigo,
+        descricao: updateData.descricao,
+        categoria: updateData.categoria,
+        unidade: updateData.unidade,
+        valor_unitario: updateData.valor_unitario
+      })
+      .eq("item_id", itemId)
+      .in("status", ["rascunho", "pendente"]);
 
-    if (validEntries.length === 0) {
-      return new Response(JSON.stringify({ success: true, updated: 0 }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (solicitacoesError) {
+      console.warn("Erro ao atualizar solicitacoes dependentes:", solicitacoesError);
+      // Não quebra a requisição se falhar em solicitações
     }
 
-    const payload = validEntries.map(([categoria, diretoriaOrcamentariaId]) => ({
-      categoria,
-      diretoria_orcamentaria_id: diretoriaOrcamentariaId,
-      ativo: true,
-      updated_at: new Date().toISOString(),
-    }));
-
-    const { error: upsertError } = await supabase
-      .from("categoria_diretoria_orcamentaria")
-      .upsert(payload, { onConflict: "categoria" });
-
-    if (upsertError) throw upsertError;
-
-    return new Response(JSON.stringify({ success: true, updated: payload.length }), {
+    return new Response(JSON.stringify({ success: true, item: itemData }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : (typeof error === "object" && error !== null && "message" in error)
-        ? String((error as { message?: unknown }).message ?? "Internal server error")
-        : "Internal server error";
+    const message = error instanceof Error ? error.message : "Internal server error";
     console.error(message);
 
     return new Response(JSON.stringify({ error: message }), {

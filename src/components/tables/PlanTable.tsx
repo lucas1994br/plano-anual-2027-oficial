@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { useRef, useState } from "react";
 import { Pencil, MessageSquare, FileDown, FileSpreadsheet, Check, X, Undo2 } from "lucide-react";
 import {

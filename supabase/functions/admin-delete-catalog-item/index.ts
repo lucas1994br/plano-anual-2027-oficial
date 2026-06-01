@@ -24,10 +24,10 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { accessCode, rules } = await req.json();
+    const { accessCode, itemId } = await req.json();
 
-    if (!accessCode || !rules || typeof rules !== "object") {
-      return new Response(JSON.stringify({ error: "Missing accessCode or rules" }), {
+    if (!accessCode || !itemId) {
+      return new Response(JSON.stringify({ error: "Missing accessCode or itemId" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -47,34 +47,30 @@ serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const accessHash = await hashCode(accessCode);
 
-    // Validar Admin - Busca por código direto OU código hash
-    const { data: accessRowsCode, error: errorCode } = await supabase
+    // Validar Admin
+    const { data: accessRowByCode, error: errorByCode } = await supabase
       .from("codigos_acesso")
       .select("id, scope, ativo, expira_em")
       .eq("scope", "admin")
       .eq("ativo", true)
       .eq("codigo_hash", accessCode)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .maybeSingle();
 
-    const { data: accessRowsHash, error: errorHash } = await supabase
+    const { data: accessRowByHash, error: errorByHash } = await supabase
       .from("codigos_acesso")
       .select("id, scope, ativo, expira_em")
       .eq("scope", "admin")
       .eq("ativo", true)
       .eq("codigo_hash", accessHash)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .maybeSingle();
 
-    const accessRows = (accessRowsCode && accessRowsCode.length > 0) ? accessRowsCode : accessRowsHash;
-    const accessError = errorCode || errorHash;
+    const accessRow = accessRowByCode || accessRowByHash;
+    const accessError = errorByCode || errorByHash;
 
     if (accessError) {
       console.error("Error validating access code:", accessError);
       throw accessError;
     }
-
-    const accessRow = accessRows?.[0] ?? null;
 
     if (!accessRow) {
       return new Response(JSON.stringify({ error: "Codigo admin invalido." }), {
@@ -90,56 +86,28 @@ serve(async (req: Request) => {
       });
     }
 
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // Como as solicitações dependem de itens_catalogo via Foreign Key, deletar pode causar erro 
+    // se o ON DELETE não for CASCADE. Se tiver restrição, podemos capturar e avisar que o item está em uso.
+    const { data: itemData, error: itemError } = await supabase
+      .from("itens_catalogo")
+      .delete()
+      .eq("id", itemId)
+      .select("*")
+      .single();
 
-    const entries = Object.entries(rules as Record<string, string>).filter(
-      ([categoria, diretoriaId]) => categoria && diretoriaId && uuidPattern.test(diretoriaId),
-    );
-
-    if (entries.length === 0) {
-      return new Response(JSON.stringify({ success: true, updated: 0 }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (itemError) {
+      if (itemError.code === '23503') { // Foreign key violation
+        throw new Error("Não é possível excluir este item porque ele já possui solicitações vinculadas.");
+      }
+      throw itemError;
     }
 
-    // Validate that diretoria IDs actually exist in DB before upserting (avoids FK violations from stale localStorage)
-    const { data: diretorias, error: diretoriasError } = await supabase.from("diretorias").select("id");
-    if (diretoriasError) throw diretoriasError;
-     
-    const validDiretoriaIds = new Set((diretorias || []).map((d: any) => d.id));
-    const validEntries = entries.filter(([, id]) => validDiretoriaIds.has(id));
-
-    if (validEntries.length === 0) {
-      return new Response(JSON.stringify({ success: true, updated: 0 }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const payload = validEntries.map(([categoria, diretoriaOrcamentariaId]) => ({
-      categoria,
-      diretoria_orcamentaria_id: diretoriaOrcamentariaId,
-      ativo: true,
-      updated_at: new Date().toISOString(),
-    }));
-
-    const { error: upsertError } = await supabase
-      .from("categoria_diretoria_orcamentaria")
-      .upsert(payload, { onConflict: "categoria" });
-
-    if (upsertError) throw upsertError;
-
-    return new Response(JSON.stringify({ success: true, updated: payload.length }), {
+    return new Response(JSON.stringify({ success: true, item: itemData }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : (typeof error === "object" && error !== null && "message" in error)
-        ? String((error as { message?: unknown }).message ?? "Internal server error")
-        : "Internal server error";
+    const message = error instanceof Error ? error.message : "Internal server error";
     console.error(message);
 
     return new Response(JSON.stringify({ error: message }), {
