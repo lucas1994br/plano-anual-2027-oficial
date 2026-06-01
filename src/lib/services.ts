@@ -386,7 +386,7 @@ export async function getSolicitacoesCompras(
   return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*, diretorias(sigla), gerencias(sigla)")
+      .select("*, diretorias!fk_solicitacoes_diretoria(sigla), gerencias!fk_solicitacoes_gerencia(sigla)")
       .eq("periodo_id", periodoId)
       .in("status", ["em_compra", "concluido"])
       .order("codigo")
@@ -532,6 +532,25 @@ export async function updateSolicitacaoStatusBulk(
     .insert(historicoRecords);
 
   if (histError) console.error("Erro ao registrar histórico em lote:", histError);
+}
+
+export async function updateServicoStatusBulk(
+  ids: string[],
+  status: SolicitacaoStatus,
+  justificativa?: string
+): Promise<void> {
+  const updates: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+
+  if (status === "rejeitado" && justificativa) {
+    updates.justificativa_rejeicao = justificativa;
+  }
+
+  const { error } = await supabase
+    .from("servicos")
+    .update(updates)
+    .in("id", ids);
+
+  if (error) throw error;
 }
 
 // ============ HISTÓRICO ============

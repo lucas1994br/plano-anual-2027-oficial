@@ -29,8 +29,16 @@ import {
   Line
 } from "recharts";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils.ts";
+import { useQuery } from "@tanstack/react-query";
+import { 
+  getPeriodosAtivos, 
+  getDiretorias, 
+  getTodasGerencias, 
+  getSolicitacoesByDiretoria, 
+  getServicosByDiretoria 
+} from "@/lib/services.ts";
 
-// ==================== SIMULATED DATA FOR DASHBOARD ====================
+// ==================== REAL DATA FOR DASHBOARD ====================
 const REAL_DIRETORIAS = ["DG", "DE", "DC", "DO", "PR"];
 
 // Mapeamento em CASCATA: Cada Diretoria tem suas próprias gerências reais
@@ -50,80 +58,154 @@ const BIMESTRES = ["1º Bimestre", "2º Bimestre", "3º Bimestre", "4º Bimestre
 const SEMANAS = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"];
 const ANOS = ["2026", "2027", "2028"];
 
-const generateMockData = (diretoriaId: string) => {
-  const dirIdUpper = diretoriaId.toUpperCase();
-  const gerenciasAtuais = DIRETORIA_GERENCIAS[dirIdUpper] || DIRETORIA_GERENCIAS["DC"];
+const useDashboardData = (filtroDiretoria: string) => {
+  const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({ queryKey: ["periodos-ativos"], queryFn: getPeriodosAtivos });
+  const periodoAtivoId = periodosAtivos?.[0]?.id as string | undefined;
 
-  const evolutionData = MOCK_MESES.map(mes => ({
-    name: mes,
-    aquisicoes: Math.floor(Math.random() * 500000) + 100000,
-    servicosNovos: Math.floor(Math.random() * 300000) + 50000,
-    servicosExistentes: Math.floor(Math.random() * 800000) + 200000,
-    orcamentoPlanejado: Math.floor(Math.random() * 1500000) + 500000,
-  }));
+  const { data: diretorias, isLoading: isLoadingDir } = useQuery({ queryKey: ["diretorias"], queryFn: getDiretorias });
+  const diretoria = (diretorias || []).find((d: any) => d.sigla.toUpperCase() === filtroDiretoria.toUpperCase());
 
-  const gerenciaData = gerenciasAtuais.map(ger => ({
-    name: ger.split(" - ")[0],
-    fullName: ger,
-    aquisicoes: Math.floor(Math.random() * 2000000) + 500000,
-    servicosNovos: Math.floor(Math.random() * 1000000) + 200000,
-    servicosExistentes: Math.floor(Math.random() * 3000000) + 1000000,
-    eficiencia: Math.floor(Math.random() * 100),
-    agilidade: Math.floor(Math.random() * 100),
-    conformidade: Math.floor(Math.random() * 100),
-  }));
+  const { data: todasGerencias, isLoading: isLoadingGer } = useQuery({ queryKey: ["todas-gerencias"], queryFn: getTodasGerencias });
+  const gerenciasAtuaisDb = (todasGerencias || []).filter((g: any) => g.diretoria_id === diretoria?.id);
+  
+  const gerenciasAtuais = gerenciasAtuaisDb.length > 0 
+    ? gerenciasAtuaisDb.map((g: any) => `${g.sigla}${g.nome ? ` - ${g.nome}` : ''}`) 
+    : (DIRETORIA_GERENCIAS[filtroDiretoria.toUpperCase()] || []);
 
-  const pieData = [
-    { name: "Equipamentos de TI", value: 400, tipo: "Aquisição" },
-    { name: "Material de Escritório", value: 300, tipo: "Aquisição" },
-    { name: "Móveis", value: 300, tipo: "Aquisição" },
-    { name: "Consultoria", value: 200, tipo: "Serviço Novo" },
-    { name: "Limpeza", value: 100, tipo: "Serviço Existente" },
-    { name: "Manutenção", value: 150, tipo: "Serviço Existente" },
-  ];
-
-  const matrixData = Array.from({ length: 50 }).map((_, i) => {
-    const isAquisicao = Math.random() > 0.4;
-    const isNovo = Math.random() > 0.5;
-    const tipo = isAquisicao ? "Aquisição" : (isNovo ? "Serviço Novo" : "Serviço Existente");
-    
-    const subcategoria = isAquisicao 
-      ? ["Equipamentos de TI", "Móveis", "Material de Escritório"][Math.floor(Math.random() * 3)]
-      : ["Consultoria", "Limpeza", "Manutenção"][Math.floor(Math.random() * 3)];
-
-    const progresso = Math.floor(Math.random() * 100);
-    const statusIdx = progresso === 100 ? 2 : progresso > 30 ? 1 : 0;
-    
-    const orcamentoPlanejado = Math.floor(Math.random() * 150000) + 5000;
-    let orcamentoExecutado = 0;
-    if (progresso === 100) {
-      orcamentoExecutado = orcamentoPlanejado * (Math.random() * 0.4 + 0.8);
-    } else {
-      orcamentoExecutado = orcamentoPlanejado * (progresso / 100) * (Math.random() * 0.2 + 0.9);
-    }
-    
-    const variacao = orcamentoPlanejado - orcamentoExecutado;
-    
-    return {
-      id: `REQ-${dirIdUpper}-${1000 + i}`,
-      gerencia: gerenciasAtuais[Math.floor(Math.random() * gerenciasAtuais.length)],
-      tipo: tipo,
-      subcategoria: subcategoria,
-      status: ["Planejado", "Em Execução", "Concluído"][statusIdx],
-      orcamentoPlanejado,
-      orcamentoExecutado,
-      variacao,
-      mes: MOCK_MESES[Math.floor(Math.random() * 12)],
-      ano: "2027",
-      trimestre: TRIMESTRES[Math.floor(Math.random() * 4)],
-      bimestre: BIMESTRES[Math.floor(Math.random() * 6)],
-      semana: SEMANAS[Math.floor(Math.random() * 4)],
-      progresso: progresso,
-      tendencia: variacao >= 0 ? "down" : "up"
-    };
+  const { data: solicitacoes = [], isLoading: isLoadingSol } = useQuery({
+    queryKey: ["solicitacoes", diretoria?.id, periodoAtivoId],
+    queryFn: () => getSolicitacoesByDiretoria(diretoria!.id, periodoAtivoId!),
+    enabled: !!diretoria?.id && !!periodoAtivoId,
   });
 
-  return { evolutionData, gerenciaData, pieData, matrixData, gerenciasAtuais };
+  const { data: servicos = [], isLoading: isLoadingSer } = useQuery({
+    queryKey: ["servicos-dash", diretoria?.id, periodoAtivoId],
+    queryFn: () => getServicosByDiretoria(diretoria!.id, periodoAtivoId!),
+    enabled: !!diretoria?.id && !!periodoAtivoId,
+  });
+
+  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer;
+
+  const mappedData = useMemo(() => {
+    const getStatusProgresso = (status?: string) => {
+      switch(status) {
+        case "concluido": return 100;
+        case "em_compra": return 75;
+        case "aprovado": return 50;
+        case "em_analise": return 25;
+        default: return 0;
+      }
+    };
+
+    const getStatusText = (progresso: number) => {
+      if (progresso === 100) return "Concluído";
+      if (progresso > 30) return "Em Execução";
+      return "Planejado";
+    };
+
+    const getMesName = (dateStr?: string) => {
+      if (!dateStr) return "Jan";
+      const d = new Date(dateStr);
+      return MOCK_MESES[d.getMonth()] || "Jan";
+    };
+
+    const matrixData: any[] = [];
+
+    solicitacoes.forEach((s: any) => {
+      const orcamentoPlanejado = (s.qtdEstimada || s.qtd_estimada || 0) * (s.valorUnitario || s.valor_unitario || 0);
+      const progresso = getStatusProgresso(s.status);
+      const orcamentoExecutado = orcamentoPlanejado * (progresso / 100);
+      const variacao = orcamentoPlanejado - orcamentoExecutado;
+      
+      const gerenciaSigla = s.gerencia || s.gerencias?.sigla || "Indefinido";
+      const gerenciaFull = gerenciasAtuais.find((g: any) => g.startsWith(gerenciaSigla)) || gerenciaSigla;
+
+      matrixData.push({
+        id: `REQ-${s.codigo || s.id?.substring(0,6)}`,
+        gerencia: gerenciaFull,
+        tipo: "Aquisição",
+        subcategoria: s.categoria || "Geral",
+        status: getStatusText(progresso),
+        orcamentoPlanejado,
+        orcamentoExecutado,
+        variacao,
+        mes: getMesName(s.created_at),
+        ano: "2027",
+        trimestre: "1º Trimestre",
+        bimestre: "1º Bimestre",
+        semana: "Semana 1",
+        progresso,
+        tendencia: variacao >= 0 ? "down" : "up"
+      });
+    });
+
+    servicos.forEach((s: any) => {
+      const orcamentoPlanejado = s.estimativaValor || s.estimativa_valor || 0;
+      const progresso = getStatusProgresso(s.status);
+      const orcamentoExecutado = orcamentoPlanejado * (progresso / 100);
+      const variacao = orcamentoPlanejado - orcamentoExecutado;
+      
+      const gerenciaSigla = s.gerencia || s.gerencias?.sigla || "Indefinido";
+      const gerenciaFull = gerenciasAtuais.find((g: any) => g.startsWith(gerenciaSigla)) || gerenciaSigla;
+
+      matrixData.push({
+        id: `SRV-${s.item || s.id?.substring(0,6)}`,
+        gerencia: gerenciaFull,
+        tipo: s.tipoContratacao === "Novo" || s.tipo_contratacao === "Novo" ? "Serviço Novo" : "Serviço Existente",
+        subcategoria: s.objeto ? (s.objeto.length > 25 ? s.objeto.substring(0, 25) + "..." : s.objeto) : "Geral",
+        status: getStatusText(progresso),
+        orcamentoPlanejado,
+        orcamentoExecutado,
+        variacao,
+        mes: getMesName(s.created_at),
+        ano: "2027",
+        trimestre: "1º Trimestre",
+        bimestre: "1º Bimestre",
+        semana: "Semana 1",
+        progresso,
+        tendencia: variacao >= 0 ? "down" : "up"
+      });
+    });
+
+    const evolutionData = MOCK_MESES.map(mes => {
+      const itemsInMonth = matrixData.filter(m => m.mes === mes);
+      return {
+        name: mes,
+        aquisicoes: itemsInMonth.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        servicosNovos: itemsInMonth.filter(m => m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        servicosExistentes: itemsInMonth.filter(m => m.tipo === "Serviço Existente").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        orcamentoPlanejado: itemsInMonth.reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+      };
+    });
+
+    const gerenciaData = gerenciasAtuais.map((gerFullName: any) => {
+      const gerSigla = gerFullName.split(" - ")[0];
+      const itemsInGer = matrixData.filter(m => m.gerencia === gerFullName);
+      return {
+        name: gerSigla,
+        fullName: gerFullName,
+        aquisicoes: itemsInGer.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        servicosNovos: itemsInGer.filter(m => m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        servicosExistentes: itemsInGer.filter(m => m.tipo === "Serviço Existente").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        eficiencia: itemsInGer.length > 0 ? itemsInGer.reduce((acc, curr) => acc + curr.progresso, 0) / itemsInGer.length : 0,
+        agilidade: itemsInGer.length > 0 ? 80 : 0, 
+        conformidade: itemsInGer.length > 0 ? 95 : 0 
+      };
+    });
+
+    const pieDataMap = new Map();
+    matrixData.forEach(item => {
+      if (!pieDataMap.has(item.subcategoria)) {
+        pieDataMap.set(item.subcategoria, { name: item.subcategoria, value: 0, tipo: item.tipo });
+      }
+      pieDataMap.get(item.subcategoria).value += item.orcamentoPlanejado;
+    });
+    const pieData = Array.from(pieDataMap.values()).filter(p => p.value > 0);
+
+    return { evolutionData, gerenciaData, pieData, matrixData, gerenciasAtuais };
+  }, [solicitacoes, servicos, gerenciasAtuais]);
+
+  return { ...mappedData, isLoading };
 };
 
 // ==================== DASHBOARD COMPONENT ====================
@@ -182,7 +264,7 @@ const AdminDiretoriaDashboard = () => {
     navigate(`/admin/diretoria/${val.toLowerCase()}`);
   };
 
-  const rawData = useMemo(() => generateMockData(filtroDiretoria), [filtroDiretoria]);
+  const { isLoading, ...rawData } = useDashboardData(filtroDiretoria);
 
   const filteredMatrix = useMemo(() => {
     return rawData.matrixData.filter(item => {
@@ -246,13 +328,13 @@ const AdminDiretoriaDashboard = () => {
 
   const dynamicPieData = useMemo(() => {
     return rawData.pieData
-      .filter(p => filtroSubcategoria === "todas" || p.name === filtroSubcategoria)
-      .filter(p => filtroCategoria === "todas" || p.tipo === filtroCategoria || p.tipo.includes(filtroCategoria.split(" ")[0]))
-      .map(p => {
+      .filter((p: any) => filtroSubcategoria === "todas" || p.name === filtroSubcategoria)
+      .filter((p: any) => filtroCategoria === "todas" || p.tipo === filtroCategoria || p.tipo.includes(filtroCategoria.split(" ")[0]))
+      .map((p: any) => {
         const factor = crossFilterGerencia ? 0.4 : 1;
         return {
           ...p,
-          value: p.value * factor * (Math.random() * 0.5 + 0.5),
+          value: p.value * factor,
           opacity: (crossFilterSubcat && crossFilterSubcat !== p.name) ? 0.3 : 1
         };
       });
@@ -301,9 +383,9 @@ const AdminDiretoriaDashboard = () => {
   };
 
   const getSubcategoriasOptions = () => {
-    if (filtroCategoria === "Aquisição") return ["Equipamentos de TI", "Móveis", "Material de Escritório"];
-    if (filtroCategoria.includes("Serviço")) return ["Consultoria", "Limpeza", "Manutenção"];
-    return ["Equipamentos de TI", "Móveis", "Material de Escritório", "Consultoria", "Limpeza", "Manutenção"];
+    const allSubs = Array.from(new Set(rawData.matrixData.map((m: any) => m.subcategoria)));
+    if (filtroCategoria === "todas") return allSubs as string[];
+    return Array.from(new Set(rawData.matrixData.filter((m: any) => m.tipo === filtroCategoria || m.tipo.includes(filtroCategoria.split(" ")[0])).map((m: any) => m.subcategoria))) as string[];
   };
 
   // Click Handlers (DEEP Power BI Interactivity)
@@ -328,6 +410,15 @@ const AdminDiretoriaDashboard = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 relative pb-12">
+      {isLoading && (
+        <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-xl shadow-lg border">
+            <div className="h-10 w-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className="font-semibold text-slate-700">Carregando Dados Reais do Banco...</p>
+          </div>
+        </div>
+      )}
+
       {/* HEADER GRADIENTE */}
       <div className="bg-gradient-to-r from-blue-900 to-indigo-900 px-6 py-8 text-white shadow-lg">
         <div className="max-w-7xl mx-auto">

@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet, Search } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import {
   Select,
   SelectContent,
@@ -22,9 +23,9 @@ import {
 } from "@/components/ui/table.tsx";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, getServicosCatalogo } from "@/lib/services.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, updateSolicitacaoStatusBulk, updateServicoStatusBulk } from "@/lib/services.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -34,6 +35,7 @@ const ComprasPanel = () => {
   const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | null>(null);
   const [selectedDiretoria, setSelectedDiretoria] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
+  const [searchTerm, setSearchTerm] = useState<string>("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectedServicos, setSelectedServicos] = useState<Set<string>>(new Set());
   const [itemsPage, setItemsPage] = useState(1);
@@ -42,31 +44,33 @@ const ComprasPanel = () => {
   const [servicosPerPage, setServicosPerPage] = useState(25);
 
   // Buscar diretorias
-  const { data: diretorias = [] } = useQuery({
+  const { data: diretorias = [], isLoading: loadingDir } = useQuery({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
   });
 
-  const { data: periodos = [] } = useQuery({
+  const { data: periodos = [], isLoading: loadingPer } = useQuery({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
   });
 
   const periodAtivo = periodos[0] as any;
 
-  const { data: solicitacoesCompras = [] } = useQuery({
+  const { data: solicitacoesCompras = [], isLoading: loadingSol } = useQuery({
     queryKey: ["solicitacoes-compras", periodAtivo?.id],
     queryFn: () => (periodAtivo ? getSolicitacoesCompras(periodAtivo.id) : []),
     enabled: !!periodAtivo,
   });
 
-  const { data: servicosCompras = [] } = useQuery({
+  const { data: servicosCompras = [], isLoading: loadingSer } = useQuery({
     queryKey: ["servicos-compras", periodAtivo?.id],
     queryFn: () => (periodAtivo ? getServicosCompras(periodAtivo.id) : []),
     enabled: !!periodAtivo,
   });
 
+  const isLoading = loadingDir || loadingPer || (!!periodAtivo && (loadingSol || loadingSer));
 
+  const queryClient = useQueryClient();
   const diretoriasById = useMemo(() => {
     const entries = diretorias.map((dir: any) => [dir.id, dir.sigla]);
     return new Map<string, string>(entries as any);
@@ -115,6 +119,7 @@ const ComprasPanel = () => {
   const filteredItems = useMemo(() => {
     const diretoriaSelecionada = normalizeFilterValue(selectedDiretoria);
     const categoriaSelecionada = selectedCategoria.trim();
+    const termo = searchTerm.trim().toLowerCase();
 
     return allApprovedItems.filter((item) => {
       const matchesDiretoria =
@@ -123,9 +128,15 @@ const ComprasPanel = () => {
       const matchesCategoria =
         categoriaSelecionada === "todas" ||
         (item.categoria || "").trim() === categoriaSelecionada;
-      return matchesDiretoria && matchesCategoria;
+        
+      const matchesSearch = termo === "" ||
+        String(item.codigo).toLowerCase().includes(termo) ||
+        item.descricao.toLowerCase().includes(termo) ||
+        (item.observacao || "").toLowerCase().includes(termo);
+
+      return matchesDiretoria && matchesCategoria && matchesSearch;
     });
-  }, [allApprovedItems, selectedDiretoria, selectedCategoria]);
+  }, [allApprovedItems, selectedDiretoria, selectedCategoria, searchTerm]);
 
   const categorias = useMemo(
     () => Array.from(new Set(allApprovedItems.map(item => item.categoria).filter(Boolean))).sort(),
@@ -134,6 +145,7 @@ const ComprasPanel = () => {
 
   const filteredServicos = useMemo(() => {
     const sourceList = selectedOption === "servicos_novos" ? allServicosNovos : allServicosCatalogo;
+    const termo = searchTerm.trim().toLowerCase();
 
     return sourceList.filter((servico) => {
       const diretoriaSelecionada = normalizeFilterValue(selectedDiretoria);
@@ -141,11 +153,74 @@ const ComprasPanel = () => {
         diretoriaSelecionada === "TODAS" ||
         normalizeFilterValue(servico.diretoriaSigla) === diretoriaSelecionada;
 
-      return matchesDiretoria;
-    });
-  }, [allServicosNovos, allServicosCatalogo, selectedOption, selectedDiretoria]);
+      const matchesSearch = termo === "" ||
+        servico.objeto.toLowerCase().includes(termo) ||
+        (servico.justificativa || "").toLowerCase().includes(termo);
 
-  const isServicoReadOnly = (servico: ServicoItem) => servico.status !== "rascunho";
+      return matchesDiretoria && matchesSearch;
+    });
+  }, [allServicosNovos, allServicosCatalogo, selectedOption, selectedDiretoria, searchTerm]);
+
+  const updateSolicitacoesMutation = useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[], status: SolicitacaoStatus }) => {
+      await updateSolicitacaoStatusBulk(ids, status);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras"] });
+      setSelectedItems(new Set());
+    }
+  });
+
+  const updateServicosMutation = useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[], status: SolicitacaoStatus }) => {
+      await updateServicoStatusBulk(ids, status);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
+      setSelectedServicos(new Set());
+    }
+  });
+
+  const handleMarcarConcluidoAquisicoes = (isRevert = false) => {
+    if (selectedItems.size === 0) return;
+    const idsToUpdate = Array.from(selectedItems).map(idStr => {
+      const item = allApprovedItems.find(i => String(i.codigo) === idStr);
+      return item?.id;
+    }).filter(Boolean) as string[];
+    
+    updateSolicitacoesMutation.mutate({ ids: idsToUpdate, status: isRevert ? "em_compra" : "concluido" });
+  };
+
+  const handleMarcarConcluidoServicos = (isRevert = false) => {
+    if (selectedServicos.size === 0) return;
+    updateServicosMutation.mutate({ ids: Array.from(selectedServicos), status: isRevert ? "em_compra" : "concluido" });
+  };
+
+  const selectedAquisicoesAreCompleted = useMemo(() => {
+    if (selectedItems.size === 0) return false;
+    const selected = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => String(i.codigo) === idStr));
+    return selected.every(i => i?.status === 'concluido');
+  }, [selectedItems, allApprovedItems]);
+
+  const selectedAquisicoesAreMixed = useMemo(() => {
+    if (selectedItems.size === 0) return false;
+    const statuses = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => String(i.codigo) === idStr)?.status);
+    return statuses.includes('concluido') && statuses.includes('em_compra');
+  }, [selectedItems, allApprovedItems]);
+
+  const selectedServicosAreCompleted = useMemo(() => {
+    if (selectedServicos.size === 0) return false;
+    const selected = Array.from(selectedServicos).map(id => filteredServicos.find(s => s.id === id));
+    return selected.every(s => s?.status === 'concluido');
+  }, [selectedServicos, filteredServicos]);
+
+  const selectedServicosAreMixed = useMemo(() => {
+    if (selectedServicos.size === 0) return false;
+    const statuses = Array.from(selectedServicos).map(id => filteredServicos.find(s => s.id === id)?.status);
+    return statuses.includes('concluido') && statuses.includes('em_compra');
+  }, [selectedServicos, filteredServicos]);
+
+  const isServicoReadOnly = (servico: ServicoItem) => false;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -161,11 +236,11 @@ const ComprasPanel = () => {
 
   useEffect(() => {
     setItemsPage(1);
-  }, [selectedDiretoria, selectedCategoria, itemsPerPage]);
+  }, [selectedDiretoria, selectedCategoria, searchTerm, itemsPerPage]);
 
   useEffect(() => {
     setServicosPage(1);
-  }, [selectedDiretoria, servicosPerPage]);
+  }, [selectedDiretoria, searchTerm, servicosPerPage]);
 
   const totalItemsPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
   const totalServicosPages = Math.max(1, Math.ceil(filteredServicos.length / servicosPerPage));
@@ -542,6 +617,14 @@ const ComprasPanel = () => {
     const isNovos = selectedOption === "servicos_novos";
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+        {isLoading && (
+          <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-xl shadow-lg border">
+              <div className="h-10 w-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+              <p className="font-semibold text-slate-700">Processando Serviços...</p>
+            </div>
+          </div>
+        )}
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -582,53 +665,86 @@ const ComprasPanel = () => {
 
           {/* Filtros e Stats */}
           <div className="max-w-7xl mx-auto px-6 py-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <Card className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <ShoppingBag className="h-6 w-6 text-green-600" />
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 -mt-10 relative z-10">
+              <Card className="p-4 border-l-4 border-l-emerald-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:-translate-y-1 hover:bg-emerald-50/50 bg-white/95 backdrop-blur">
+                <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-sm text-muted-foreground">Total de Serviços</p>
-                    <p className="text-2xl font-bold">{filteredServicos.length}</p>
+                    <p className="text-sm font-medium text-slate-500">Total de Serviços</p>
+                    <p className="text-3xl font-bold text-slate-800 mt-1">{filteredServicos.length}</p>
+                  </div>
+                  <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                    <ShoppingBag className="h-5 w-5" />
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-blue-100 rounded-lg">
-                    <TrendingUp className="h-6 w-6 text-blue-600" />
-                  </div>
+              <Card className="p-4 border-l-4 border-l-indigo-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:-translate-y-1 hover:bg-indigo-50/50 bg-white/95 backdrop-blur">
+                <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-sm text-muted-foreground">Valor Total</p>
-                    <p className="text-2xl font-bold">{formatCurrency(totalServicos)}</p>
+                    <p className="text-sm font-medium text-slate-500">Valor Total</p>
+                    <p className="text-3xl font-bold text-slate-800 mt-1">{formatCurrency(totalServicos)}</p>
+                  </div>
+                  <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                    <TrendingUp className="h-5 w-5" />
                   </div>
                 </div>
               </Card>
             </div>
 
             {/* Filtros e Exports */}
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <Select value={selectedDiretoria} onValueChange={setSelectedDiretoria}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Filtrar por Diretoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todas">Todas as Diretorias</SelectItem>
-                  {diretorias.map((dir: any) => (
-                    <SelectItem key={dir.id} value={dir.sigla}>
-                      {dir.sigla}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:shadow-md">
+              <div className="flex flex-1 items-center gap-4">
+                <div className="relative w-full max-w-sm">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Input
+                    type="text"
+                    placeholder="Buscar por objeto..."
+                    className="pl-9 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm h-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Select value={selectedDiretoria} onValueChange={setSelectedDiretoria}>
+                  <SelectTrigger className="w-[220px] bg-slate-50 border-slate-200 text-sm h-10">
+                    <SelectValue placeholder="Filtrar por Diretoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas">Todas as Diretorias</SelectItem>
+                    {diretorias.map((dir: any) => (
+                      <SelectItem key={dir.id} value={dir.sigla}>
+                        {dir.sigla}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedServicos.size > 0 && !selectedServicosAreMixed && (
+                  <Button 
+                    className={`shadow-md gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedServicosAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
+                    onClick={() => handleMarcarConcluidoServicos(selectedServicosAreCompleted)}
+                    disabled={updateServicosMutation.isPending}
+                  >
+                    {updateServicosMutation.isPending 
+                      ? (
+                          <span className="flex items-center gap-2">
+                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Processando...
+                          </span>
+                        ) 
+                      : selectedServicosAreCompleted 
+                        ? `Reverter ${selectedServicos.size} para Fila` 
+                        : `Marcar ${selectedServicos.size} como Concluído`}
+                  </Button>
+                )}
+                {selectedServicosAreMixed && (
+                  <p className="text-sm text-amber-600 font-medium bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">Seleção mista inválida.</p>
+                )}
+              </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="gap-2" onClick={handleExportServicosExcel}>
+                <Button variant="outline" size="sm" className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={handleExportServicosExcel}>
                   <FileSpreadsheet className="h-4 w-4" />
                   Excel
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={handleExportServicosPDF}>
+                <Button variant="outline" size="sm" className="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50" onClick={handleExportServicosPDF}>
                   <FileDown className="h-4 w-4" />
                   PDF
                 </Button>
@@ -636,10 +752,10 @@ const ComprasPanel = () => {
             </div>
 
             {/* Tabela de Serviços */}
-            <div className="bg-white rounded-lg border overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
                     <TableHead className="w-12">
                       <Checkbox
                         checked={selectedServicos.size === filteredServicos.length && filteredServicos.length > 0}
@@ -651,19 +767,23 @@ const ComprasPanel = () => {
                     <TableHead>Diretoria</TableHead>
                     <TableHead>Justificativa</TableHead>
                     <TableHead>Prioridade</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
                     <TableHead className="text-center">Estimativa Valor</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredServicos.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        Nenhum serviço em compras
+                      <TableCell colSpan={8} className="text-center py-12 text-slate-500">
+                        <div className="flex flex-col items-center">
+                          <Search className="h-10 w-10 text-slate-300 mb-3" />
+                          <p className="text-lg">Nenhum serviço encontrado com a configuração atual.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedServicos.map((servico) => (
-                      <TableRow key={servico.id} className={isServicoReadOnly(servico) ? "opacity-75" : ""}>
+                      <TableRow key={servico.id} className={`transition-colors group hover:shadow-inner hover:bg-slate-50/80 ${servico.status === 'concluido' ? 'bg-slate-50/50 opacity-90' : 'bg-white'} ${isServicoReadOnly(servico) ? 'opacity-75' : ''}`}>
                         <TableCell>
                           <Checkbox
                             checked={servico.id ? selectedServicos.has(servico.id) : false}
@@ -671,16 +791,21 @@ const ComprasPanel = () => {
                             disabled={isServicoReadOnly(servico)}
                           />
                         </TableCell>
-                        <TableCell className="max-w-xs truncate">{servico.objeto}</TableCell>
+                        <TableCell className="max-w-xs truncate font-medium text-slate-700">{servico.objeto}</TableCell>
                         <TableCell>{servico.gerencia}</TableCell>
                         <TableCell><Badge variant="outline">{servico.diretoriaSigla}</Badge></TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{servico.justificativa || "-"}</TableCell>
+                        <TableCell className="text-sm text-slate-500 max-w-xs truncate">{servico.justificativa || "-"}</TableCell>
                         <TableCell>
                           <Badge variant={getPrioridadeBadgeVariant(servico.grauPrioridade) as any}>
                             {servico.grauPrioridade}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-center font-mono">
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className={servico.status === 'concluido' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}>
+                            {servico.status === 'concluido' ? 'Concluído' : 'Em Compra'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center font-mono text-slate-700 font-medium">
                           {formatCurrency(servico.estimativaValor || 0)}
                         </TableCell>
                       </TableRow>
@@ -734,6 +859,19 @@ const ComprasPanel = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      {isLoading && (
+        <div className="absolute inset-0 bg-slate-900/10 z-50 flex items-center justify-center backdrop-blur-md">
+          <div className="flex flex-col items-center gap-4 bg-white/90 p-8 rounded-2xl shadow-2xl border border-white/20">
+            <div className="relative">
+              <div className="h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="h-2 w-2 bg-indigo-600 rounded-full"></div>
+              </div>
+            </div>
+            <p className="font-medium text-slate-700 tracking-wide text-sm uppercase">Processando Dados...</p>
+          </div>
+        </div>
+      )}
       <div
         className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
         style={{ top: "200px" }}
@@ -770,79 +908,132 @@ const ComprasPanel = () => {
       </div>
 
       {/* Summary */}
-      <div className="max-w-6xl mx-auto px-6 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-4 card-shadow border-l-4 border-l-success">
-          <p className="text-sm text-muted-foreground">Itens Aprovados</p>
-          <p className="text-2xl font-bold">{filteredItems.length}</p>
+      {/* Summary */}
+      <div className="max-w-6xl mx-auto px-6 py-4 grid grid-cols-1 md:grid-cols-3 gap-4 -mt-6">
+        <Card className="p-4 border-l-4 border-l-emerald-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:-translate-y-1 hover:bg-emerald-50/50 bg-white/95 backdrop-blur">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm font-medium text-slate-500">Itens Aprovados</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{filteredItems.length}</p>
+            </div>
+            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><ShoppingBag className="w-5 h-5" /></div>
+          </div>
         </Card>
-        <Card className="p-4 card-shadow border-l-4 border-l-info">
-          <p className="text-sm text-muted-foreground">Valor Total</p>
-          <p className="text-2xl font-bold">{formatCurrency(totalValor)}</p>
+        <Card className="p-4 border-l-4 border-l-indigo-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:-translate-y-1 hover:bg-indigo-50/50 bg-white/95 backdrop-blur">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm font-medium text-slate-500">Valor Total</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{formatCurrency(totalValor)}</p>
+            </div>
+            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><ArrowLeft className="w-5 h-5 -rotate-45" /></div>
+          </div>
         </Card>
-        <Card className="p-4 card-shadow border-l-4 border-l-primary">
-          <p className="text-sm text-muted-foreground">Diretorias</p>
-          <p className="text-2xl font-bold">{diretorias.length}</p>
+        <Card className="p-4 border-l-4 border-l-cyan-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:-translate-y-1 hover:bg-cyan-50/50 bg-white/95 backdrop-blur">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm font-medium text-slate-500">Diretorias</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{diretorias.length}</p>
+            </div>
+            <div className="p-2 bg-cyan-100 text-cyan-600 rounded-lg"><Search className="w-5 h-5" /></div>
+          </div>
         </Card>
       </div>
 
       {/* Filters */}
-      <div className="max-w-6xl mx-auto px-6 pb-4 flex gap-3">
-        <Select value={selectedDiretoria} onValueChange={setSelectedDiretoria}>
-          <SelectTrigger className="w-[250px] bg-card">
-            <SelectValue placeholder="Filtrar por Diretoria" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas Diretorias</SelectItem>
-            {diretorias.map((dir: any) => (
-              <SelectItem key={dir.sigla} value={dir.sigla}>{dir.sigla} - {dir.nome}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        
-        <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
-          <SelectTrigger className="w-[250px] bg-card">
-            <SelectValue placeholder="Filtrar por Categoria" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas Categorias</SelectItem>
-            {categorias.map((cat) => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* Filters */}
+      <div className="max-w-6xl mx-auto px-6 pb-6">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-3 items-center transition-all hover:shadow-md">
+          <div className="relative w-full md:w-[320px]">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              type="text"
+              placeholder="Buscar por código ou descrição..."
+              className="pl-9 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm h-10"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <Select value={selectedDiretoria} onValueChange={setSelectedDiretoria}>
+            <SelectTrigger className="w-[220px] bg-slate-50 border-slate-200 text-sm h-10">
+              <SelectValue placeholder="Filtrar por Diretoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas Diretorias</SelectItem>
+              {diretorias.map((dir: any) => (
+                <SelectItem key={dir.sigla} value={dir.sigla}>{dir.sigla} - {dir.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          
+          <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
+            <SelectTrigger className="w-[220px] bg-slate-50 border-slate-200 text-sm h-10">
+              <SelectValue placeholder="Filtrar por Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas Categorias</SelectItem>
+              {categorias.map((cat) => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        {selectedCategoria !== "todas" && (
-          <Button variant="outline" onClick={() => setSelectedCategoria("todas")}>
+          {selectedCategoria !== "todas" && (
+            <Button variant="ghost" className="text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 h-10 px-3 text-sm" onClick={() => setSelectedCategoria("todas")}>
             Limpar categoria
           </Button>
         )}
+        
+        {selectedItems.size > 0 && !selectedAquisicoesAreMixed && (
+          <Button 
+            className={`shadow-md gap-2 ml-auto transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedAquisicoesAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
+            onClick={() => handleMarcarConcluidoAquisicoes(selectedAquisicoesAreCompleted)}
+            disabled={updateSolicitacoesMutation.isPending}
+          >
+            {updateSolicitacoesMutation.isPending 
+              ? (
+                  <span className="flex items-center gap-2">
+                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Processando...
+                  </span>
+                )
+              : selectedAquisicoesAreCompleted 
+                ? `Reverter ${selectedItems.size} para Fila` 
+                : `Marcar ${selectedItems.size} como Concluído`}
+          </Button>
+        )}
+        {selectedAquisicoesAreMixed && (
+          <p className="text-sm text-amber-600 font-medium ml-auto bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">Seleção mista inválida.</p>
+        )}
+        </div>
       </div>
 
       {/* Table */}
       <div className="max-w-6xl mx-auto px-6 pb-6">
         {filteredItems.length === 0 ? (
-          <div className="p-6 text-center text-muted-foreground">
-            Nenhum item encontrado com a categoria selecionada.
+          <div className="p-12 text-center text-slate-500 flex flex-col items-center bg-white rounded-xl shadow-sm border border-slate-200">
+            <Search className="h-10 w-10 text-slate-300 mb-3" />
+            <p className="text-lg">Nenhum item encontrado com a configuração atual.</p>
           </div>
         ) : (
-          <Card className="card-shadow overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b">
+          <Card className="shadow-sm border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b bg-slate-50">
             <div className="flex items-center gap-4">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                <ShoppingBag className="h-5 w-5 text-indigo-500" />
                 Itens de Compras ({filteredItems.length})
               </h2>
               {selectedItems.size > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">{selectedItems.size} selecionado(s)</span>
+                  <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100">{selectedItems.size} selecionado(s)</span>
                 </div>
               )}
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportExcel}>
+              <Button variant="outline" size="sm" className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={handleExportExcel}>
                 <FileSpreadsheet className="h-4 w-4" />
                 Excel
               </Button>
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleExportPDF}>
+              <Button variant="outline" size="sm" className="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50" onClick={handleExportPDF}>
                 <FileDown className="h-4 w-4" />
                 PDF
               </Button>
@@ -851,7 +1042,7 @@ const ComprasPanel = () => {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/50">
+                <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
                   <TableHead className="w-[40px]">
                     <Checkbox
                       checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
@@ -865,12 +1056,13 @@ const ComprasPanel = () => {
                   <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                   <TableHead className="text-right w-[100px]">Valor Unit.</TableHead>
                   <TableHead className="text-right w-[100px]">Total</TableHead>
+                  <TableHead className="text-center w-[100px]">Status</TableHead>
                   <TableHead className="min-w-[180px]">Obs.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedItems.map((item) => (
-                  <TableRow key={`${item.codigo}`} className="hover:bg-muted/30">
+                  <TableRow key={`${item.codigo}`} className={`transition-colors group hover:shadow-inner hover:bg-slate-50/80 ${item.status === 'concluido' ? 'bg-slate-50/50 opacity-90' : 'bg-white'}`}>
                     <TableCell>
                       <Checkbox
                         checked={selectedItems.has(`${item.codigo}`)}
@@ -892,6 +1084,11 @@ const ComprasPanel = () => {
                     <TableCell className="text-right">{formatCurrency(item.valorUnitario)}</TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(item.qtdEstimada * item.valorUnitario)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline" className={item.status === 'concluido' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}>
+                        {item.status === 'concluido' ? 'Concluído' : 'Em Compra'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {item.observacao || "-"}
