@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, FileText, BarChart3, TrendingUp, PieChart as PieChartIcon, Table as TableIcon, Filter, CalendarDays, Activity, Target } from "lucide-react";
@@ -307,21 +307,21 @@ const AdminDiretoriaDashboard = () => {
   };
 
   // Click Handlers (DEEP Power BI Interactivity)
-  const onBarClick = (data: any) => {
+  const onBarClick = (data: { fullName: string }) => {
     if (crossFilterGerencia === data.fullName) setCrossFilterGerencia(null);
     else setCrossFilterGerencia(data.fullName);
   };
-  const onPieClick = (data: any) => {
+  const onPieClick = (data: { name: string }) => {
     if (crossFilterSubcat === data.name) setCrossFilterSubcat(null);
     else setCrossFilterSubcat(data.name);
   };
-  const onComposedChartClick = (data: any) => {
+  const onComposedChartClick = (data: { activeLabel?: string } | null | undefined) => {
     if (data?.activeLabel) {
       if (crossFilterMes === data.activeLabel) setCrossFilterMes(null);
       else setCrossFilterMes(data.activeLabel);
     }
   };
-  const onTableRowClick = (row: any) => {
+  const onTableRowClick = (row: { gerencia: string; subcategoria: string }) => {
     setCrossFilterGerencia(crossFilterGerencia === row.gerencia ? null : row.gerencia);
     setCrossFilterSubcat(crossFilterSubcat === row.subcategoria ? null : row.subcategoria);
   };
@@ -366,7 +366,7 @@ const AdminDiretoriaDashboard = () => {
       <div className="max-w-7xl mx-auto px-6 mt-6 space-y-6">
         
         {/* SLICER BAR (POWER BI STYLE BUTTON SLICERS) */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 flex flex-col gap-4 sticky top-4 z-10 transition-all">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 flex flex-col gap-4 transition-all">
           <div className="flex items-center justify-between border-b pb-2">
             <div className="flex items-center gap-2 text-indigo-700 font-semibold">
               <Filter className="h-5 w-5" /> Painel de Segmentação Visual
@@ -486,7 +486,7 @@ const AdminDiretoriaDashboard = () => {
 
         {/* CONTROLES (Visão) */}
         <div className="flex justify-between items-center bg-white p-2 rounded-xl shadow-sm border border-slate-200">
-          <Tabs value={visao} onValueChange={(v) => setVisao(v as any)} className="w-full lg:w-auto">
+          <Tabs value={visao} onValueChange={(v) => setVisao(v as "diretoria" | "gerencias")} className="w-full lg:w-auto">
             <TabsList className="grid w-full grid-cols-2 lg:w-[400px] bg-slate-100">
               <TabsTrigger value="diretoria" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Visão Consolidada</TabsTrigger>
               <TabsTrigger value="gerencias" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Visão por Gerência</TabsTrigger>
@@ -547,7 +547,7 @@ const AdminDiretoriaDashboard = () => {
             </CardHeader>
             <CardContent className="h-[350px]">
                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={dynamicEvolutionData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }} onClick={(e: any) => onComposedChartClick(e)}>
+                  <ComposedChart data={dynamicEvolutionData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }} onClick={(e) => onComposedChartClick(e as any)}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000}k`} />
@@ -593,7 +593,7 @@ const AdminDiretoriaDashboard = () => {
             </CardHeader>
             <CardContent className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dynamicGerenciaData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} onClick={(e: any) => e?.activePayload && onBarClick(e.activePayload[0].payload)}>
+                <BarChart data={dynamicGerenciaData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} onClick={(e) => e?.activePayload && onBarClick(e.activePayload[0].payload as any)}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000000}M`} />
@@ -623,7 +623,7 @@ const AdminDiretoriaDashboard = () => {
             </CardHeader>
             <CardContent className="h-[300px] flex justify-center items-center">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart onClick={(e: any) => e && onPieClick(e)}>
+                <PieChart onClick={(e) => e && onPieClick(e as any)}>
                   <Pie
                     data={dynamicPieData}
                     cx="50%"

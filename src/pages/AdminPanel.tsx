@@ -1,5 +1,5 @@
-// deno-lint-ignore-file no-explicit-any
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 const DIRETORIA_GERENCIAS: Record<string, string[]> = {
   "DG": ["GCFI", "GCON", "GEPE", "GESL", "GSAD"],
@@ -8,7 +8,6 @@ const DIRETORIA_GERENCIAS: Record<string, string[]> = {
   "DO": ["ODCD", "OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB", "OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"],
   "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
 };
-import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Calendar, Save, Shield, Users, Clock, RefreshCw, Plus } from "lucide-react";
 import { Button } from "../components/ui/button.tsx";
 import { Badge } from "../components/ui/badge.tsx";
@@ -63,7 +62,7 @@ const AdminPanel = () => {
     gcTime: 0,
   });
 
-  const periodos = periodosRaw as any[];
+  const periodos = periodosRaw as unknown as Periodo[];
 
   const [novoPeriodo, setNovoPeriodo] = useState({ nome: "", inicio: "", fim: "" });
   const [isCreatingPeriodo, setIsCreatingPeriodo] = useState(false);
