@@ -72,23 +72,41 @@ async function fetchAllPages<T>(
     includeCount: boolean
   ) => Promise<PostgrestSingleResponse<T[]>>
 ): Promise<T[]> {
+  const CHUNK_SIZE = 5;
   const allRows: T[] = [];
-  let from = 0;
+  let currentFrom = 0;
+  let hasMore = true;
 
-  while (true) {
-    const to = from + SUPABASE_PAGE_SIZE - 1;
-    const { data, error } = await queryFactory(from, to, false);
-
-    if (error) throw error;
-
-    const rows = data || [];
-    allRows.push(...rows);
-
-    if (rows.length < SUPABASE_PAGE_SIZE) {
+  while (hasMore) {
+    const promises = [];
+    for (let i = 0; i < CHUNK_SIZE; i++) {
+      const start = currentFrom + i * SUPABASE_PAGE_SIZE;
+      const end = start + SUPABASE_PAGE_SIZE - 1;
+      promises.push(queryFactory(start, end, false).then(res => {
+        if (res.error) throw res.error;
+        return res.data || [];
+      }));
+    }
+    
+    const results = await Promise.all(promises);
+    
+    for (const rows of results) {
+      allRows.push(...rows);
+      if (rows.length < SUPABASE_PAGE_SIZE) {
+        hasMore = false;
+        break;
+      }
+    }
+    
+    // SAFETY LIMIT to prevent browser crashes (max ~2000 items)
+    if (allRows.length >= 2000) {
+      hasMore = false;
       break;
     }
-
-    from += SUPABASE_PAGE_SIZE;
+    
+    if (hasMore) {
+      currentFrom += CHUNK_SIZE * SUPABASE_PAGE_SIZE;
+    }
   }
 
   return allRows;

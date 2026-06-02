@@ -2,11 +2,12 @@ import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, createServico } from "@/lib/services";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
@@ -114,7 +115,7 @@ const DiretoriaAprovacao = () => {
   const [novoServicoForm, setNovoServicoForm] = useState({
     objeto: "",
     justificativa: "",
-    tipoContratacao: "Novo",
+    tipoContratacao: "Contínuo",
     gerenciaId: "",
     previsaoInicio: "",
     estimativaValor: "",
@@ -230,6 +231,17 @@ const DiretoriaAprovacao = () => {
     enabled: authenticated && selectedOption === "aquisicao",
     staleTime: 10 * 60 * 1000,
   });
+
+  const { data: servicosCatalogoData = [] } = useQuery({
+    queryKey: ["servicos-catalogo"],
+    queryFn: getServicosCatalogo,
+    enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos"),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const servicosCatalogoSet = useMemo(() => {
+    return new Set((servicosCatalogoData as any[]).map(c => c.item));
+  }, [servicosCatalogoData]);
 
   const orcamentoConfig = useMemo(() => {
     const localConfig = loadAdminBudgetConfig();
@@ -547,9 +559,9 @@ const DiretoriaAprovacao = () => {
   const gastoServicosDiretoria = useMemo(() => {
     let list = servicosData.filter((s: ServicoItem) => s.status !== "rascunho");
     if (selectedOption === "servicos_novos") {
-      list = list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+      list = list.filter(s => !servicosCatalogoSet.has(s.item));
     } else if (selectedOption === "servicos_existentes") {
-      list = list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
+      list = list.filter(s => servicosCatalogoSet.has(s.item));
     }
     return list.reduce(
       (acc: number, servico: ServicoItem) =>
@@ -579,10 +591,10 @@ const DiretoriaAprovacao = () => {
       : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
-      return list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+      return list.filter(s => !servicosCatalogoSet.has(s.item));
     }
     if (selectedOption === "servicos_existentes") {
-      return list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
+      return list.filter(s => servicosCatalogoSet.has(s.item));
     }
     return list;
   }, [servicosRecebidosBase, selectedGerencia, selectedOption]);
@@ -1290,6 +1302,7 @@ const DiretoriaAprovacao = () => {
   };
 
   const handleCriarServicoDiretoria = async () => {
+    if (novoServicoLoading) return; // Prevent double submission
     if (!diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
@@ -1335,7 +1348,7 @@ const DiretoriaAprovacao = () => {
       setNovoServicoForm({
         objeto: "",
         justificativa: "",
-        tipoContratacao: "Novo",
+        tipoContratacao: "Contínuo",
         gerenciaId: "",
         previsaoInicio: "",
         estimativaValor: "",
@@ -1632,7 +1645,7 @@ const DiretoriaAprovacao = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
@@ -1658,7 +1671,7 @@ const DiretoriaAprovacao = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
@@ -1771,10 +1784,7 @@ const DiretoriaAprovacao = () => {
                     {isServicoReadOnly(servico) ? (
                       new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(servico.estimativaValor || 0)
                     ) : (
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
+                      <CurrencyInput
                         defaultValue={servico.estimativaValor || 0}
                         className="w-36 h-8 text-right mx-auto"
                         onBlur={(e) => handleUpdateServicoEstimativa(servico, Number(e.target.value) || 0)}
@@ -2237,8 +2247,6 @@ const DiretoriaAprovacao = () => {
                         onChange={(e) => setNovoServicoForm(f => ({ ...f, tipoContratacao: e.target.value }))}
                         className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                       >
-                        <option value="Novo">Novo</option>
-                        <option value="Serviço">Serviço</option>
                         <option value="Contínuo">Contínuo</option>
                         <option value="Outros">Outros</option>
                       </select>
@@ -2266,31 +2274,14 @@ const DiretoriaAprovacao = () => {
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={novoServicoForm.estimativaValor}
-                        onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        placeholder="0,00"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Dotação Orçamentária 2027 (R$)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={novoServicoForm.dotacaoOrcamentaria}
-                        onChange={(e) => setNovoServicoForm(f => ({ ...f, dotacaoOrcamentaria: e.target.value }))}
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        placeholder="0,00"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
+                    <CurrencyInput
+                      value={novoServicoForm.estimativaValor}
+                      onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
+                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                      placeholder="0,00"
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium">Grau de Prioridade</label>
@@ -2336,14 +2327,20 @@ const DiretoriaAprovacao = () => {
                   <Button variant="outline" onClick={() => setNovoServicoOpen(false)} disabled={novoServicoLoading}>
                     Cancelar
                   </Button>
-                  <Button
-                    onClick={handleCriarServicoDiretoria}
-                    disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim() || novoServicoLoading}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    {novoServicoLoading ? "Salvando..." : "Adicionar Serviço"}
-                  </Button>
+                  {!novoServicoLoading ? (
+                    <Button
+                      onClick={handleCriarServicoDiretoria}
+                      disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar Serviço
+                    </Button>
+                  ) : (
+                    <Button disabled className="gap-2 opacity-50 cursor-not-allowed">
+                      Salvando...
+                    </Button>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>

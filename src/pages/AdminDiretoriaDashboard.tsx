@@ -35,8 +35,10 @@ import {
   getDiretorias, 
   getTodasGerencias, 
   getSolicitacoesByDiretoria, 
-  getServicosByDiretoria 
+  getServicosByDiretoria,
+  getAdminMiniErpConfigDb
 } from "@/lib/services.ts";
+import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget } from "@/lib/adminBudgetConfig.ts";
 
 // ==================== REAL DATA FOR DASHBOARD ====================
 const REAL_DIRETORIAS = ["DG", "DE", "DC", "DO", "PR"];
@@ -59,13 +61,13 @@ const SEMANAS = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"];
 const ANOS = ["2026", "2027", "2028"];
 
 const useDashboardData = (filtroDiretoria: string) => {
-  const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({ queryKey: ["periodos-ativos"], queryFn: getPeriodosAtivos });
+  const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({ queryKey: ["periodos-ativos"], queryFn: getPeriodosAtivos, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
   const periodoAtivoId = periodosAtivos?.[0]?.id as string | undefined;
 
-  const { data: diretorias, isLoading: isLoadingDir } = useQuery({ queryKey: ["diretorias"], queryFn: getDiretorias });
+  const { data: diretorias, isLoading: isLoadingDir } = useQuery({ queryKey: ["diretorias"], queryFn: getDiretorias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
   const diretoria = (diretorias || []).find((d: any) => d.sigla.toUpperCase() === filtroDiretoria.toUpperCase());
 
-  const { data: todasGerencias, isLoading: isLoadingGer } = useQuery({ queryKey: ["todas-gerencias"], queryFn: getTodasGerencias });
+  const { data: todasGerencias, isLoading: isLoadingGer } = useQuery({ queryKey: ["todas-gerencias"], queryFn: getTodasGerencias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
   const gerenciasAtuaisDb = (todasGerencias || []).filter((g: any) => g.diretoria_id === diretoria?.id);
   
   const gerenciasAtuais = gerenciasAtuaisDb.length > 0 
@@ -76,15 +78,40 @@ const useDashboardData = (filtroDiretoria: string) => {
     queryKey: ["solicitacoes", diretoria?.id, periodoAtivoId],
     queryFn: () => getSolicitacoesByDiretoria(diretoria!.id, periodoAtivoId!),
     enabled: !!diretoria?.id && !!periodoAtivoId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   const { data: servicos = [], isLoading: isLoadingSer } = useQuery({
     queryKey: ["servicos-dash", diretoria?.id, periodoAtivoId],
     queryFn: () => getServicosByDiretoria(diretoria!.id, periodoAtivoId!),
     enabled: !!diretoria?.id && !!periodoAtivoId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
-  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer;
+  const { data: adminMiniConfigFromDb, isLoading: isLoadingConfig } = useQuery({
+    queryKey: ["admin-mini-config"],
+    queryFn: getAdminMiniErpConfigDb,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer || isLoadingConfig;
+
+  const orcamentoConfig = useMemo(() => {
+    const localConfig = loadAdminBudgetConfig();
+    const dbConfig = adminMiniConfigFromDb as Partial<AdminBudgetConfig>;
+    if (!localConfig && !dbConfig) return null;
+    return {
+      ...(localConfig || {}),
+      ...(dbConfig || {}),
+      routingRules: dbConfig?.routingRules || localConfig?.routingRules || {},
+    } as AdminBudgetConfig;
+  }, [adminMiniConfigFromDb]);
+
+  const limiteAquisicao = diretoria ? getDiretoriaBudget(orcamentoConfig, diretoria.id, "aquisicao") : 0;
+  const limiteServicos = diretoria ? getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos") : 0;
+  const limiteTotal = limiteAquisicao + limiteServicos;
 
   const mappedData = useMemo(() => {
     const getStatusProgresso = (status?: string) => {
@@ -194,16 +221,40 @@ const useDashboardData = (filtroDiretoria: string) => {
     });
 
     const pieDataMap = new Map();
+    const statusPieDataMap = new Map();
+
     matrixData.forEach(item => {
+      // Subcategorias
       if (!pieDataMap.has(item.subcategoria)) {
         pieDataMap.set(item.subcategoria, { name: item.subcategoria, value: 0, tipo: item.tipo });
       }
       pieDataMap.get(item.subcategoria).value += item.orcamentoPlanejado;
-    });
-    const pieData = Array.from(pieDataMap.values()).filter(p => p.value > 0);
 
-    return { evolutionData, gerenciaData, pieData, matrixData, gerenciasAtuais };
-  }, [solicitacoes, servicos, gerenciasAtuais]);
+      // Status
+      const statusFormatado = item.status.replace("_", " ").toUpperCase();
+      if (!statusPieDataMap.has(statusFormatado)) {
+        statusPieDataMap.set(statusFormatado, { name: statusFormatado, value: 0 });
+      }
+      statusPieDataMap.get(statusFormatado).value += item.orcamentoPlanejado;
+    });
+
+    let pieData = Array.from(pieDataMap.values()).filter(p => p.value > 0);
+    // Agrupar se houver mais de 5 itens
+    pieData.sort((a, b) => b.value - a.value);
+    if (pieData.length > 5) {
+      const top4 = pieData.slice(0, 4);
+      const outrosValue = pieData.slice(4).reduce((acc, curr) => acc + curr.value, 0);
+      top4.push({ name: "Outros", value: outrosValue, tipo: "Diversos" });
+      pieData = top4;
+    }
+
+    const statusPieData = Array.from(statusPieDataMap.values()).filter(p => p.value > 0);
+    statusPieData.sort((a, b) => b.value - a.value);
+
+    const isLimitedData = solicitacoes.length >= 2000 || servicos.length >= 2000;
+
+    return { evolutionData, gerenciaData, pieData, statusPieData, matrixData, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicos, isLimitedData };
+  }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicos]);
 
   return { ...mappedData, isLoading };
 };
@@ -254,7 +305,6 @@ const AdminDiretoriaDashboard = () => {
        const novaGerencia = validGerencias.find(g => g.startsWith(gerenciaQuery));
        if (novaGerencia) setFiltroGerencia(novaGerencia);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, gerenciaQuery]);
 
   const handleDiretoriaChange = (val: string) => {
@@ -440,6 +490,11 @@ const AdminDiretoriaDashboard = () => {
               </div>
               <h1 className="text-3xl font-bold tracking-tight">Dashboard Avançado (BI)</h1>
               <p className="text-blue-200 mt-1">Interatividade Máxima: Clique EM QUALQUER LUGAR (tabelas, gráficos, KPIs) para segmentar.</p>
+              {rawData.isLimitedData && (
+                <div className="mt-3 inline-flex items-center gap-2 bg-amber-500/20 border border-amber-400 text-amber-200 px-3 py-1.5 rounded-md text-sm font-medium">
+                  ⚠️ Aviso: Apenas os 2.000 registros mais recentes foram carregados para evitar travamentos. Os totais financeiros abaixo representam apenas esta amostra.
+                </div>
+              )}
             </div>
             
             <div className="flex gap-2">
@@ -592,25 +647,26 @@ const AdminDiretoriaDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="border-l-4 border-l-indigo-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-indigo-50" onClick={() => setFiltroCategoria("todas")} title="Clique para resetar Categoria">
             <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">Orçamento Planejado</CardDescription>
-              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(totalPlanejado)}</CardTitle>
+              <CardDescription className="font-medium text-slate-500">Limite Orçamentário (Admin)</CardDescription>
+              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(rawData.limiteTotal || 0)}</CardTitle>
+              <div className="text-xs text-slate-500 mt-1 font-medium">Aquis: {formatCurrency(rawData.limiteAquisicao || 0)} / Serv: {formatCurrency(rawData.limiteServicos || 0)}</div>
             </CardHeader>
           </Card>
           
           <Card className="border-l-4 border-l-cyan-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-cyan-50" onClick={() => setFiltroGerencia("todas")} title="Clique para resetar Gerência">
             <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">Orçamento Executado</CardDescription>
-              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(totalExecutado)}</CardTitle>
+              <CardDescription className="font-medium text-slate-500">Orçamento Planejado (Soma Itens)</CardDescription>
+              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(totalPlanejado)}</CardTitle>
             </CardHeader>
           </Card>
           
-          <Card className={`border-l-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${variacaoTotal >= 0 ? 'border-l-emerald-500 hover:bg-emerald-50' : 'border-l-rose-500 hover:bg-rose-50'}`} onClick={() => { setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }} title="Clique para resetar Subcategoria">
+          <Card className={`border-l-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${rawData.limiteTotal - totalPlanejado >= 0 ? 'border-l-emerald-500 hover:bg-emerald-50' : 'border-l-rose-500 hover:bg-rose-50'}`} onClick={() => { setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }} title="Clique para resetar Subcategoria">
             <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">{variacaoTotal >= 0 ? "Economia Gerada" : "Excedente (Estouro)"}</CardDescription>
-              <CardTitle className={`text-2xl font-bold ${variacaoTotal >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {formatCurrency(Math.abs(variacaoTotal))}
+              <CardDescription className="font-medium text-slate-500">{rawData.limiteTotal - totalPlanejado >= 0 ? "Saldo Disponível" : "Excedente Orçamentário"}</CardDescription>
+              <CardTitle className={`text-2xl font-bold ${rawData.limiteTotal - totalPlanejado >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatCurrency(Math.abs((rawData.limiteTotal || 0) - totalPlanejado))}
               </CardTitle>
-              <div className="text-xs text-slate-500 mt-1 font-medium">{Math.abs(variacaoPercGlobal).toFixed(1)}% do planejado</div>
+              {rawData.limiteTotal > 0 && <div className="text-xs text-slate-500 mt-1 font-medium">{Math.abs((totalPlanejado / rawData.limiteTotal) * 100).toFixed(1)}% do limite consumido</div>}
             </CardHeader>
           </Card>
 
@@ -704,40 +760,74 @@ const AdminDiretoriaDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* PIE CHART (INTERATIVO) */}
-          <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <PieChartIcon className="h-5 w-5 text-emerald-500" />
-                Subcategorias (Clique na Fatia)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[300px] flex justify-center items-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart onClick={(e) => e && onPieClick(e as any)}>
-                  <Pie
-                    data={dynamicPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={90}
-                    paddingAngle={5}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                    className="cursor-pointer"
-                  >
-                    {dynamicPieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} opacity={entry.opacity} className="hover:opacity-80 transition-opacity" />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+          </div>
+        
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* PIE CHART (INTERATIVO) */}
+            <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <PieChartIcon className="h-5 w-5 text-emerald-500" />
+                  Top Subcategorias
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="h-[300px] flex justify-center items-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart onClick={(e) => e && onPieClick(e as any)}>
+                    <Pie
+                      data={dynamicPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={90}
+                      paddingAngle={5}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                      className="cursor-pointer"
+                    >
+                      {dynamicPieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} opacity={entry.opacity} className="hover:opacity-80 transition-opacity" />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
 
-        </div>
+            {/* STATUS PIE CHART */}
+            <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <Activity className="h-5 w-5 text-blue-500" />
+                  Status de Execução
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="h-[300px] flex justify-center items-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={rawData.statusPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={90}
+                      paddingAngle={5}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {rawData.statusPieData.map((entry, index) => (
+                        <Cell key={`status-cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} className="hover:opacity-80 transition-opacity" />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
 
         {/* MATRIZ DE DADOS (AGORA COM DEEP CROSS-FILTERING ON CLICK) */}
         <Card className="shadow-sm border-slate-200 mb-12 overflow-hidden">

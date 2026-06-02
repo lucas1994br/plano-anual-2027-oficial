@@ -99,7 +99,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       "Justificativa",
       "Previsão Início",
       "Estimativa Valor",
-      "Dotação Orçamentária",
       "Grau Prioridade",
       "Vinculação",
       "Observação"
@@ -115,7 +114,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
         s.justificativa,
         s.previsaoInicio || "",
         s.estimativaValor || 0,
-        s.dotacaoOrcamentaria || 0,
         s.grauPrioridade,
         s.vinculacao,
         s.observacao || ""
@@ -133,7 +131,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       { wch: 40 },  // Justificativa
       { wch: 15 },  // Previsão
       { wch: 15 },  // Estimativa
-      { wch: 15 },  // Dotação
       { wch: 15 },  // Prioridade
       { wch: 12 },  // Vinculação
       { wch: 30 }   // Observação
@@ -198,7 +195,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                 <TableHead className="w-32">Unidade Demandante</TableHead>
                 <TableHead className="min-w-[300px]">Objeto</TableHead>
                 <TableHead className="w-34">Estimativa de Valor</TableHead>
-                <TableHead className="w-32">Dotação Orcamentária</TableHead>
                 <TableHead className="w-32">Prioridade</TableHead>
                 <TableHead className="w-20 text-center">Justificativa</TableHead>
                 <TableHead className="w-34 text-center">Vinculação com outro item</TableHead>
@@ -231,9 +227,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                     </TableCell>
                     <TableCell className="text-sm">
                       {formatCurrency(servico.estimativaValor)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatCurrency(servico.dotacaoOrcamentaria)}
                     </TableCell>
                     <TableCell>
                       <Select
@@ -329,14 +322,6 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
               <span className="font-semibold">
                 {formatCurrency(
                   servicos.reduce((acc, s) => acc + (s.estimativaValor || 0), 0)
-                )}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-6">
-              <span className="text-sm text-muted-foreground">Dotação Total:</span>
-              <span className="font-semibold">
-                {formatCurrency(
-                  servicos.reduce((acc, s) => acc + (s.dotacaoOrcamentaria || 0), 0)
                 )}
               </span>
             </div>

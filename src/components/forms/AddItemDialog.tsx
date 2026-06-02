@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import { PlanItem } from "@/types/plan.ts";
+import { useToast } from "@/hooks/use-toast.ts";
 
 interface AddItemDialogProps {
   open: boolean;
@@ -35,6 +37,8 @@ export function AddItemDialog({
   categorias,
   gerencias,
 }: AddItemDialogProps) {
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     descricao: "",
     categoria: "",
@@ -72,10 +76,28 @@ export function AddItemDialog({
     }
   }, [editingItem, open]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
-    onOpenChange(false);
+    if (isSubmitting) return;
+
+    if (!formData.descricao || !formData.categoria || formData.qtdEstimada <= 0) {
+      toast({
+        title: "Campos obrigatórios",
+        description: "Preencha a descrição, categoria e quantidade.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await onSave(formData);
+      onOpenChange(false);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -160,11 +182,8 @@ export function AddItemDialog({
 
             <div>
               <Label htmlFor="valorUnitario">Valor Unitário (R$)</Label>
-              <Input
+              <CurrencyInput
                 id="valorUnitario"
-                type="number"
-                min="0"
-                step="0.01"
                 value={formData.valorUnitario}
                 onChange={(e) =>
                   setFormData({
@@ -172,7 +191,6 @@ export function AddItemDialog({
                     valorUnitario: Number(e.target.value),
                   })
                 }
-                required
               />
             </div>
 
@@ -214,12 +232,19 @@ export function AddItemDialog({
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
             >
               Cancelar
             </Button>
-            <Button type="submit">
-              {editingItem ? "Salvar Alterações" : "Adicionar Item"}
-            </Button>
+            {!isSubmitting ? (
+              <Button type="submit">
+                {editingItem ? "Salvar Alterações" : "Adicionar Item"}
+              </Button>
+            ) : (
+              <Button disabled className="opacity-50 cursor-not-allowed">
+                Salvando...
+              </Button>
+            )}
           </div>
         </form>
       </DialogContent>

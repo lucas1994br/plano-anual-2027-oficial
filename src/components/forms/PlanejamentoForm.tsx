@@ -4,6 +4,7 @@ import type { CategoriaItem, PlanoItem } from '@/types/erp.ts';
 import { Card } from '@/components/ui/card.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { CurrencyInput } from '@/components/ui/currency-input.tsx';
 import { toast } from '@/hooks/use-toast.ts';
 
 interface PlanejamentoFormProps {
@@ -162,13 +163,10 @@ export function PlanejamentoForm({ planoDiretoriaId, onItemAdicionado }: Planeja
 
             <div>
               <label className="block text-sm font-medium mb-1">Valor Unitário</label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
+              <CurrencyInput
                 value={form.valor_unit_previsto}
                 onChange={(e) => setForm({ ...form, valor_unit_previsto: Number(e.target.value) })}
-                placeholder="Ex: 50.00"
+                placeholder="Ex: 50,00"
               />
             </div>
 

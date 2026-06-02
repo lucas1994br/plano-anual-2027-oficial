@@ -5,6 +5,7 @@ import { Save, Waypoints, Wallet, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import {
@@ -347,12 +348,10 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                     <Label htmlFor={`dir-acq-${dir.id}`} className="text-xs font-semibold">
                       {dir.sigla} - Orçamento Aquisição
                     </Label>
-                    <Input
+                    <CurrencyInput
                       id={`dir-acq-${dir.id}`}
-                      type="number"
-                      min={0}
                       value={diretoriaBudgetsAquisicao[dir.id] === 0 ? "" : String(diretoriaBudgetsAquisicao[dir.id] ?? "")}
-                      placeholder="0"
+                      placeholder="0,00"
                       onChange={(e) => {
                         const value = toNumber(e.target.value);
                         setDiretoriaBudgetsAquisicao((prev) => ({ ...prev, [dir.id]: value }));
@@ -393,12 +392,10 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                                 <Label htmlFor={`ger-acq-${ger.id}`} className="text-xs font-medium">
                                   {ger.sigla}
                                 </Label>
-                                <Input
+                                <CurrencyInput
                                   id={`ger-acq-${ger.id}`}
-                                  type="number"
-                                  min={0}
                                   value={gerenciaBudgetsAquisicao[ger.id] === 0 ? "" : String(gerenciaBudgetsAquisicao[ger.id] ?? "")}
-                                  placeholder="0"
+                                  placeholder="0,00"
                                   onChange={(e) => {
                                     const value = toNumber(e.target.value);
                                     setGerenciaBudgetsAquisicao((prev) => ({ ...prev, [ger.id]: value }));
@@ -461,12 +458,10 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                     <Label htmlFor={`dir-serv-${dir.id}`} className="text-xs font-semibold">
                       {dir.sigla} - Orçamento Serviços
                     </Label>
-                    <Input
+                    <CurrencyInput
                       id={`dir-serv-${dir.id}`}
-                      type="number"
-                      min={0}
                       value={diretoriaBudgetsServicos[dir.id] === 0 ? "" : String(diretoriaBudgetsServicos[dir.id] ?? "")}
-                      placeholder="0"
+                      placeholder="0,00"
                       onChange={(e) => {
                         const value = toNumber(e.target.value);
                         setDiretoriaBudgetsServicos((prev) => ({ ...prev, [dir.id]: value }));
@@ -507,12 +502,10 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                                 <Label htmlFor={`ger-serv-${ger.id}`} className="text-xs font-medium">
                                   {ger.sigla}
                                 </Label>
-                                <Input
+                                <CurrencyInput
                                   id={`ger-serv-${ger.id}`}
-                                  type="number"
-                                  min={0}
                                   value={gerenciaBudgetsServicos[ger.id] === 0 ? "" : String(gerenciaBudgetsServicos[ger.id] ?? "")}
-                                  placeholder="0"
+                                  placeholder="0,00"
                                   onChange={(e) => {
                                     const value = toNumber(e.target.value);
                                     setGerenciaBudgetsServicos((prev) => ({ ...prev, [ger.id]: value }));

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Select,
@@ -544,10 +545,7 @@ export function AdminCatalogItemControl() {
 
             <div className="space-y-1">
               <Label className="text-xs font-medium">Valor unitário (R$) *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
+              <CurrencyInput
                 value={novoItem.valorUnitario}
                 onChange={(e) => setNovoItem(prev => ({ ...prev, valorUnitario: e.target.value }))}
                 placeholder="0,00"
@@ -636,12 +634,10 @@ export function AdminCatalogItemControl() {
 
             <div className="space-y-1">
               <Label className="text-xs font-medium">Valor unitário (R$) *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
+              <CurrencyInput
                 value={editFormData.valorUnitario}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, valorUnitario: e.target.value }))}
+                placeholder="0,00"
               />
             </div>
           </div>

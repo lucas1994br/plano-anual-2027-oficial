@@ -4,6 +4,7 @@ import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadshee
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -98,7 +99,7 @@ const GerenciaPanel = () => {
   const [novoServicoForm, setNovoServicoForm] = useState({
     objeto: "",
     justificativa: "",
-    tipoContratacao: "Novo",
+    tipoContratacao: "Contínuo",
     unidadeDemandante: "",
     previsaoInicio: "",
     estimativaValor: "",
@@ -181,7 +182,6 @@ const GerenciaPanel = () => {
     refetchOnMount: true,
   });
 
-  // Buscar itens originais do catálogo para saber quais vieram do painel administrativo
   const { data: servicosCatalogoData = [] } = useQuery({
     queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id],
     queryFn: () => gerenciaAtual ? getServicosCatalogoByGerencia(gerenciaAtual.id) : [],
@@ -275,10 +275,10 @@ const GerenciaPanel = () => {
     : 0;
   const gastoAquisicaoGerencia = useMemo(
     () =>
-      filteredItems
+      items
         .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id)
         .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [filteredItems, diretoria?.id],
+    [items, diretoria?.id],
   );
   const summary = useMemo(
     () => ({
@@ -555,6 +555,7 @@ const GerenciaPanel = () => {
   };
 
   const handleCriarServico = async () => {
+    if (novoServicoLoading) return; // Prevent double submission
     if (!gerenciaAtual || !diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
@@ -587,7 +588,7 @@ const GerenciaPanel = () => {
       setNovoServicoForm({
         objeto: "",
         justificativa: "",
-        tipoContratacao: "Novo",
+        tipoContratacao: "Contínuo",
         unidadeDemandante: "",
         previsaoInicio: "",
         estimativaValor: "",
@@ -949,7 +950,7 @@ const GerenciaPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
@@ -971,7 +972,7 @@ const GerenciaPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
@@ -1111,12 +1112,12 @@ const GerenciaPanel = () => {
       wsData.push([`Plano Anual de Contratações 2027 — ${titleLabel} — ${gerenciaUpper}`]);
       wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
       wsData.push([]);
-      wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Dotação Orçamentária", "Grau Prioridade", "Vinculação", "Status"]);
+      wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Grau Prioridade", "Vinculação", "Status"]);
       filteredServicos.forEach((s) => {
-        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.dotacaoOrcamentaria || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
+        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
+      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, titleLabel);
       XLSX.writeFile(wb, `PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
     };
@@ -1130,13 +1131,12 @@ const GerenciaPanel = () => {
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
       autoTable(doc, {
-        head: [["Item", "Tipo", "Objeto", "Estimativa", "Dotação", "Prioridade", "Status"]],
+        head: [["Item", "Tipo", "Objeto", "Estimativa", "Prioridade", "Status"]],
         body: filteredServicos.map((s) => [
           s.item,
           s.tipoContratacao,
           s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
           formatCurrency(s.estimativaValor),
-          formatCurrency(s.dotacaoOrcamentaria),
           s.grauPrioridade,
           s.status || "rascunho",
         ]),
@@ -1178,7 +1178,6 @@ const GerenciaPanel = () => {
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground">Justificativa</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-36">Prioridade</th>
                   <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Estimativa (R$)</th>
-                  <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Dotação (R$)</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-28">Vinculação</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-24">Status</th>
                   <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Ações</th>
@@ -1209,7 +1208,9 @@ const GerenciaPanel = () => {
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
                         <td className="p-3 text-sm max-w-xs">
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{servico.tipoContratacao} · {servico.unidadeDemandante}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {servico.tipoContratacao} · {servico.unidadeDemandante}
+                          </p>
                         </td>
                         <td className="p-3 text-sm">
                           {readOnly ? (
@@ -1255,19 +1256,6 @@ const GerenciaPanel = () => {
                         </td>
                         <td className="p-3 text-right">
                           <span className="text-sm">{formatCurrency(servico.estimativaValor)}</span>
-                        </td>
-                        <td className="p-3 text-right">
-                          {readOnly ? (
-                            <span className="text-sm">{formatCurrency(servico.dotacaoOrcamentaria)}</span>
-                          ) : (
-                            <input
-                              type="number"
-                              defaultValue={servico.dotacaoOrcamentaria || 0}
-                              onBlur={(e) => handleUpdateDotacao(servico.item, parseFloat(e.target.value) || 0)}
-                              className="w-28 text-sm border rounded px-2 py-1 text-right bg-background"
-                              step="0.01"
-                            />
-                          )}
                         </td>
                         <td className="p-3">
                           {readOnly ? (
@@ -1382,9 +1370,9 @@ const GerenciaPanel = () => {
           <SummaryCards totalItens={servicosSummary.totalItens} valorTotal={servicosSummary.valorTotal} />
 
           <BudgetConsumptionCard
-            titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
+            titulo={`Orçamento Anual da Gerência ${gerenciaUpper} (Todos os Serviços)`}
             orcamento={orcamentoGerenciaServicos}
-            gasto={displayedServicos.reduce(
+            gasto={[...servicosExistentes, ...servicosNovos].reduce(
               (acc, servico) =>
                 acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
               0,
@@ -1467,6 +1455,7 @@ const GerenciaPanel = () => {
             prioridade={prioridade}
             onPrioridadeChange={setPrioridade}
             categorias={[]}
+            hideCategoriaFilter={true}
           />
 
           {/* Ações gerais */}
@@ -1566,21 +1555,19 @@ const GerenciaPanel = () => {
                       onChange={(e) => setNovoServicoForm(f => ({ ...f, tipoContratacao: e.target.value }))}
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                     >
-                      <option value="Novo">Novo</option>
                       <option value="Contínuo">Contínuo</option>
                       <option value="Outros">Outros</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium">Unidade Demandante</label>
-                    <input
-                      type="text"
-                      value={novoServicoForm.unidadeDemandante}
-                      onChange={(e) => setNovoServicoForm(f => ({ ...f, unidadeDemandante: e.target.value }))}
-                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                      placeholder={gerenciaUpper}
-                    />
-                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Unidade Demandante</label>
+                  <input
+                    type="text"
+                    value={gerenciaUpper}
+                    disabled
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium">Previsão de Início da Nova Contratação</label>
@@ -1594,10 +1581,7 @@ const GerenciaPanel = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                    <CurrencyInput
                       value={novoServicoForm.estimativaValor}
                       onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
@@ -1649,14 +1633,20 @@ const GerenciaPanel = () => {
                 <Button variant="outline" onClick={() => setNovoServicoOpen(false)} disabled={novoServicoLoading}>
                   Cancelar
                 </Button>
-                <Button
-                  onClick={handleCriarServico}
-                  disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim() || novoServicoLoading}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  {novoServicoLoading ? "Salvando..." : "Adicionar Serviço"}
-                </Button>
+                {!novoServicoLoading ? (
+                  <Button
+                    onClick={handleCriarServico}
+                    disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar Serviço
+                  </Button>
+                ) : (
+                  <Button disabled className="gap-2 opacity-50 cursor-not-allowed">
+                    Salvando...
+                  </Button>
+                )}
               </div>
             </DialogContent>
           </Dialog>
