@@ -1370,9 +1370,9 @@ const GerenciaPanel = () => {
           <SummaryCards totalItens={servicosSummary.totalItens} valorTotal={servicosSummary.valorTotal} />
 
           <BudgetConsumptionCard
-            titulo={`Orçamento Anual da Gerência ${gerenciaUpper} (Todos os Serviços)`}
+            titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={orcamentoGerenciaServicos}
-            gasto={[...servicosExistentes, ...servicosNovos].reduce(
+            gasto={displayedServicos.reduce(
               (acc, servico) =>
                 acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
               0,
