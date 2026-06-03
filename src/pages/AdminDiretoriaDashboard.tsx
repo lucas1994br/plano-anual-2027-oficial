@@ -38,7 +38,11 @@ import {
   getServicosByDiretoria,
   getAdminMiniErpConfigDb
 } from "@/lib/services.ts";
+<<<<<<< HEAD
 import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget, getGerenciaBudget } from "@/lib/adminBudgetConfig.ts";
+=======
+import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget } from "@/lib/adminBudgetConfig.ts";
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
 
 // ==================== REAL DATA FOR DASHBOARD ====================
 const REAL_DIRETORIAS = ["DG", "DE", "DC", "DO", "PR"];
@@ -78,16 +82,22 @@ const useDashboardData = (filtroDiretoria: string) => {
     queryKey: ["solicitacoes-diretoria", diretoria?.id, periodoAtivoId],
     queryFn: () => getSolicitacoesByDiretoria(diretoria!.id, periodoAtivoId!),
     enabled: !!diretoria?.id && !!periodoAtivoId,
+<<<<<<< HEAD
     staleTime: 0,
     gcTime: 10 * 60 * 1000,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
+=======
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
   });
 
   const { data: servicos = [], isLoading: isLoadingSer } = useQuery({
     queryKey: ["servicos-diretoria", diretoria?.id, periodoAtivoId],
     queryFn: () => getServicosByDiretoria(diretoria!.id, periodoAtivoId!),
     enabled: !!diretoria?.id && !!periodoAtivoId,
+<<<<<<< HEAD
     staleTime: 0,
     gcTime: 10 * 60 * 1000,
     refetchOnMount: true,
@@ -100,6 +110,16 @@ const useDashboardData = (filtroDiretoria: string) => {
     staleTime: 0,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
+=======
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const { data: adminMiniConfigFromDb, isLoading: isLoadingConfig } = useQuery({
+    queryKey: ["admin-mini-config"],
+    queryFn: getAdminMiniErpConfigDb,
+    staleTime: 5 * 60 * 1000,
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
   });
 
   const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer || isLoadingConfig;
@@ -115,6 +135,7 @@ const useDashboardData = (filtroDiretoria: string) => {
     } as AdminBudgetConfig;
   }, [adminMiniConfigFromDb]);
 
+<<<<<<< HEAD
   const limiteAquisicao = useMemo(() => {
     if (!diretoria || !orcamentoConfig) return 0;
     const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "aquisicao");
@@ -137,6 +158,11 @@ const useDashboardData = (filtroDiretoria: string) => {
   }, [diretoria, orcamentoConfig, gerenciasAtuaisDb]);
 
   const limiteTotal = limiteAquisicao + limiteServicosNovos + limiteServicosExistentes;
+=======
+  const limiteAquisicao = diretoria ? getDiretoriaBudget(orcamentoConfig, diretoria.id, "aquisicao") : 0;
+  const limiteServicos = diretoria ? getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos") : 0;
+  const limiteTotal = limiteAquisicao + limiteServicos;
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
 
   const mappedData = useMemo(() => {
     const getStatusProgresso = (status?: string) => {
@@ -278,8 +304,13 @@ const useDashboardData = (filtroDiretoria: string) => {
 
     const isLimitedData = solicitacoes.length >= 2000 || servicos.length >= 2000;
 
+<<<<<<< HEAD
     return { evolutionData, gerenciaData, pieData, statusPieData, matrixData, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes, isLimitedData };
   }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes]);
+=======
+    return { evolutionData, gerenciaData, pieData, statusPieData, matrixData, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicos, isLimitedData };
+  }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicos]);
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
 
   return { ...mappedData, isLoading };
 };
@@ -674,11 +705,15 @@ const AdminDiretoriaDashboard = () => {
             <CardHeader className="pb-2">
               <CardDescription className="font-medium text-slate-500">Limite Orçamentário (Admin)</CardDescription>
               <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(rawData.limiteTotal || 0)}</CardTitle>
+<<<<<<< HEAD
               <div className="text-[10px] text-slate-500 mt-1 font-medium leading-tight">
                 Aquis: {formatCurrency(rawData.limiteAquisicao || 0)} <br/>
                 S. Novos: {formatCurrency(rawData.limiteServicosNovos || 0)} <br/>
                 S. Exist: {formatCurrency(rawData.limiteServicosExistentes || 0)}
               </div>
+=======
+              <div className="text-xs text-slate-500 mt-1 font-medium">Aquis: {formatCurrency(rawData.limiteAquisicao || 0)} / Serv: {formatCurrency(rawData.limiteServicos || 0)}</div>
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
             </CardHeader>
           </Card>
           

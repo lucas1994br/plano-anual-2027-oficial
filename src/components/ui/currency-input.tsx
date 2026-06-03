@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Input } from './input';
 
+<<<<<<< HEAD
 export type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
+=======
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
 
 export interface CurrencyInputProps extends Omit<InputProps, 'onChange' | 'value' | 'defaultValue'> {
   value?: string | number;
@@ -32,7 +36,11 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
     }, [value, defaultValue]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+<<<<<<< HEAD
       const inputValue = e.target.value;
+=======
+      let inputValue = e.target.value;
+>>>>>>> ae6fc62ac3d6242de3e635029fd6df12f6a50aba
 
       // Se o usuário digitou algo não numérico ou apagou tudo
       const digits = inputValue.replace(/\D/g, '');
