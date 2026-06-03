@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet, Search } from "lucide-react";
+import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet, Search, Pencil, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -23,11 +23,13 @@ import {
 } from "@/components/ui/table.tsx";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, updateSolicitacaoStatusBulk, updateServicoStatusBulk } from "@/lib/services.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, updateSolicitacaoStatusBulk, updateServicoStatusBulk, updateSolicitacoesBulkData, updateServicosBulkData, deleteSolicitacoesBulk, deleteServicosBulk, deleteSolicitacao, deleteServico, updateSolicitacao, updateServico } from "@/lib/services.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs.tsx";
+import { useToast } from "@/hooks/use-toast.ts";
 
 const ComprasPanel = () => {
   const navigate = useNavigate();
@@ -42,6 +44,14 @@ const ComprasPanel = () => {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [servicosPage, setServicosPage] = useState(1);
   const [servicosPerPage, setServicosPerPage] = useState(25);
+
+  const { toast } = useToast();
+  const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
+  const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  
+  // Single item editing logic
+  const [singleEditId, setSingleEditId] = useState<string | null>(null);
 
   // Buscar diretorias
   const { data: diretorias = [], isLoading: loadingDir } = useQuery({
@@ -181,12 +191,116 @@ const ComprasPanel = () => {
     }
   });
 
-  const handleMarcarConcluidoAquisicoes = (isRevert = false) => {
-    if (selectedItems.size === 0) return;
-    const idsToUpdate = Array.from(selectedItems).map(idStr => {
+  const getSelectedAquisicaoDbIds = () => {
+    return Array.from(selectedItems).map(idStr => {
       const item = allApprovedItems.find(i => String(i.codigo) === idStr);
       return item?.id;
     }).filter(Boolean) as string[];
+  };
+
+  const handleBulkEditAquisicao = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleEditId ? [singleEditId] : getSelectedAquisicaoDbIds();
+      if (ids.length === 0) return;
+      await updateSolicitacoesBulkData(ids, updates);
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras", periodAtivo?.id] });
+      toast({ title: "Sucesso", description: "Atualizado com sucesso." });
+      setBulkEditAquisicaoOpen(false);
+      setSingleEditId(null);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkEditServicos = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleEditId ? [singleEditId] : Array.from(selectedServicos);
+      if (ids.length === 0) return;
+      await updateServicosBulkData(ids, updates);
+      await queryClient.invalidateQueries({ queryKey: ["servicos-compras", periodAtivo?.id] });
+      toast({ title: "Sucesso", description: "Atualizado com sucesso." });
+      setBulkEditServicosOpen(false);
+      setSingleEditId(null);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDeleteAquisicao = async (singleId?: string) => {
+    if (!confirm("Tem certeza que deseja excluir permanentemente?")) return;
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleId ? [singleId] : getSelectedAquisicaoDbIds();
+      await deleteSolicitacoesBulk(ids);
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras", periodAtivo?.id] });
+      if (!singleId) setSelectedItems(new Set());
+      toast({ title: "Excluído", description: "Excluído com sucesso." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDeleteServicos = async (singleId?: string) => {
+    if (!confirm("Tem certeza que deseja excluir permanentemente?")) return;
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleId ? [singleId] : Array.from(selectedServicos);
+      await deleteServicosBulk(ids);
+      await queryClient.invalidateQueries({ queryKey: ["servicos-compras", periodAtivo?.id] });
+      if (!singleId) setSelectedServicos(new Set());
+      toast({ title: "Excluído", description: "Excluído com sucesso." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDevolverAquisicao = async (singleId?: string) => {
+    if (!confirm("Tem certeza que deseja devolver para rascunho?")) return;
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleId ? [singleId] : getSelectedAquisicaoDbIds();
+      await updateSolicitacaoStatusBulk(ids, "rascunho");
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras", periodAtivo?.id] });
+      if (!singleId) setSelectedItems(new Set());
+      toast({ title: "Devolvido", description: "Devolvido para rascunho com sucesso." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDevolverServicos = async (singleId?: string) => {
+    if (!confirm("Tem certeza que deseja devolver para rascunho?")) return;
+    setIsBulkUpdating(true);
+    try {
+      const ids = singleId ? [singleId] : Array.from(selectedServicos);
+      // Aqui usamos updateServicoStatusBulk que suporta array. Se não suportasse, usaríamos um Promise.all, mas updateServicoStatusBulk já existe.
+      // O backend pode esperar (ids, status)
+      await updateServicoStatusBulk(ids, "rascunho");
+      await queryClient.invalidateQueries({ queryKey: ["servicos-compras", periodAtivo?.id] });
+      if (!singleId) setSelectedServicos(new Set());
+      toast({ title: "Devolvido", description: "Devolvido para rascunho com sucesso." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleMarcarConcluidoAquisicoes = (isRevert = false) => {
+    if (selectedItems.size === 0) return;
+    const idsToUpdate = Array.from(selectedItems) as string[];
     
     updateSolicitacoesMutation.mutate({ ids: idsToUpdate, status: isRevert ? "em_compra" : "concluido" });
   };
@@ -198,13 +312,13 @@ const ComprasPanel = () => {
 
   const selectedAquisicoesAreCompleted = useMemo(() => {
     if (selectedItems.size === 0) return false;
-    const selected = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => String(i.codigo) === idStr));
+    const selected = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => i.id === idStr));
     return selected.every(i => i?.status === 'concluido');
   }, [selectedItems, allApprovedItems]);
 
   const selectedAquisicoesAreMixed = useMemo(() => {
     if (selectedItems.size === 0) return false;
-    const statuses = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => String(i.codigo) === idStr)?.status);
+    const statuses = Array.from(selectedItems).map(idStr => allApprovedItems.find(i => i.id === idStr)?.status);
     return statuses.includes('concluido') && statuses.includes('em_compra');
   }, [selectedItems, allApprovedItems]);
 
@@ -269,7 +383,7 @@ const ComprasPanel = () => {
     if (selectedItems.size === filteredItems.length && filteredItems.length > 0) {
       setSelectedItems(new Set());
     } else {
-      setSelectedItems(new Set(filteredItems.map(item => `${item.codigo}`)));
+      setSelectedItems(new Set(filteredItems.filter(item => item.id).map(item => item.id!)));
     }
   };
 
@@ -565,7 +679,7 @@ const ComprasPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
@@ -588,7 +702,7 @@ const ComprasPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
@@ -718,22 +832,49 @@ const ComprasPanel = () => {
                   </SelectContent>
                 </Select>
                 {selectedServicos.size > 0 && !selectedServicosAreMixed && (
-                  <Button 
-                    className={`shadow-md gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedServicosAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
-                    onClick={() => handleMarcarConcluidoServicos(selectedServicosAreCompleted)}
-                    disabled={updateServicosMutation.isPending}
-                  >
-                    {updateServicosMutation.isPending 
-                      ? (
-                          <span className="flex items-center gap-2">
-                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            Processando...
-                          </span>
-                        ) 
-                      : selectedServicosAreCompleted 
-                        ? `Reverter ${selectedServicos.size} para Fila` 
-                        : `Marcar ${selectedServicos.size} como Concluído`}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      className="gap-2 text-primary border-primary hover:bg-primary/10"
+                      onClick={() => setBulkEditServicosOpen(true)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Editar ({selectedServicos.size})
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                      onClick={() => handleBulkDevolverServicos()}
+                    >
+                      <Undo2 className="h-4 w-4" />
+                      Devolver ({selectedServicos.size})
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="gap-2 text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => handleBulkDeleteServicos()}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Excluir ({selectedServicos.size})
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                      onClick={() => handleMarcarConcluidoServicos(selectedServicosAreCompleted)}
+                      disabled={updateServicosMutation.isPending}
+                    >
+                      {updateServicosMutation.isPending 
+                        ? (
+                            <span className="flex items-center gap-2">
+                              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Processando...
+                            </span>
+                          ) 
+                        : selectedServicosAreCompleted 
+                          ? `Reverter ${selectedServicos.size} para Fila` 
+                          : `Marcar ${selectedServicos.size} como Concluído`}
+                    </Button>
+                  </div>
                 )}
                 {selectedServicosAreMixed && (
                   <p className="text-sm text-amber-600 font-medium bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">Seleção mista inválida.</p>
@@ -756,19 +897,21 @@ const ComprasPanel = () => {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
-                    <TableHead className="w-12">
+                    <TableHead className="w-12 cursor-pointer select-none" onClick={toggleSelectAllServicos}>
                       <Checkbox
                         checked={selectedServicos.size === filteredServicos.length && filteredServicos.length > 0}
                         onCheckedChange={toggleSelectAllServicos}
+                        className="pointer-events-none"
                       />
                     </TableHead>
-                    <TableHead>Objeto</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={toggleSelectAllServicos}>Objeto</TableHead>
                     <TableHead>Gerência</TableHead>
                     <TableHead>Diretoria</TableHead>
                     <TableHead>Justificativa</TableHead>
                     <TableHead>Prioridade</TableHead>
                     <TableHead className="text-center">Status</TableHead>
                     <TableHead className="text-center">Estimativa Valor</TableHead>
+                    <TableHead className="text-center w-24">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -791,22 +934,51 @@ const ComprasPanel = () => {
                             disabled={isServicoReadOnly(servico)}
                           />
                         </TableCell>
-                        <TableCell className="max-w-xs truncate font-medium text-slate-700">{servico.objeto}</TableCell>
-                        <TableCell>{servico.gerencia}</TableCell>
-                        <TableCell><Badge variant="outline">{servico.diretoriaSigla}</Badge></TableCell>
-                        <TableCell className="text-sm text-slate-500 max-w-xs truncate">{servico.justificativa || "-"}</TableCell>
                         <TableCell>
-                          <Badge variant={getPrioridadeBadgeVariant(servico.grauPrioridade) as any}>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800">{servico.objeto}</span>
+                            <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                              <Badge variant="outline" className="text-[10px] bg-slate-50">{servico.tipoContratacao}</Badge>
+                              {servico.vinculacao === 'Sim' && (
+                                <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">Vinculado</Badge>
+                              )}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">{servico.gerencia}</TableCell>
+                        <TableCell className="text-sm font-medium">{servico.diretoriaSigla}</TableCell>
+                        <TableCell className="text-sm text-slate-600">
+                          {servico.justificativa ? (
+                            <span className="line-clamp-2" title={servico.justificativa}>{servico.justificativa}</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Nenhuma</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`${getPrioridadeBadgeVariant(servico.grauPrioridade as any)} text-xs border-0 shadow-sm`}>
                             {servico.grauPrioridade}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-center">
-                          <Badge variant="outline" className={servico.status === 'concluido' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}>
+                          <Badge variant="outline" className={servico.status === 'concluido' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm' : 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'}>
                             {servico.status === 'concluido' ? 'Concluído' : 'Em Compra'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-center font-mono text-slate-700 font-medium">
+                        <TableCell className="text-center font-semibold text-slate-700">
                           {formatCurrency(servico.estimativaValor || 0)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center gap-1 transition-opacity">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => { setSingleEditId(servico.id!); setBulkEditServicosOpen(true); }} title="Editar">
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverServicos(servico.id)} title="Devolver Rascunho">
+                              <Undo2 className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleBulkDeleteServicos(servico.id)} title="Excluir">
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -984,22 +1156,48 @@ const ComprasPanel = () => {
         )}
         
         {selectedItems.size > 0 && !selectedAquisicoesAreMixed && (
-          <Button 
-            className={`shadow-md gap-2 ml-auto transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedAquisicoesAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
-            onClick={() => handleMarcarConcluidoAquisicoes(selectedAquisicoesAreCompleted)}
-            disabled={updateSolicitacoesMutation.isPending}
-          >
-            {updateSolicitacoesMutation.isPending 
-              ? (
-                  <span className="flex items-center gap-2">
-                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Processando...
-                  </span>
-                )
-              : selectedAquisicoesAreCompleted 
-                ? `Reverter ${selectedItems.size} para Fila` 
-                : `Marcar ${selectedItems.size} como Concluído`}
-          </Button>
+          <div className="flex gap-2 ml-auto">
+            <Button 
+              variant="outline" 
+              className="gap-2 text-primary border-primary hover:bg-primary/10 shadow-sm"
+              onClick={() => setBulkEditAquisicaoOpen(true)}
+            >
+              <Pencil className="h-4 w-4" />
+              Editar ({selectedItems.size})
+            </Button>
+            <Button 
+              variant="outline" 
+              className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700 shadow-sm"
+              onClick={() => handleBulkDevolverAquisicao()}
+            >
+              <Undo2 className="h-4 w-4" />
+              Devolver ({selectedItems.size})
+            </Button>
+            <Button 
+              variant="outline" 
+              className="gap-2 text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive shadow-sm"
+              onClick={() => handleBulkDeleteAquisicao()}
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir ({selectedItems.size})
+            </Button>
+            <Button 
+              className={`shadow-md gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedAquisicoesAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
+              onClick={() => handleMarcarConcluidoAquisicoes(selectedAquisicoesAreCompleted)}
+              disabled={updateSolicitacoesMutation.isPending}
+            >
+              {updateSolicitacoesMutation.isPending 
+                ? (
+                    <span className="flex items-center gap-2">
+                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Processando...
+                    </span>
+                  )
+                : selectedAquisicoesAreCompleted 
+                  ? `Reverter ${selectedItems.size} para Fila` 
+                  : `Marcar ${selectedItems.size} como Concluído`}
+            </Button>
+          </div>
         )}
         {selectedAquisicoesAreMixed && (
           <p className="text-sm text-amber-600 font-medium ml-auto bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">Seleção mista inválida.</p>
@@ -1043,13 +1241,14 @@ const ComprasPanel = () => {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
-                  <TableHead className="w-[40px]">
+                  <TableHead className="w-[40px] cursor-pointer select-none" onClick={toggleSelectAll}>
                     <Checkbox
                       checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
                       onCheckedChange={toggleSelectAll}
+                      className="pointer-events-none"
                     />
                   </TableHead>
-                  <TableHead className="w-[70px]">Código</TableHead>
+                  <TableHead className="w-[70px] cursor-pointer select-none" onClick={toggleSelectAll}>Código</TableHead>
                   <TableHead className="min-w-[200px]">Descrição</TableHead>
                   <TableHead className="text-center w-[60px]">Dir.</TableHead>
                   <TableHead className="text-center w-[70px]">Ger.</TableHead>
@@ -1058,15 +1257,16 @@ const ComprasPanel = () => {
                   <TableHead className="text-right w-[100px]">Total</TableHead>
                   <TableHead className="text-center w-[100px]">Status</TableHead>
                   <TableHead className="min-w-[180px]">Obs.</TableHead>
+                  <TableHead className="text-center w-24">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedItems.map((item) => (
-                  <TableRow key={`${item.codigo}`} className={`transition-colors group hover:shadow-inner hover:bg-slate-50/80 ${item.status === 'concluido' ? 'bg-slate-50/50 opacity-90' : 'bg-white'}`}>
+                  <TableRow key={item.id || item.codigo} className={`transition-colors group hover:shadow-inner hover:bg-slate-50/80 ${item.status === 'concluido' ? 'bg-slate-50/50 opacity-90' : 'bg-white'}`}>
                     <TableCell>
                       <Checkbox
-                        checked={selectedItems.has(`${item.codigo}`)}
-                        onCheckedChange={() => toggleSelectItem(`${item.codigo}`)}
+                        checked={item.id ? selectedItems.has(item.id) : false}
+                        onCheckedChange={() => item.id && toggleSelectItem(item.id)}
                       />
                     </TableCell>
                     <TableCell className="font-medium text-primary">{item.codigo}</TableCell>
@@ -1092,6 +1292,19 @@ const ComprasPanel = () => {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {item.observacao || "-"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => { setSingleEditId(item.id!); setBulkEditAquisicaoOpen(true); }} title="Editar">
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverAquisicao(item.id!)} title="Devolver Rascunho">
+                          <Undo2 className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleBulkDeleteAquisicao(item.id!)} title="Excluir">
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1147,6 +1360,20 @@ const ComprasPanel = () => {
       )}
       </div>
       </div>
+      <BulkEditAquisicaoDialog 
+        open={bulkEditAquisicaoOpen} 
+        onOpenChange={setBulkEditAquisicaoOpen} 
+        selectedCount={singleEditId ? 1 : selectedItems.size} 
+        onConfirm={handleBulkEditAquisicao} 
+        isUpdating={isBulkUpdating} 
+      />
+      <BulkEditServicosDialog 
+        open={bulkEditServicosOpen} 
+        onOpenChange={setBulkEditServicosOpen} 
+        selectedCount={singleEditId ? 1 : selectedServicos.size} 
+        onConfirm={handleBulkEditServicos} 
+        isUpdating={isBulkUpdating} 
+      />
     </div>
   );
 };

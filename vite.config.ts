@@ -12,6 +12,15 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
+  build: {
+    chunkSizeWarningLimit: 4000,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.code === "INEFFECTIVE_DYNAMIC_IMPORT") return;
+        warn(warning);
+      },
+    },
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

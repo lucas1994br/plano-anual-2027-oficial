@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Select,
@@ -116,6 +117,10 @@ export function AdminServicosControl() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+  const [isUpdatingBulk, setIsUpdatingBulk] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditField, setBulkEditField] = useState("");
+  const [bulkEditValue, setBulkEditValue] = useState("");
 
   // Estados de busca e seleção
   const [searchTerm, setSearchTerm] = useState("");
@@ -420,6 +425,32 @@ export function AdminServicosControl() {
     }
   };
 
+  const handleBulkEdit = async () => {
+    if (selectedIds.length === 0 || !bulkEditField || !bulkEditValue) return;
+
+    setIsUpdatingBulk(true);
+    try {
+      const updates: any = {};
+      if (bulkEditField === "tipo_contratacao") updates.tipo_contratacao = bulkEditValue;
+      if (bulkEditField === "grau_prioridade") updates.grau_prioridade = bulkEditValue;
+      if (bulkEditField === "vinculacao") updates.vinculacao = bulkEditValue;
+
+      await Promise.all(selectedIds.map(id => updateServicoCatalogoAdmin(id, updates)));
+      
+      setBulkEditOpen(false);
+      setBulkEditField("");
+      setBulkEditValue("");
+      await refetchServicos();
+      queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      toast.success(`${selectedIds.length} serviços atualizados com sucesso.`);
+    } catch (_error: unknown) {
+      toast.error("Ocorreu um erro ao atualizar um ou mais serviços.");
+    } finally {
+      setIsUpdatingBulk(false);
+    }
+  };
+
   const toggleSelectAll = () => {
     if (selectedIds.length === paginationData.paginatedItems.length) {
       setSelectedIds([]);
@@ -494,15 +525,26 @@ export function AdminServicosControl() {
               />
             </div>
             {selectedIds.length > 0 && (
-              <Button 
-                variant="destructive" 
-                onClick={handleBulkDelete}
-                disabled={isDeletingBulk}
-                className="whitespace-nowrap w-full sm:w-auto"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                {isDeletingBulk ? "Excluindo..." : `Excluir (${selectedIds.length})`}
-              </Button>
+              <>
+                <Button 
+                  variant="outline"
+                  className="gap-2 text-primary border-primary hover:bg-primary/10 whitespace-nowrap w-full sm:w-auto"
+                  onClick={() => setBulkEditOpen(true)}
+                  disabled={isUpdatingBulk}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Editar ({selectedIds.length})
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleBulkDelete}
+                  disabled={isDeletingBulk}
+                  className="whitespace-nowrap w-full sm:w-auto gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {isDeletingBulk ? "Excluindo..." : `Excluir (${selectedIds.length})`}
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -742,10 +784,7 @@ export function AdminServicosControl() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium">Estimativa de Valor (R$) *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <CurrencyInput
                   value={formData.estimativa_valor}
                   onChange={(e) => setFormData(prev => ({ ...prev, estimativa_valor: e.target.value }))}
                   placeholder="0,00"
@@ -918,13 +957,11 @@ export function AdminServicosControl() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium">Estimativa de Valor (R$) *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <CurrencyInput
                   value={editFormData.estimativa_valor}
                   onChange={(e) => setEditFormData(prev => ({ ...prev, estimativa_valor: e.target.value }))}
                   className="mt-1"
+                  placeholder="0,00"
                 />
               </div>
 
@@ -1040,6 +1077,75 @@ export function AdminServicosControl() {
               {isDeleting ? "Excluindo..." : "Sim, Excluir"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== DIALOG EDITAR EM LOTE ==================== */}
+      <Dialog open={bulkEditOpen} onOpenChange={(open) => {
+        setBulkEditOpen(open);
+        if (!open) {
+          setBulkEditField("");
+          setBulkEditValue("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar {selectedIds.length} serviços em lote</DialogTitle>
+            <DialogDescription>
+              Selecione o campo que deseja alterar para todos os serviços selecionados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Campo a editar</Label>
+              <Select value={bulkEditField} onValueChange={setBulkEditField}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o campo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tipo_contratacao">Tipo de Contratação</SelectItem>
+                  <SelectItem value="grau_prioridade">Grau de Prioridade</SelectItem>
+                  <SelectItem value="vinculacao">Vinculação</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {bulkEditField && (
+              <div className="space-y-2">
+                <Label>Novo valor</Label>
+                {bulkEditField === "tipo_contratacao" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Novo">Novo</SelectItem>
+                      <SelectItem value="Renovação">Renovação</SelectItem>
+                      <SelectItem value="Prorrogação">Prorrogação</SelectItem>
+                      <SelectItem value="Outros">Outros</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : bulkEditField === "grau_prioridade" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Baixo">Baixo</SelectItem>
+                      <SelectItem value="Médio">Médio</SelectItem>
+                      <SelectItem value="Alto">Alto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Sim">Sim</SelectItem>
+                      <SelectItem value="Não">Não</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+            <Button className="w-full" disabled={!bulkEditField || !bulkEditValue || isUpdatingBulk} onClick={handleBulkEdit}>
+              {isUpdatingBulk ? "Salvando..." : "Aplicar a todos"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -31,6 +31,7 @@ interface PlanFiltersProps {
   onPrioridadeChange: (value: string) => void;
   categorias: string[];
   gerencias?: string[];
+  hideCategoriaFilter?: boolean;
 }
 
 export function PlanFilters({
@@ -44,6 +45,7 @@ export function PlanFilters({
   onPrioridadeChange,
   categorias,
   gerencias,
+  hideCategoriaFilter,
 }: PlanFiltersProps) {
   const [categoriaOpen, setCategoriaOpen] = useState(false);
 
@@ -87,62 +89,64 @@ export function PlanFilters({
             </Select>
           )}
 
-          <Popover open={categoriaOpen} onOpenChange={setCategoriaOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                role="combobox"
-                aria-expanded={categoriaOpen}
-                className="w-[320px] justify-between bg-card font-normal"
-              >
-                <span className="truncate">{categoriaSelecionadaLabel}</span>
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[320px] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Pesquisar categoria..." />
-                <CommandList>
-                  <CommandEmpty>Nenhuma categoria encontrada.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem
-                      value="limpar categoria"
-                      onSelect={() => {
-                        onCategoriaChange("");
-                        setCategoriaOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4",
-                          categoria === "" ? "opacity-100" : "opacity-0",
-                        )}
-                      />
-                      Limpar categoria
-                    </CommandItem>
-                    {categorias.map((cat) => (
+          {!hideCategoriaFilter && (
+            <Popover open={categoriaOpen} onOpenChange={setCategoriaOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={categoriaOpen}
+                  className="w-[320px] justify-between bg-card font-normal"
+                >
+                  <span className="truncate">{categoriaSelecionadaLabel}</span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[320px] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Pesquisar categoria..." />
+                  <CommandList>
+                    <CommandEmpty>Nenhuma categoria encontrada.</CommandEmpty>
+                    <CommandGroup>
                       <CommandItem
-                        key={cat}
-                        value={cat}
-                        onSelect={(currentValue) => {
-                          onCategoriaChange(currentValue === categoria ? "" : currentValue);
+                        value="limpar categoria"
+                        onSelect={() => {
+                          onCategoriaChange("");
                           setCategoriaOpen(false);
                         }}
                       >
                         <Check
                           className={cn(
                             "mr-2 h-4 w-4",
-                            categoria === cat ? "opacity-100" : "opacity-0",
+                            categoria === "" ? "opacity-100" : "opacity-0",
                           )}
                         />
-                        {cat}
+                        Limpar categoria
                       </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+                      {categorias.map((cat) => (
+                        <CommandItem
+                          key={cat}
+                          value={cat}
+                          onSelect={(currentValue) => {
+                            onCategoriaChange(currentValue === categoria ? "" : currentValue);
+                            setCategoriaOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              categoria === cat ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          {cat}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          )}
 
           <Select value={prioridade} onValueChange={onPrioridadeChange}>
             <SelectTrigger className="w-[180px] bg-card">

@@ -1,12 +1,12 @@
-
-
 import { useEffect, useMemo, useState } from "react";
-import { Save, Waypoints, Wallet, Building2 } from "lucide-react";
+import { Save, Waypoints, Wallet, Building2, CheckCircle2, TrendingUp, ChevronRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import {
   Select,
   SelectContent,
@@ -15,19 +15,14 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table.tsx";
-import {
   getAdminMiniErpConfigDb,
   getCategoryBudgetOwnerRules,
   getGerenciasByDiretoria,
   saveAdminMiniErpConfigDb,
   saveCategoryBudgetOwnerRules,
+  criarOrcamento,
+  enviarOrcamento,
+  deletarOrcamento
 } from "@/lib/services.ts";
 import {
   AdminBudgetConfig,
@@ -40,6 +35,7 @@ import { CATEGORIAS_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata.ts";
 import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils.ts";
 
 interface DiretoriaResumo {
   id: string;
@@ -54,58 +50,32 @@ interface GerenciaResumo {
   diretoria_id: string;
 }
 
-interface GerenciaGrupo {
-  titulo: string;
-  gerencias: GerenciaResumo[];
-}
-
-const DO_GROUPS: Array<{ titulo: string; siglas: string[] }> = [
-  { titulo: "Sede", siglas: ["ODCD"] },
-  { titulo: "Norte", siglas: ["OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB"] },
-  { titulo: "Sul", siglas: ["OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"] },
-];
-
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 
-const toNumber = (raw: string) => {
+const toNumber = (raw: string | number) => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const buildGerenciaGroups = (siglaDiretoria: string, gerencias: GerenciaResumo[]): GerenciaGrupo[] => {
-  const sortedGerencias = [...gerencias].sort((a, b) => a.sigla.localeCompare(b.sigla));
-
-  if (siglaDiretoria !== "DO") {
-    return [{ titulo: `Gerências da ${siglaDiretoria}`, gerencias: sortedGerencias }];
-  }
-
-  const porSigla = new Map(sortedGerencias.map((g) => [g.sigla, g]));
-
-  const grupos = DO_GROUPS.map((grupo) => ({
-    titulo: grupo.titulo,
-    gerencias: grupo.siglas.map((sigla) => porSigla.get(sigla)).filter(Boolean) as GerenciaResumo[],
-  }));
-
-  const siglasConhecidas = new Set(DO_GROUPS.flatMap((g) => g.siglas));
-  const outras = sortedGerencias.filter((g) => !siglasConhecidas.has(g.sigla));
-
-  if (outras.length > 0) {
-    grupos.push({ titulo: "Outras", gerencias: outras });
-  }
-
-  return grupos.filter((grupo) => grupo.gerencias.length > 0);
 };
 
 export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo[] }) {
   const queryClient = useQueryClient();
   const [diretoriaBudgetsAquisicao, setDiretoriaBudgetsAquisicao] = useState<Record<string, number>>({});
   const [diretoriaBudgetsServicos, setDiretoriaBudgetsServicos] = useState<Record<string, number>>({});
+  const [diretoriaBudgetsServicosNovos, setDiretoriaBudgetsServicosNovos] = useState<Record<string, number>>({});
+  const [diretoriaBudgetsServicosExistentes, setDiretoriaBudgetsServicosExistentes] = useState<Record<string, number>>({});
+
   const [gerenciaBudgetsAquisicao, setGerenciaBudgetsAquisicao] = useState<Record<string, number>>({});
   const [gerenciaBudgetsServicos, setGerenciaBudgetsServicos] = useState<Record<string, number>>({});
+  const [gerenciaBudgetsServicosNovos, setGerenciaBudgetsServicosNovos] = useState<Record<string, number>>({});
+  const [gerenciaBudgetsServicosExistentes, setGerenciaBudgetsServicosExistentes] = useState<Record<string, number>>({});
+
   const [routingRules, setRoutingRules] = useState<Record<string, RoutingRule>>({});
   const [categoryBudgetOwners, setCategoryBudgetOwners] = useState<Record<string, string>>({});
-  const [categorySearch, setCategorySearch] = useState("");
+  
+  const [selectedDirId, setSelectedDirId] = useState<string | null>(diretorias[0]?.id || null);
+  const [activeTab, setActiveTab] = useState<"aquisicao" | "servicos_novos" | "servicos_existentes">("aquisicao");
+  const [isSaving, setIsSaving] = useState(false);
 
   const { data: gerencias = [], isLoading: isLoadingGerencias } = useQuery({
     queryKey: ["admin-mini-erp-gerencias", diretorias.map((d) => d.id).join("|")],
@@ -145,517 +115,361 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
     return map;
   }, [gerencias]);
 
-  const categoriasOrcamentarias = useMemo(() => {
-    const categoriasDaPlanilha = Object.values(MATERIAL_DESCRIPTION_BY_CODE);
-    const categoriasSalvasNoBanco = Object.keys(categoryOwnersFromDb || {});
-    const categoriasSalvasLocal = Object.keys(loadAdminBudgetConfig()?.categoryBudgetOwners || {});
-
-    const all = new Set<string>([
-      ...CATEGORIAS_ITEM_PREDEFINIDAS,
-      ...categoriasDaPlanilha,
-      ...categoriasSalvasNoBanco,
-      ...categoriasSalvasLocal,
-    ]);
-
-    return Array.from(all)
-      .filter((categoria) => typeof categoria === "string" && categoria.trim() !== "")
-      .sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [categoryOwnersFromDb]);
-
-  const categoriasOrcamentariasFiltradas = useMemo(() => {
-    const termo = categorySearch.trim().toLowerCase();
-
-    if (!termo) {
-      return categoriasOrcamentarias;
-    }
-
-    return categoriasOrcamentarias.filter((categoria) =>
-      categoria.toLowerCase().includes(termo)
-    );
-  }, [categoriasOrcamentarias, categorySearch]);
-
   useEffect(() => {
     if (diretorias.length === 0) return;
-
     const saved = loadAdminBudgetConfig();
 
-    const defaultDirBudgetsAquisicao = diretorias.reduce<Record<string, number>>((acc, dir) => {
-      acc[dir.id] =
-        ((miniConfigFromDb as { diretoriaBudgetsAquisicao?: Record<string, number> })?.diretoriaBudgetsAquisicao?.[dir.id]) ??
-        saved?.diretoriaBudgetsAquisicao?.[dir.id] ??
-        saved?.diretoriaBudgets?.[dir.id] ??
-        0;
-      return acc;
-    }, {});
+    const dirAquisicao: Record<string, number> = {};
+    const dirServicos: Record<string, number> = {};
+    const dirServicosNovos: Record<string, number> = {};
+    const dirServicosExistentes: Record<string, number> = {};
+    const gerAquisicao: Record<string, number> = {};
+    const gerServicos: Record<string, number> = {};
+    const gerServicosNovos: Record<string, number> = {};
+    const gerServicosExistentes: Record<string, number> = {};
 
-    const defaultDirBudgetsServicos = diretorias.reduce<Record<string, number>>((acc, dir) => {
-      acc[dir.id] =
-        ((miniConfigFromDb as { diretoriaBudgetsServicos?: Record<string, number> })?.diretoriaBudgetsServicos?.[dir.id]) ??
-        saved?.diretoriaBudgetsServicos?.[dir.id] ??
-        0;
-      return acc;
-    }, {});
+    diretorias.forEach(dir => {
+        dirAquisicao[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsAquisicao?.[dir.id] || 0;
+        dirServicos[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicos?.[dir.id] || 0;
+        dirServicosNovos[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicosNovos?.[dir.id] || 0;
+        dirServicosExistentes[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicosExistentes?.[dir.id] || 0;
+    });
 
-    const defaultGerBudgetsAquisicao = gerencias.reduce<Record<string, number>>((acc, ger) => {
-      acc[ger.id] =
-        ((miniConfigFromDb as { gerenciaBudgetsAquisicao?: Record<string, number> })?.gerenciaBudgetsAquisicao?.[ger.id]) ??
-        saved?.gerenciaBudgetsAquisicao?.[ger.id] ??
-        saved?.gerenciaBudgets?.[ger.id] ??
-        0;
-      return acc;
-    }, {});
+    gerencias.forEach(ger => {
+        gerAquisicao[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsAquisicao?.[ger.id] || 0;
+        gerServicos[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicos?.[ger.id] || 0;
+        gerServicosNovos[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicosNovos?.[ger.id] || 0;
+        gerServicosExistentes[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicosExistentes?.[ger.id] || 0;
+    });
 
-    const defaultGerBudgetsServicos = gerencias.reduce<Record<string, number>>((acc, ger) => {
-      acc[ger.id] =
-        ((miniConfigFromDb as { gerenciaBudgetsServicos?: Record<string, number> })?.gerenciaBudgetsServicos?.[ger.id]) ??
-        saved?.gerenciaBudgetsServicos?.[ger.id] ??
-        0;
-      return acc;
-    }, {});
+    setDiretoriaBudgetsAquisicao(dirAquisicao);
+    setDiretoriaBudgetsServicos(dirServicos);
+    setDiretoriaBudgetsServicosNovos(dirServicosNovos);
+    setDiretoriaBudgetsServicosExistentes(dirServicosExistentes);
+    setGerenciaBudgetsAquisicao(gerAquisicao);
+    setGerenciaBudgetsServicos(gerServicos);
+    setGerenciaBudgetsServicosNovos(gerServicosNovos);
+    setGerenciaBudgetsServicosExistentes(gerServicosExistentes);
 
     const defaultRules = gerencias.reduce<Record<string, RoutingRule>>((acc, ger) => {
-      acc[ger.id] = ((miniConfigFromDb as { routingRules?: Record<string, RoutingRule> })?.routingRules?.[ger.id]) ?? saved?.routingRules?.[ger.id] ?? {
+      acc[ger.id] = ((miniConfigFromDb as any)?.routingRules?.[ger.id]) ?? saved?.routingRules?.[ger.id] ?? {
         destinoTipo: "diretoria",
         destinoId: ger.diretoria_id,
       };
       return acc;
     }, {});
+    setRoutingRules(defaultRules);
+
+    const categoriasOrcamentarias = Array.from(new Set([
+        ...CATEGORIAS_ITEM_PREDEFINIDAS,
+        ...Object.values(MATERIAL_DESCRIPTION_BY_CODE),
+        ...Object.keys(categoryOwnersFromDb || {})
+    ])).filter(Boolean);
 
     const defaultCategoryBudgetOwners = categoriasOrcamentarias.reduce<Record<string, string>>((acc, categoria) => {
-      acc[categoria] = categoryOwnersFromDb?.[categoria] ?? saved?.categoryBudgetOwners?.[categoria] ?? DEFAULT_BUDGET_OWNER;
+      acc[categoria] = categoryOwnersFromDb?.[categoria] ?? DEFAULT_BUDGET_OWNER;
       return acc;
     }, {});
-
-    setDiretoriaBudgetsAquisicao(defaultDirBudgetsAquisicao);
-    setDiretoriaBudgetsServicos(defaultDirBudgetsServicos);
-    setGerenciaBudgetsAquisicao(defaultGerBudgetsAquisicao);
-    setGerenciaBudgetsServicos(defaultGerBudgetsServicos);
-    setRoutingRules(defaultRules);
     setCategoryBudgetOwners(defaultCategoryBudgetOwners);
-  }, [diretorias, gerencias, categoryOwnersFromDb, miniConfigFromDb, categoriasOrcamentarias]);
+  }, [diretorias, gerencias, categoryOwnersFromDb, miniConfigFromDb]);
+
+  const totalDiretoriasAquisicao = useMemo(() => Object.values(diretoriaBudgetsAquisicao).reduce((acc, v) => acc + v, 0), [diretoriaBudgetsAquisicao]);
+  const totalGerenciasAquisicao = useMemo(() => Object.values(gerenciaBudgetsAquisicao).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsAquisicao]);
+  const fundoGlobalAquisicao = totalDiretoriasAquisicao + totalGerenciasAquisicao;
+
+  const totalDiretoriasServicos = useMemo(() => Object.values(diretoriaBudgetsServicos).reduce((acc, v) => acc + v, 0), [diretoriaBudgetsServicos]);
+  const totalGerenciasServicos = useMemo(() => Object.values(gerenciaBudgetsServicos).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsServicos]);
+  
+  const totalDiretoriasServicosNovos = useMemo(() => Object.values(diretoriaBudgetsServicosNovos).reduce((acc, v) => acc + v, 0), [diretoriaBudgetsServicosNovos]);
+  const totalGerenciasServicosNovos = useMemo(() => Object.values(gerenciaBudgetsServicosNovos).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsServicosNovos]);
+  const fundoGlobalServicosNovos = totalDiretoriasServicosNovos + totalGerenciasServicosNovos;
+
+  const totalDiretoriasServicosExistentes = useMemo(() => Object.values(diretoriaBudgetsServicosExistentes).reduce((acc, v) => acc + v, 0), [diretoriaBudgetsServicosExistentes]);
+  const totalGerenciasServicosExistentes = useMemo(() => Object.values(gerenciaBudgetsServicosExistentes).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsServicosExistentes]);
+  const fundoGlobalServicosExistentes = totalDiretoriasServicosExistentes + totalGerenciasServicosExistentes;
+
+  const fundoGlobalAcumulado = fundoGlobalAquisicao + fundoGlobalServicosNovos + fundoGlobalServicosExistentes;
 
   const handleSaveConfig = async () => {
-    const payload: AdminBudgetConfig = {
-      diretoriaBudgetsAquisicao,
-      diretoriaBudgetsServicos,
-      gerenciaBudgetsAquisicao,
-      gerenciaBudgetsServicos,
-      // Compatibilidade com leitura legada
-      diretoriaBudgets: diretoriaBudgetsAquisicao,
-      gerenciaBudgets: gerenciaBudgetsAquisicao,
-      routingRules,
-      categoryBudgetOwners,
-      updatedAt: new Date().toISOString(),
-    };
+    setIsSaving(true);
     try {
-      await Promise.all([
-        saveAdminMiniErpConfigDb({
+      // Como as novas Edge Functions (enviarOrcamento) podem não estar em produção
+      // e para evitar 10+ requisições sequenciais, utilizamos o batching nativo
+      // já publicado e funcional para garantir que a UI funcione.
+      await saveAdminMiniErpConfigDb({
           diretoriaBudgetsAquisicao,
           diretoriaBudgetsServicos,
+          diretoriaBudgetsServicosNovos,
+          diretoriaBudgetsServicosExistentes,
           gerenciaBudgetsAquisicao,
           gerenciaBudgetsServicos,
-          routingRules,
-        }),
-        saveCategoryBudgetOwnerRules(categoryBudgetOwners),
-      ]);
-      saveAdminBudgetConfig(payload);
+          gerenciaBudgetsServicosNovos,
+          gerenciaBudgetsServicosExistentes,
+          routingRules
+      });
+      
+      await saveCategoryBudgetOwnerRules(categoryBudgetOwners);
+
       queryClient.invalidateQueries({ queryKey: ["admin-mini-erp-config-db"] });
       queryClient.invalidateQueries({ queryKey: ["category-budget-owners-db"] });
-      toast.success("Configurações de orçamento e fluxo salvas no Admin e no banco.");
-    } catch (error: unknown) {
-      const rawMessage = String(error instanceof Error ? error.message : "");
-      const message = rawMessage.includes("Sessão admin não encontrada") || rawMessage.includes("Sessao admin nao encontrada")
-        ? "Sessão admin expirada. Entre novamente no painel admin."
-        : "Não foi possível salvar as regras orçamentárias no banco.";
-      toast.error(message);
+      toast.success("Orçamentos e repasses configurados com sucesso!");
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || "Erro ao salvar orçamentos. Verifique os logs.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const totalDiretoriasAquisicao = useMemo(
-    () => Object.values(diretoriaBudgetsAquisicao).reduce((acc, value) => acc + value, 0),
-    [diretoriaBudgetsAquisicao],
-  );
+  const selectedDir = diretoriaMap[selectedDirId || ""];
+  const gerenciasOfSelectedDir = gerenciasByDiretoria[selectedDir?.id || ""] || [];
 
-  const totalDiretoriasServicos = useMemo(
-    () => Object.values(diretoriaBudgetsServicos).reduce((acc, value) => acc + value, 0),
-    [diretoriaBudgetsServicos],
-  );
+  const retidoDirAquisicao = diretoriaBudgetsAquisicao[selectedDir?.id || ""] || 0;
+  const repassadoGerenciasAquisicao = gerenciasOfSelectedDir.reduce((acc, g) => acc + (gerenciaBudgetsAquisicao[g.id] || 0), 0);
+  const fundoDCAquisicao = retidoDirAquisicao + repassadoGerenciasAquisicao;
 
-  const totalGerenciasAquisicao = useMemo(
-    () => Object.values(gerenciaBudgetsAquisicao).reduce((acc, value) => acc + value, 0),
-    [gerenciaBudgetsAquisicao],
-  );
+  const retidoDirServicosNovos = diretoriaBudgetsServicosNovos[selectedDir?.id || ""] || 0;
+  const repassadoGerenciasServicosNovos = gerenciasOfSelectedDir.reduce((acc, g) => acc + (gerenciaBudgetsServicosNovos[g.id] || 0), 0);
+  const fundoDCServicosNovos = retidoDirServicosNovos + repassadoGerenciasServicosNovos;
 
-  const totalGerenciasServicos = useMemo(
-    () => Object.values(gerenciaBudgetsServicos).reduce((acc, value) => acc + value, 0),
-    [gerenciaBudgetsServicos],
-  );
+  const retidoDirServicosExistentes = diretoriaBudgetsServicosExistentes[selectedDir?.id || ""] || 0;
+  const repassadoGerenciasServicosExistentes = gerenciasOfSelectedDir.reduce((acc, g) => acc + (gerenciaBudgetsServicosExistentes[g.id] || 0), 0);
+  const fundoDCServicosExistentes = retidoDirServicosExistentes + repassadoGerenciasServicosExistentes;
+
+  const currentFundo = activeTab === "aquisicao" ? fundoDCAquisicao : (activeTab === "servicos_novos" ? fundoDCServicosNovos : fundoDCServicosExistentes);
+  const currentRetido = activeTab === "aquisicao" ? retidoDirAquisicao : (activeTab === "servicos_novos" ? retidoDirServicosNovos : retidoDirServicosExistentes);
+  const currentRepassado = activeTab === "aquisicao" ? repassadoGerenciasAquisicao : (activeTab === "servicos_novos" ? repassadoGerenciasServicosNovos : repassadoGerenciasServicosExistentes);
+  const currentGerenciaBudgets = activeTab === "aquisicao" ? gerenciaBudgetsAquisicao : (activeTab === "servicos_novos" ? gerenciaBudgetsServicosNovos : gerenciaBudgetsServicosExistentes);
+  
+  const handleRetidoChange = (val: number) => {
+      if (activeTab === "aquisicao") {
+          setDiretoriaBudgetsAquisicao(prev => ({ ...prev, [selectedDir.id]: val }));
+      } else if (activeTab === "servicos_novos") {
+          setDiretoriaBudgetsServicosNovos(prev => ({ ...prev, [selectedDir.id]: val }));
+      } else {
+          setDiretoriaBudgetsServicosExistentes(prev => ({ ...prev, [selectedDir.id]: val }));
+      }
+  };
+
+  const handleGerenciaChange = (gerId: string, val: number) => {
+      if (activeTab === "aquisicao") {
+          setGerenciaBudgetsAquisicao(prev => ({ ...prev, [gerId]: val }));
+      } else if (activeTab === "servicos_novos") {
+          setGerenciaBudgetsServicosNovos(prev => ({ ...prev, [gerId]: val }));
+      } else {
+          setGerenciaBudgetsServicosExistentes(prev => ({ ...prev, [gerId]: val }));
+      }
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-          <Wallet className="h-5 w-5 text-primary" />
-          Orçamento Central
-        </h2>
-        <Button onClick={handleSaveConfig} className="gap-2">
-          <Save className="h-4 w-4" />
-          Salvar configurações
+      {/* Header Banner */}
+      <div className="bg-[#1f2937] rounded-xl p-6 flex items-center justify-between shadow-xl">
+        <div className="flex items-center gap-4">
+          <div className="bg-white/10 p-4 rounded-xl backdrop-blur-md border border-white/20">
+            <Wallet className="h-8 w-8 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Painel de Orçamentos</h2>
+            <p className="text-white/70 text-sm mt-1">Gerencie fundos, defina a pirâmide de repasses e roteamento.</p>
+          </div>
+        </div>
+        <Button 
+            onClick={handleSaveConfig} 
+            disabled={isSaving}
+            className="bg-[#10b981] hover:bg-[#059669] text-white shadow-lg shadow-emerald-500/20 border-0 rounded-lg font-medium px-6 py-5 gap-2 transition-all hover:scale-105"
+        >
+          {isSaving ? "Salvando..." : (
+              <>
+                  <Save className="h-4 w-4" />
+                  Gravar Configurações
+              </>
+          )}
         </Button>
       </div>
 
-      {/* CARD AQUISIÇÃO */}
-      <Card className="p-6 card-shadow border-l-4 border-l-blue-500">
-        <div className="flex items-center gap-2 mb-4">
-          <h3 className="text-base font-semibold text-foreground">Aquisição</h3>
-          <Badge className="bg-blue-100 text-blue-700">Compras de itens</Badge>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-          <div className="rounded-lg border p-4 bg-blue-50">
-            <p className="text-xs text-muted-foreground mb-1">Diretorias (Aquisição)</p>
-            <p className="text-lg font-bold text-blue-700">{formatCurrency(totalDiretoriasAquisicao)}</p>
-          </div>
-          <div className="rounded-lg border p-4 bg-amber-50">
-            <p className="text-xs text-muted-foreground mb-1">Gerências (Aquisição)</p>
-            <p className="text-lg font-bold text-amber-700">{formatCurrency(totalGerenciasAquisicao)}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mb-4">
-          <Badge variant={totalDiretoriasAquisicao >= totalGerenciasAquisicao ? "default" : "destructive"}>
-            {totalDiretoriasAquisicao >= totalGerenciasAquisicao ? "Equilibrada" : "Acima do limite"}
-          </Badge>
-          <span className="text-sm text-muted-foreground">
-            Saldo: {formatCurrency(totalDiretoriasAquisicao - totalGerenciasAquisicao)}
-          </span>
-        </div>
-
-        <div className="space-y-4">
-          {diretorias.map((dir) => {
-            const gerenciasDaDiretoria = gerenciasByDiretoria[dir.id] || [];
-            const gerenciasAgrupadas = buildGerenciaGroups(dir.sigla, gerenciasDaDiretoria);
-            const totalGerenciasDirAquisicao = gerenciasDaDiretoria.reduce(
-              (acc, ger) => acc + (gerenciaBudgetsAquisicao[ger.id] || 0),
-              0,
-            );
-
-            return (
-              <div key={dir.id} className="rounded-lg border p-4 bg-muted/20">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-                  <div className="space-y-1">
-                    <Label htmlFor={`dir-acq-${dir.id}`} className="text-xs font-semibold">
-                      {dir.sigla} - Orçamento Aquisição
-                    </Label>
-                    <Input
-                      id={`dir-acq-${dir.id}`}
-                      type="number"
-                      min={0}
-                      value={diretoriaBudgetsAquisicao[dir.id] === 0 ? "" : String(diretoriaBudgetsAquisicao[dir.id] ?? "")}
-                      placeholder="0"
-                      onChange={(e) => {
-                        const value = toNumber(e.target.value);
-                        setDiretoriaBudgetsAquisicao((prev) => ({ ...prev, [dir.id]: value }));
-                      }}
-                    />
-                  </div>
-                  <div className="rounded-md border bg-background px-3 py-2 text-sm space-y-1">
-                    <p className="text-muted-foreground font-medium">{dir.sigla}</p>
-                    <p className="text-xs">Gerências: {formatCurrency(totalGerenciasDirAquisicao)}</p>
-                    <p className="text-xs">Saldo: {formatCurrency((diretoriaBudgetsAquisicao[dir.id] || 0) - totalGerenciasDirAquisicao)}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    Gerências da {dir.sigla}
-                  </div>
-                  {isLoadingGerencias ? (
-                    <div className="text-sm text-muted-foreground">Carregando gerências...</div>
-                  ) : gerenciasDaDiretoria.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">Nenhuma gerência cadastrada.</div>
-                  ) : (
-                    <div className="space-y-4">
-                      {gerenciasAgrupadas.map((grupo) => (
-                        <div key={`${dir.sigla}-acq-${grupo.titulo}`} className="space-y-2">
-                          {dir.sigla === "DO" && (
-                            <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-foreground">DO - {grupo.titulo}</p>
-                              <Badge variant="secondary" className="text-[10px]">
-                                {grupo.gerencias.length}
-                              </Badge>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {grupo.gerencias.map((ger) => (
-                              <div key={`${ger.id}-acq`} className="space-y-1 rounded-md border bg-background p-3">
-                                <Label htmlFor={`ger-acq-${ger.id}`} className="text-xs font-medium">
-                                  {ger.sigla}
-                                </Label>
-                                <Input
-                                  id={`ger-acq-${ger.id}`}
-                                  type="number"
-                                  min={0}
-                                  value={gerenciaBudgetsAquisicao[ger.id] === 0 ? "" : String(gerenciaBudgetsAquisicao[ger.id] ?? "")}
-                                  placeholder="0"
-                                  onChange={(e) => {
-                                    const value = toNumber(e.target.value);
-                                    setGerenciaBudgetsAquisicao((prev) => ({ ...prev, [ger.id]: value }));
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* CARD SERVIÇOS */}
-      <Card className="p-6 card-shadow border-l-4 border-l-emerald-500">
-        <div className="flex items-center gap-2 mb-4">
-          <h3 className="text-base font-semibold text-foreground">Serviços</h3>
-          <Badge className="bg-emerald-100 text-emerald-700">Contratações de serviços</Badge>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-          <div className="rounded-lg border p-4 bg-emerald-50">
-            <p className="text-xs text-muted-foreground mb-1">Diretorias (Serviços)</p>
-            <p className="text-lg font-bold text-emerald-700">{formatCurrency(totalDiretoriasServicos)}</p>
-          </div>
-          <div className="rounded-lg border p-4 bg-violet-50">
-            <p className="text-xs text-muted-foreground mb-1">Gerências (Serviços)</p>
-            <p className="text-lg font-bold text-violet-700">{formatCurrency(totalGerenciasServicos)}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mb-4">
-          <Badge variant={totalDiretoriasServicos >= totalGerenciasServicos ? "default" : "destructive"}>
-            {totalDiretoriasServicos >= totalGerenciasServicos ? "Equilibrada" : "Acima do limite"}
-          </Badge>
-          <span className="text-sm text-muted-foreground">
-            Saldo: {formatCurrency(totalDiretoriasServicos - totalGerenciasServicos)}
-          </span>
-        </div>
-
-        <div className="space-y-4">
-          {diretorias.map((dir) => {
-            const gerenciasDaDiretoria = gerenciasByDiretoria[dir.id] || [];
-            const gerenciasAgrupadas = buildGerenciaGroups(dir.sigla, gerenciasDaDiretoria);
-            const totalGerenciasDirServicos = gerenciasDaDiretoria.reduce(
-              (acc, ger) => acc + (gerenciaBudgetsServicos[ger.id] || 0),
-              0,
-            );
-
-            return (
-              <div key={`${dir.id}-serv`} className="rounded-lg border p-4 bg-muted/20">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-                  <div className="space-y-1">
-                    <Label htmlFor={`dir-serv-${dir.id}`} className="text-xs font-semibold">
-                      {dir.sigla} - Orçamento Serviços
-                    </Label>
-                    <Input
-                      id={`dir-serv-${dir.id}`}
-                      type="number"
-                      min={0}
-                      value={diretoriaBudgetsServicos[dir.id] === 0 ? "" : String(diretoriaBudgetsServicos[dir.id] ?? "")}
-                      placeholder="0"
-                      onChange={(e) => {
-                        const value = toNumber(e.target.value);
-                        setDiretoriaBudgetsServicos((prev) => ({ ...prev, [dir.id]: value }));
-                      }}
-                    />
-                  </div>
-                  <div className="rounded-md border bg-background px-3 py-2 text-sm space-y-1">
-                    <p className="text-muted-foreground font-medium">{dir.sigla}</p>
-                    <p className="text-xs">Gerências: {formatCurrency(totalGerenciasDirServicos)}</p>
-                    <p className="text-xs">Saldo: {formatCurrency((diretoriaBudgetsServicos[dir.id] || 0) - totalGerenciasDirServicos)}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    Gerências da {dir.sigla}
-                  </div>
-                  {isLoadingGerencias ? (
-                    <div className="text-sm text-muted-foreground">Carregando gerências...</div>
-                  ) : gerenciasDaDiretoria.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">Nenhuma gerência cadastrada.</div>
-                  ) : (
-                    <div className="space-y-4">
-                      {gerenciasAgrupadas.map((grupo) => (
-                        <div key={`${dir.sigla}-serv-${grupo.titulo}`} className="space-y-2">
-                          {dir.sigla === "DO" && (
-                            <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-foreground">DO - {grupo.titulo}</p>
-                              <Badge variant="secondary" className="text-[10px]">
-                                {grupo.gerencias.length}
-                              </Badge>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {grupo.gerencias.map((ger) => (
-                              <div key={`${ger.id}-serv`} className="space-y-1 rounded-md border bg-background p-3">
-                                <Label htmlFor={`ger-serv-${ger.id}`} className="text-xs font-medium">
-                                  {ger.sigla}
-                                </Label>
-                                <Input
-                                  id={`ger-serv-${ger.id}`}
-                                  type="number"
-                                  min={0}
-                                  value={gerenciaBudgetsServicos[ger.id] === 0 ? "" : String(gerenciaBudgetsServicos[ger.id] ?? "")}
-                                  placeholder="0"
-                                  onChange={(e) => {
-                                    const value = toNumber(e.target.value);
-                                    setGerenciaBudgetsServicos((prev) => ({ ...prev, [ger.id]: value }));
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* CARD CATEGORIAS ORÇAMENTÁRIAS */}
-      <Card className="p-6 card-shadow">
-        <div className="flex items-center gap-2 mb-4">
-          <h3 className="text-base font-semibold text-foreground">Diretoria Orçamentária por Categoria</h3>
-        </div>
-        <p className="text-sm text-muted-foreground mb-4">
-          Defina qual diretoria vai bancar cada categoria. Quando uma gerência solicitar um item, a aprovação seguirá para a diretoria orçamentária definida abaixo.
-        </p>
-        <div className="mb-4 space-y-2">
-          <Input
-            value={categorySearch}
-            onChange={(e) => setCategorySearch(e.target.value)}
-            placeholder="Buscar categoria..."
-            className="max-w-md"
-          />
-          <p className="text-xs text-muted-foreground">
-            Exibindo {categoriasOrcamentariasFiltradas.length} de {categoriasOrcamentarias.length} categorias.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {categoriasOrcamentariasFiltradas.map((categoria) => (
-            <div key={categoria} className="rounded-md border p-3 bg-muted/20 space-y-2">
-              <p className="text-xs font-medium text-foreground">{categoria}</p>
-              <Select
-                value={categoryBudgetOwners[categoria] ?? DEFAULT_BUDGET_OWNER}
-                onValueChange={(value) => {
-                  setCategoryBudgetOwners((prev) => ({
-                    ...prev,
-                    [categoria]: value,
-                  }));
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a diretoria orçamentária" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEFAULT_BUDGET_OWNER}>Mesma diretoria solicitante</SelectItem>
-                  {diretorias.map((dir) => (
-                    <SelectItem key={dir.id} value={dir.id}>
-                      {dir.sigla} - {dir.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Global Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="p-6 rounded-2xl shadow-sm border-0 ring-1 ring-slate-200 bg-white relative overflow-hidden">
+            <div className="absolute -right-4 -bottom-4 text-slate-100/50 pointer-events-none">
+                <span className="text-[120px] font-black tracking-tighter leading-none">$</span>
             </div>
-          ))}
-        </div>
-        {categoriasOrcamentariasFiltradas.length === 0 && (
-          <div className="mt-4 text-sm text-muted-foreground">
-            Nenhuma categoria encontrada para a busca informada.
-          </div>
-        )}
-      </Card>
+            <p className="text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-2">Fundo Acumulado</p>
+            <p className="text-xl font-black text-slate-800 tracking-tight">{formatCurrency(fundoGlobalAcumulado)}</p>
+            <div className="mt-4 flex items-center gap-2">
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200 gap-1.5 py-1 px-2 text-[10px]">
+                    <TrendingUp className="h-3 w-3" />
+                    Ativo p/ 2027
+                </Badge>
+            </div>
+        </Card>
+        
+        <Card className="p-6 rounded-2xl shadow-sm border-0 ring-1 ring-slate-200 bg-[#f8fafc] relative overflow-hidden">
+            <div className="h-1.5 w-16 bg-blue-500/20 rounded-full absolute bottom-6 left-6"></div>
+            <p className="text-[10px] font-bold tracking-widest text-blue-500/70 uppercase mb-2">Fundos: Aquisição</p>
+            <p className="text-xl font-bold text-blue-900 tracking-tight">{formatCurrency(fundoGlobalAquisicao)}</p>
+        </Card>
 
-      {/* CARD CONTROLE DE FLUXO */}
-      <Card className="p-6 card-shadow">
-        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
-          <Waypoints className="h-5 w-5 text-primary" />
-          Controle de Fluxo (Roteamento de Solicitações)
-        </h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Configure para onde as gerências devem enviar suas solicitações (para a diretoria, para compras direto, ou para admin).
-        </p>
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Origem</TableHead>
-                <TableHead>Diretoria</TableHead>
-                <TableHead>Destino</TableHead>
-                <TableHead>Resumo</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {gerencias.map((ger) => {
-                const rule = routingRules[ger.id];
-                const dir = diretoriaMap[ger.diretoria_id];
-                const destinoLabel =
-                  rule?.destinoTipo === "diretoria"
-                    ? diretoriaMap[rule.destinoId]?.sigla || "Diretoria"
-                    : rule?.destinoTipo === "compras"
-                      ? "Compras"
-                      : "Admin";
+        <Card className="p-6 rounded-2xl shadow-sm border-0 ring-1 ring-emerald-100 bg-[#ecfdf5] relative overflow-hidden">
+            <div className="h-1.5 w-16 bg-emerald-500/40 rounded-full absolute bottom-6 left-6"></div>
+            <p className="text-[10px] font-bold tracking-widest text-emerald-600/70 uppercase mb-2">Fundos: Novos Serv.</p>
+            <p className="text-xl font-bold text-emerald-800 tracking-tight">{formatCurrency(fundoGlobalServicosNovos)}</p>
+        </Card>
+        
+        <Card className="p-6 rounded-2xl shadow-sm border-0 ring-1 ring-teal-100 bg-teal-50 relative overflow-hidden">
+            <div className="h-1.5 w-16 bg-teal-500/40 rounded-full absolute bottom-6 left-6"></div>
+            <p className="text-[10px] font-bold tracking-widest text-teal-600/70 uppercase mb-2">Fundos: Serv. Existentes</p>
+            <p className="text-xl font-bold text-teal-800 tracking-tight">{formatCurrency(fundoGlobalServicosExistentes)}</p>
+        </Card>
+      </div>
 
-                return (
-                  <TableRow key={ger.id}>
-                    <TableCell className="font-medium">{ger.sigla}</TableCell>
-                    <TableCell>{dir?.sigla ?? "-"}</TableCell>
-                    <TableCell>
-                      <Select
-                        value={`${rule?.destinoTipo ?? "diretoria"}|${rule?.destinoId ?? ger.diretoria_id}`}
-                        onValueChange={(value) => {
-                          const [destinoTipo, destinoId] = value.split("|");
-                          setRoutingRules((prev) => ({
-                            ...prev,
-                            [ger.id]: {
-                              destinoTipo: destinoTipo as RoutingRule["destinoTipo"],
-                              destinoId,
-                            },
-                          }));
-                        }}
-                      >
-                        <SelectTrigger className="w-[220px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={`diretoria|${ger.diretoria_id}`}>
-                            Diretoria {dir?.sigla ?? ""}
-                          </SelectItem>
-                          <SelectItem value="compras|compras">Compras</SelectItem>
-                          <SelectItem value="admin|admin">Admin</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {ger.sigla} envia para {destinoLabel}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+      {/* Main Layout Area */}
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* Left Sidebar - Diretorias */}
+        <div className="w-full md:w-64 flex-shrink-0 space-y-2">
+            <div className="flex items-center gap-2 px-2 py-3">
+                <Building2 className="h-5 w-5 text-slate-400" />
+                <span className="font-bold tracking-widest text-xs text-slate-500 uppercase">Diretoria</span>
+            </div>
+            <div className="space-y-3">
+                {diretorias.map(dir => (
+                    <button
+                        key={dir.id}
+                        onClick={() => setSelectedDirId(dir.id)}
+                        className={cn(
+                            "w-full text-left px-5 py-4 rounded-xl text-sm font-medium transition-all duration-200 border",
+                            selectedDirId === dir.id 
+                                ? "bg-[#1f2937] text-white border-transparent shadow-lg shadow-slate-800/10 scale-[1.02]" 
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                        )}
+                    >
+                        <div className="font-bold mb-1">{dir.sigla} - {dir.nome}</div>
+                    </button>
+                ))}
+            </div>
         </div>
-      </Card>
+
+        {/* Right Content - Tabs and Pirâmide */}
+        <div className="flex-1 min-w-0">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
+                <div className="bg-white rounded-t-2xl px-6 pt-6 border-b border-slate-200">
+                    <TabsList className="bg-transparent h-auto p-0 border-b-0 space-x-6">
+                        <TabsTrigger 
+                            value="aquisicao" 
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-800 rounded-none px-2 py-3 text-sm font-semibold text-slate-500 data-[state=active]:text-slate-900 transition-none"
+                        >
+                            Aquisição de Itens
+                        </TabsTrigger>
+                        <TabsTrigger 
+                            value="servicos_novos" 
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-emerald-600 rounded-none px-2 py-3 text-sm font-semibold text-slate-500 data-[state=active]:text-emerald-700 transition-none"
+                        >
+                            Novos Serviços
+                        </TabsTrigger>
+                        <TabsTrigger 
+                            value="servicos_existentes" 
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-teal-600 rounded-none px-2 py-3 text-sm font-semibold text-slate-500 data-[state=active]:text-teal-700 transition-none"
+                        >
+                            Serviços Existentes
+                        </TabsTrigger>
+                    </TabsList>
+                </div>
+
+                <div className="bg-white rounded-b-2xl border border-t-0 border-slate-200 p-8 shadow-sm">
+                    {selectedDir && (
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            <div className="flex items-start justify-between mb-8 pb-8 border-b border-slate-100">
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                        <Waypoints className={cn("h-5 w-5", activeTab === "aquisicao" ? "text-blue-500" : "text-emerald-500")} />
+                                        Pirâmide de Repasses
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Configure o fundo total da {selectedDir.sigla} e distribua os repasses.</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-1">Fundo {selectedDir.sigla}</p>
+                                    <p className={cn("text-3xl font-black tracking-tight", activeTab === "aquisicao" ? "text-slate-800" : (activeTab === "servicos_novos" ? "text-emerald-600" : "text-teal-600"))}>
+                                        {formatCurrency(currentFundo)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col lg:flex-row gap-8 items-start relative">
+                                {/* Retido na Diretoria */}
+                                <div className="w-full lg:w-1/3 bg-slate-50 rounded-2xl p-6 border-l-4 border-l-[#1f2937] ring-1 ring-slate-200 shadow-sm relative z-10">
+                                    <p className="text-xs font-bold tracking-widest text-slate-500 uppercase mb-4">Retido na Diretoria ({selectedDir.sigla})</p>
+                                    <div className="bg-white rounded-xl ring-1 ring-slate-200 p-2 shadow-inner">
+                                        <CurrencyInput
+                                            className="text-xl font-bold border-0 bg-transparent focus-visible:ring-0 shadow-none px-3"
+                                            value={currentRetido === 0 ? "" : String(currentRetido)}
+                                            placeholder="0,00"
+                                            onChange={(e) => handleRetidoChange(toNumber(e.target.value))}
+                                        />
+                                    </div>
+                                    <div className="mt-4 flex items-center justify-between text-sm">
+                                        <span className="text-slate-500 font-medium">% do Fundo</span>
+                                        <Badge variant="secondary" className="bg-slate-200/50 text-slate-700 hover:bg-slate-200/50">
+                                            {currentFundo > 0 ? ((currentRetido / currentFundo) * 100).toFixed(1) : "0"}%
+                                        </Badge>
+                                    </div>
+                                </div>
+
+                                {/* Seta indicativa */}
+                                <div className="hidden lg:flex items-center justify-center h-full absolute left-1/3 top-1/2 -translate-y-1/2 -translate-x-4 z-0 text-slate-300">
+                                    <ChevronRight className="h-8 w-8" />
+                                </div>
+
+                                {/* Repasses para Gerências */}
+                                <div className="w-full lg:w-2/3 space-y-4 relative z-10">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Repasses para Gerências</p>
+                                        <p className="text-xs font-medium text-slate-400 lowercase">total repassado: {formatCurrency(currentRepassado)}</p>
+                                    </div>
+                                    
+                                    <div className="space-y-3">
+                                        {gerenciasOfSelectedDir.length === 0 ? (
+                                            <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
+                                                Nenhuma gerência cadastrada nesta diretoria.
+                                            </div>
+                                        ) : (
+                                            gerenciasOfSelectedDir.map(ger => {
+                                                const val = currentGerenciaBudgets[ger.id] || 0;
+                                                const pct = currentFundo > 0 ? ((val / currentFundo) * 100).toFixed(1) : "0.0";
+                                                
+                                                return (
+                                                    <div key={ger.id} className="flex items-center gap-4 bg-white rounded-xl p-4 border border-slate-200 shadow-sm transition-all hover:border-slate-300 hover:shadow-md">
+                                                        <div className="w-20">
+                                                            <Badge variant="secondary" className="bg-slate-100 text-slate-700 w-full justify-center text-xs font-bold py-1 px-0">
+                                                                {ger.sigla}
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="flex-1 bg-slate-50 rounded-lg ring-1 ring-slate-200/60 p-1">
+                                                            <CurrencyInput
+                                                                className="text-right font-medium border-0 bg-transparent focus-visible:ring-0 shadow-none h-8"
+                                                                value={val === 0 ? "" : String(val)}
+                                                                placeholder="0,00"
+                                                                onChange={(e) => handleGerenciaChange(ger.id, toNumber(e.target.value))}
+                                                            />
+                                                        </div>
+                                                        <div className="w-24 text-right">
+                                                            <p className="text-[10px] text-slate-400 font-medium mb-0.5">% do Fundo</p>
+                                                            <Badge variant="outline" className="text-slate-600 bg-slate-50 justify-center w-16">
+                                                                {pct}%
+                                                            </Badge>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </Tabs>
+        </div>
+      </div>
     </div>
   );
 }

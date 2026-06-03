@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Select,
@@ -79,6 +80,10 @@ export function AdminCatalogItemControl() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+  const [isUpdatingBulk, setIsUpdatingBulk] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditField, setBulkEditField] = useState("");
+  const [bulkEditValue, setBulkEditValue] = useState("");
   
   // Paginação
   const [currentPage, setCurrentPage] = useState(1);
@@ -269,6 +274,32 @@ export function AdminCatalogItemControl() {
     }
   };
 
+  const handleBulkEdit = async () => {
+    if (selectedIds.length === 0 || !bulkEditField || !bulkEditValue) return;
+
+    setIsUpdatingBulk(true);
+    try {
+      const updates: any = {};
+      if (bulkEditField === "categoria") updates.categoria = bulkEditValue;
+      if (bulkEditField === "unidade") updates.unidade = bulkEditValue;
+      if (bulkEditField === "valorUnitario") updates.valor_unitario = Number(bulkEditValue);
+
+      await Promise.all(selectedIds.map(id => updateItemCatalogoAdmin(id, updates)));
+      
+      setBulkEditOpen(false);
+      setBulkEditField("");
+      setBulkEditValue("");
+      await refetchItens();
+      queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      toast.success(`${selectedIds.length} itens atualizados com sucesso.`);
+    } catch (_error: unknown) {
+      toast.error("Ocorreu um erro ao atualizar um ou mais itens.");
+    } finally {
+      setIsUpdatingBulk(false);
+    }
+  };
+
   const toggleSelectAll = () => {
     if (selectedIds.length === paginationData.paginatedItems.length) {
       setSelectedIds([]);
@@ -337,15 +368,26 @@ export function AdminCatalogItemControl() {
               />
             </div>
             {selectedIds.length > 0 && (
-              <Button 
-                variant="destructive" 
-                onClick={handleBulkDelete}
-                disabled={isDeletingBulk}
-                className="whitespace-nowrap w-full sm:w-auto"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                {isDeletingBulk ? "Excluindo..." : `Excluir (${selectedIds.length})`}
-              </Button>
+              <>
+                <Button 
+                  variant="outline"
+                  className="gap-2 text-primary border-primary hover:bg-primary/10 whitespace-nowrap w-full sm:w-auto"
+                  onClick={() => setBulkEditOpen(true)}
+                  disabled={isUpdatingBulk}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Editar ({selectedIds.length})
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleBulkDelete}
+                  disabled={isDeletingBulk}
+                  className="whitespace-nowrap w-full sm:w-auto gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {isDeletingBulk ? "Excluindo..." : `Excluir (${selectedIds.length})`}
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -544,10 +586,7 @@ export function AdminCatalogItemControl() {
 
             <div className="space-y-1">
               <Label className="text-xs font-medium">Valor unitário (R$) *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
+              <CurrencyInput
                 value={novoItem.valorUnitario}
                 onChange={(e) => setNovoItem(prev => ({ ...prev, valorUnitario: e.target.value }))}
                 placeholder="0,00"
@@ -636,12 +675,10 @@ export function AdminCatalogItemControl() {
 
             <div className="space-y-1">
               <Label className="text-xs font-medium">Valor unitário (R$) *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
+              <CurrencyInput
                 value={editFormData.valorUnitario}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, valorUnitario: e.target.value }))}
+                placeholder="0,00"
               />
             </div>
           </div>
@@ -676,6 +713,64 @@ export function AdminCatalogItemControl() {
               {isDeleting ? "Excluindo..." : "Sim, Excluir"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== DIALOG EDITAR EM LOTE ==================== */}
+      <Dialog open={bulkEditOpen} onOpenChange={(open) => {
+        setBulkEditOpen(open);
+        if (!open) {
+          setBulkEditField("");
+          setBulkEditValue("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar {selectedIds.length} itens em lote</DialogTitle>
+            <DialogDescription>
+              Selecione o campo que deseja alterar para todos os itens selecionados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Campo a editar</Label>
+              <Select value={bulkEditField} onValueChange={setBulkEditField}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o campo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="categoria">Categoria</SelectItem>
+                  <SelectItem value="unidade">Unidade</SelectItem>
+                  <SelectItem value="valorUnitario">Valor Unitário</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {bulkEditField && (
+              <div className="space-y-2">
+                <Label>Novo valor</Label>
+                {bulkEditField === "categoria" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione a categoria" /></SelectTrigger>
+                    <SelectContent>
+                      {CATEGORIAS_ITEM_PREDEFINIDAS.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : bulkEditField === "unidade" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione a unidade" /></SelectTrigger>
+                    <SelectContent>
+                      {UNIDADES_ITEM_PREDEFINIDAS.map(uni => <SelectItem key={uni} value={uni}>{uni}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <CurrencyInput value={bulkEditValue} onChange={(e) => setBulkEditValue(e.target.value)} />
+                )}
+              </div>
+            )}
+            <Button className="w-full" disabled={!bulkEditField || !bulkEditValue || isUpdatingBulk} onClick={handleBulkEdit}>
+              {isUpdatingBulk ? "Salvando..." : "Aplicar a todos"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

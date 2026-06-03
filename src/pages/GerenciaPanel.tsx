@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2 } from "lucide-react";
+import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { PlanHeader } from "@/components/layout/PlanHeader";
 import { SummaryCards } from "@/components/common/SummaryCards";
+import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { PlanFilters } from "@/components/forms/PlanFilters";
 import { PlanTable } from "@/components/tables/PlanTable";
 import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard";
@@ -50,10 +52,13 @@ import {
   updateSolicitacao,
   updateSolicitacaoStatus,
   updateSolicitacaoStatusBulk,
+  updateSolicitacoesBulkData,
   getServicosByGerencia,
   updateServico,
   createServico,
   deleteServico,
+  deleteServicosBulk,
+  updateServicosBulkData,
   getServicosCatalogoByGerencia,
 } from "@/lib/services";
 import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
@@ -98,7 +103,7 @@ const GerenciaPanel = () => {
   const [novoServicoForm, setNovoServicoForm] = useState({
     objeto: "",
     justificativa: "",
-    tipoContratacao: "Novo",
+    tipoContratacao: "Contínuo",
     unidadeDemandante: "",
     previsaoInicio: "",
     estimativaValor: "",
@@ -108,6 +113,9 @@ const GerenciaPanel = () => {
     dependenciaDescricao: "",
   });
   const [novoServicoLoading, setNovoServicoLoading] = useState(false);
+  const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
+  const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 100;
   const queryClient = useQueryClient();
@@ -181,7 +189,6 @@ const GerenciaPanel = () => {
     refetchOnMount: true,
   });
 
-  // Buscar itens originais do catálogo para saber quais vieram do painel administrativo
   const { data: servicosCatalogoData = [] } = useQuery({
     queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id],
     queryFn: () => gerenciaAtual ? getServicosCatalogoByGerencia(gerenciaAtual.id) : [],
@@ -270,15 +277,18 @@ const GerenciaPanel = () => {
   const orcamentoGerenciaAquisicao = gerenciaAtual?.id
     ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "aquisicao")
     : 0;
-  const orcamentoGerenciaServicos = gerenciaAtual?.id
-    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "servicos")
+  const orcamentoGerenciaServicosNovos = gerenciaAtual?.id
+    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "servicos_novos")
+    : 0;
+  const orcamentoGerenciaServicosExistentes = gerenciaAtual?.id
+    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoGerencia = useMemo(
     () =>
-      filteredItems
+      items
         .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id)
         .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [filteredItems, diretoria?.id],
+    [items, diretoria?.id],
   );
   const summary = useMemo(
     () => ({
@@ -444,6 +454,32 @@ const GerenciaPanel = () => {
     }
   };
 
+  const handleBulkEditAquisicao = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      await updateSolicitacoesBulkData(Array.from(selectedAquisicaoIds), updates);
+      await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      toast({ title: "Itens atualizados", description: "Os itens selecionados foram atualizados com sucesso." });
+      setBulkEditAquisicaoOpen(false);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDeleteAquisicao = async () => {
+    if (!confirm("Excluir os itens selecionados permanentemente?")) return;
+    try {
+      await deleteSolicitacoesBulk(Array.from(selectedAquisicaoIds));
+      setSelectedAquisicaoIds(new Set());
+      await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      toast({ title: "Itens excluídos", description: "Os itens foram removidos." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
+  };
+
   const ensureServico = async (itemCode: number, updates: any) => {
     try {
       const servicoExistente = servicosData.find((s: ServicoItem) => s.item === itemCode);
@@ -555,6 +591,7 @@ const GerenciaPanel = () => {
   };
 
   const handleCriarServico = async () => {
+    if (novoServicoLoading) return; // Prevent double submission
     if (!gerenciaAtual || !diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
@@ -587,7 +624,7 @@ const GerenciaPanel = () => {
       setNovoServicoForm({
         objeto: "",
         justificativa: "",
-        tipoContratacao: "Novo",
+        tipoContratacao: "Contínuo",
         unidadeDemandante: "",
         previsaoInicio: "",
         estimativaValor: "",
@@ -646,6 +683,32 @@ const GerenciaPanel = () => {
     } catch (error) {
       console.error("Erro ao enviar serviços para diretoria:", error);
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    }
+  };
+
+  const handleBulkEditServicos = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      await updateServicosBulkData(Array.from(selectedServicos), updates);
+      await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+      toast({ title: "Serviços atualizados", description: "Os serviços selecionados foram atualizados com sucesso." });
+      setBulkEditServicosOpen(false);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkDeleteServicos = async () => {
+    if (!confirm("Excluir os serviços selecionados permanentemente?")) return;
+    try {
+      await deleteServicosBulk(Array.from(selectedServicos));
+      setSelectedServicos(new Set());
+      await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+      toast({ title: "Serviços excluídos", description: "Os serviços foram removidos." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
 
@@ -949,7 +1012,7 @@ const GerenciaPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
@@ -971,7 +1034,7 @@ const GerenciaPanel = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
@@ -1111,12 +1174,12 @@ const GerenciaPanel = () => {
       wsData.push([`Plano Anual de Contratações 2027 — ${titleLabel} — ${gerenciaUpper}`]);
       wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
       wsData.push([]);
-      wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Dotação Orçamentária", "Grau Prioridade", "Vinculação", "Status"]);
+      wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Grau Prioridade", "Vinculação", "Status"]);
       filteredServicos.forEach((s) => {
-        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.dotacaoOrcamentaria || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
+        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
+      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, titleLabel);
       XLSX.writeFile(wb, `PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
     };
@@ -1130,13 +1193,12 @@ const GerenciaPanel = () => {
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
       autoTable(doc, {
-        head: [["Item", "Tipo", "Objeto", "Estimativa", "Dotação", "Prioridade", "Status"]],
+        head: [["Item", "Tipo", "Objeto", "Estimativa", "Prioridade", "Status"]],
         body: filteredServicos.map((s) => [
           s.item,
           s.tipoContratacao,
           s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
           formatCurrency(s.estimativaValor),
-          formatCurrency(s.dotacaoOrcamentaria),
           s.grauPrioridade,
           s.status || "rascunho",
         ]),
@@ -1178,7 +1240,6 @@ const GerenciaPanel = () => {
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground">Justificativa</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-36">Prioridade</th>
                   <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Estimativa (R$)</th>
-                  <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Dotação (R$)</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-28">Vinculação</th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-24">Status</th>
                   <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Ações</th>
@@ -1209,7 +1270,9 @@ const GerenciaPanel = () => {
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
                         <td className="p-3 text-sm max-w-xs">
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{servico.tipoContratacao} · {servico.unidadeDemandante}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {servico.tipoContratacao} · {servico.unidadeDemandante}
+                          </p>
                         </td>
                         <td className="p-3 text-sm">
                           {readOnly ? (
@@ -1255,19 +1318,6 @@ const GerenciaPanel = () => {
                         </td>
                         <td className="p-3 text-right">
                           <span className="text-sm">{formatCurrency(servico.estimativaValor)}</span>
-                        </td>
-                        <td className="p-3 text-right">
-                          {readOnly ? (
-                            <span className="text-sm">{formatCurrency(servico.dotacaoOrcamentaria)}</span>
-                          ) : (
-                            <input
-                              type="number"
-                              defaultValue={servico.dotacaoOrcamentaria || 0}
-                              onBlur={(e) => handleUpdateDotacao(servico.item, parseFloat(e.target.value) || 0)}
-                              className="w-28 text-sm border rounded px-2 py-1 text-right bg-background"
-                              step="0.01"
-                            />
-                          )}
                         </td>
                         <td className="p-3">
                           {readOnly ? (
@@ -1360,14 +1410,34 @@ const GerenciaPanel = () => {
                 </Badge>
               )}
               {canSendServicos && (
-                <Button
-                  className="gap-2"
-                  onClick={() => setConfirmSendServicosOpen(true)}
-                  disabled={selectedServicos.size === 0}
-                >
-                  <Send className="h-4 w-4" />
-                  Enviar para Diretoria ({selectedServicos.size})
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                    onClick={handleBulkDeleteServicos}
+                    disabled={selectedServicos.size === 0}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Excluir Selecionados
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-primary border-primary hover:bg-primary/10"
+                    onClick={() => setBulkEditServicosOpen(true)}
+                    disabled={selectedServicos.size === 0}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar Selecionados
+                  </Button>
+                  <Button
+                    className="gap-2"
+                    onClick={() => setConfirmSendServicosOpen(true)}
+                    disabled={selectedServicos.size === 0}
+                  >
+                    <Send className="h-4 w-4" />
+                    Enviar para Diretoria ({selectedServicos.size})
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -1383,7 +1453,7 @@ const GerenciaPanel = () => {
 
           <BudgetConsumptionCard
             titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
-            orcamento={orcamentoGerenciaServicos}
+            orcamento={selectedOption === "servicos_existentes" ? orcamentoGerenciaServicosExistentes : orcamentoGerenciaServicosNovos}
             gasto={displayedServicos.reduce(
               (acc, servico) =>
                 acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
@@ -1467,6 +1537,7 @@ const GerenciaPanel = () => {
             prioridade={prioridade}
             onPrioridadeChange={setPrioridade}
             categorias={[]}
+            hideCategoriaFilter={true}
           />
 
           {/* Ações gerais */}
@@ -1566,21 +1637,19 @@ const GerenciaPanel = () => {
                       onChange={(e) => setNovoServicoForm(f => ({ ...f, tipoContratacao: e.target.value }))}
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                     >
-                      <option value="Novo">Novo</option>
                       <option value="Contínuo">Contínuo</option>
                       <option value="Outros">Outros</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium">Unidade Demandante</label>
-                    <input
-                      type="text"
-                      value={novoServicoForm.unidadeDemandante}
-                      onChange={(e) => setNovoServicoForm(f => ({ ...f, unidadeDemandante: e.target.value }))}
-                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                      placeholder={gerenciaUpper}
-                    />
-                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Unidade Demandante</label>
+                  <input
+                    type="text"
+                    value={gerenciaUpper}
+                    disabled
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium">Previsão de Início da Nova Contratação</label>
@@ -1594,10 +1663,7 @@ const GerenciaPanel = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                    <CurrencyInput
                       value={novoServicoForm.estimativaValor}
                       onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
@@ -1649,14 +1715,20 @@ const GerenciaPanel = () => {
                 <Button variant="outline" onClick={() => setNovoServicoOpen(false)} disabled={novoServicoLoading}>
                   Cancelar
                 </Button>
-                <Button
-                  onClick={handleCriarServico}
-                  disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim() || novoServicoLoading}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  {novoServicoLoading ? "Salvando..." : "Adicionar Serviço"}
-                </Button>
+                {!novoServicoLoading ? (
+                  <Button
+                    onClick={handleCriarServico}
+                    disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar Serviço
+                  </Button>
+                ) : (
+                  <Button disabled className="gap-2 opacity-50 cursor-not-allowed">
+                    Salvando...
+                  </Button>
+                )}
               </div>
             </DialogContent>
           </Dialog>
@@ -1714,14 +1786,34 @@ const GerenciaPanel = () => {
           </div>
           <div className="flex items-center gap-2">
             {hasRascunhoItems && !hasApprovedItems && (
-              <Button
-                className="gap-2"
-                disabled={!canSend || selectedAquisicaoIds.size === 0}
-                onClick={() => setConfirmSendOpen(true)}
-              >
-                <Send className="h-4 w-4" />
-                Enviar Selecionados ({selectedAquisicaoIds.size})
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                  onClick={handleBulkDeleteAquisicao}
+                  disabled={selectedAquisicaoIds.size === 0}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir Selecionados
+                </Button>
+                <Button
+                  variant="outline"
+                  className="gap-2 text-primary border-primary hover:bg-primary/10"
+                  onClick={() => setBulkEditAquisicaoOpen(true)}
+                  disabled={selectedAquisicaoIds.size === 0}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Editar Selecionados
+                </Button>
+                <Button
+                  className="gap-2"
+                  disabled={!canSend || selectedAquisicaoIds.size === 0}
+                  onClick={() => setConfirmSendOpen(true)}
+                >
+                  <Send className="h-4 w-4" />
+                  Enviar Selecionados ({selectedAquisicaoIds.size})
+                </Button>
+              </div>
             )}
             {hasApprovedItems && (
               <Badge className="bg-success text-success-foreground text-sm gap-1 py-2 px-4">
@@ -2113,6 +2205,20 @@ const GerenciaPanel = () => {
           </div>
         </DialogContent>
       </Dialog>
+      <BulkEditAquisicaoDialog 
+        open={bulkEditAquisicaoOpen} 
+        onOpenChange={setBulkEditAquisicaoOpen} 
+        selectedCount={selectedAquisicaoIds.size} 
+        onConfirm={handleBulkEditAquisicao} 
+        isUpdating={isBulkUpdating} 
+      />
+      <BulkEditServicosDialog 
+        open={bulkEditServicosOpen} 
+        onOpenChange={setBulkEditServicosOpen} 
+        selectedCount={selectedServicos.size} 
+        onConfirm={handleBulkEditServicos} 
+        isUpdating={isBulkUpdating} 
+      />
       </div>
     </div>
   );

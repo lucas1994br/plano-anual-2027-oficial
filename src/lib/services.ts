@@ -72,23 +72,41 @@ async function fetchAllPages<T>(
     includeCount: boolean
   ) => Promise<PostgrestSingleResponse<T[]>>
 ): Promise<T[]> {
+  const CHUNK_SIZE = 5;
   const allRows: T[] = [];
-  let from = 0;
+  let currentFrom = 0;
+  let hasMore = true;
 
-  while (true) {
-    const to = from + SUPABASE_PAGE_SIZE - 1;
-    const { data, error } = await queryFactory(from, to, false);
-
-    if (error) throw error;
-
-    const rows = data || [];
-    allRows.push(...rows);
-
-    if (rows.length < SUPABASE_PAGE_SIZE) {
+  while (hasMore) {
+    const promises = [];
+    for (let i = 0; i < CHUNK_SIZE; i++) {
+      const start = currentFrom + i * SUPABASE_PAGE_SIZE;
+      const end = start + SUPABASE_PAGE_SIZE - 1;
+      promises.push(queryFactory(start, end, false).then(res => {
+        if (res.error) throw res.error;
+        return res.data || [];
+      }));
+    }
+    
+    const results = await Promise.all(promises);
+    
+    for (const rows of results) {
+      allRows.push(...rows);
+      if (rows.length < SUPABASE_PAGE_SIZE) {
+        hasMore = false;
+        break;
+      }
+    }
+    
+    // SAFETY LIMIT to prevent browser crashes (max ~2000 items)
+    if (allRows.length >= 2000) {
+      hasMore = false;
       break;
     }
-
-    from += SUPABASE_PAGE_SIZE;
+    
+    if (hasMore) {
+      currentFrom += CHUNK_SIZE * SUPABASE_PAGE_SIZE;
+    }
   }
 
   return allRows;
@@ -660,25 +678,30 @@ export async function getCategoryBudgetOwnerRules(): Promise<
   return rules;
 }
 
-export async function getAdminMiniErpConfigDb(): Promise<
-  Partial<AdminBudgetConfig>
-> {
-  const { data: orcamentos, error: orcamentosError } = await supabase
+export async function getAdminMiniErpConfigDb() {
+  const { data: orcamentos } = await supabase
     .from("admin_orcamento_config")
     .select("escopo, referencia_id, tipo, valor");
 
-  if (orcamentosError) throw orcamentosError;
-
-  const { data: fluxos, error: fluxosError } = await supabase
+  const { data: fluxos } = await supabase
     .from("admin_fluxo_config")
     .select("gerencia_id, destino_tipo, destino_id");
 
-  if (fluxosError) throw fluxosError;
+  const { data: diretorias } = await supabase.from("diretorias").select("id");
+  const { data: gerencias } = await supabase.from("gerencias").select("id");
+  
+  const validDiretoriaIds = new Set((diretorias || []).map(d => d.id));
+  const validGerenciaIds = new Set((gerencias || []).map(g => g.id));
 
   const diretoriaBudgetsAquisicao: Record<string, number> = {};
   const diretoriaBudgetsServicos: Record<string, number> = {};
+  const diretoriaBudgetsServicosNovos: Record<string, number> = {};
+  const diretoriaBudgetsServicosExistentes: Record<string, number> = {};
+
   const gerenciaBudgetsAquisicao: Record<string, number> = {};
   const gerenciaBudgetsServicos: Record<string, number> = {};
+  const gerenciaBudgetsServicosNovos: Record<string, number> = {};
+  const gerenciaBudgetsServicosExistentes: Record<string, number> = {};
 
   (orcamentos || []).forEach(
     (row: {
@@ -687,27 +710,65 @@ export async function getAdminMiniErpConfigDb(): Promise<
       tipo: string;
       valor: number;
     }) => {
-      const tipo = row.tipo as "aquisicao" | "servicos";
+      const tipo = row.tipo;
       const escopo = row.escopo as "diretoria" | "gerencia";
       const valor = Number(row.valor || 0);
 
-      if (escopo === "diretoria" && tipo === "aquisicao") {
-        diretoriaBudgetsAquisicao[row.referencia_id] = valor;
+      if (escopo === "diretoria") {
+        if (tipo === "aquisicao") diretoriaBudgetsAquisicao[row.referencia_id] = valor;
+        if (tipo === "servicos") {
+          // As servicos_novos uses the real UUID, and servicos_existentes uses the faked UUID
+          // We will resolve this after gathering all rows because we need the list of real UUIDs.
+          // For now we just put them all in servicosNovos, and later we'll move the fake ones.
+          diretoriaBudgetsServicosNovos[row.referencia_id] = valor;
+        }
       }
 
-      if (escopo === "diretoria" && tipo === "servicos") {
-        diretoriaBudgetsServicos[row.referencia_id] = valor;
-      }
-
-      if (escopo === "gerencia" && tipo === "aquisicao") {
-        gerenciaBudgetsAquisicao[row.referencia_id] = valor;
-      }
-
-      if (escopo === "gerencia" && tipo === "servicos") {
-        gerenciaBudgetsServicos[row.referencia_id] = valor;
+      if (escopo === "gerencia") {
+        if (tipo === "aquisicao") gerenciaBudgetsAquisicao[row.referencia_id] = valor;
+        if (tipo === "servicos") {
+          gerenciaBudgetsServicosNovos[row.referencia_id] = valor;
+        }
       }
     }
   );
+
+  const getExistentesId = (id: string) => {
+    const char = id.charAt(0);
+    const replacements: Record<string, string> = {
+      '0': 'f', '1': 'e', '2': 'd', '3': 'c', '4': 'b', '5': 'a', '6': '9', '7': '8',
+      '8': '7', '9': '6', 'a': '5', 'b': '4', 'c': '3', 'd': '2', 'e': '1', 'f': '0'
+    };
+    return replacements[char] + id.slice(1);
+  };
+
+  // Move fake UUIDs to Existentes
+  const allRealIds = new Set([
+    ...Object.keys(diretoriaBudgetsAquisicao),
+    ...Object.keys(gerenciaBudgetsAquisicao),
+    // Or we could just iterate over what's currently in Novos
+  ]);
+  
+  // A better way: iterate all keys in Novos. If getExistentesId(key) is also in Novos, or if the key itself looks like a fake of an existing real ID.
+  // Actually, we can just compute the fake ID for every key. If we find it, we move it to Existentes.
+  
+  Object.keys(diretoriaBudgetsServicosNovos).forEach(id => {
+    if (!validDiretoriaIds.has(id)) {
+      // É um ID falso (Existentes)
+      const realId = getExistentesId(id);
+      diretoriaBudgetsServicosExistentes[realId] = diretoriaBudgetsServicosNovos[id];
+      delete diretoriaBudgetsServicosNovos[id];
+    }
+  });
+
+  Object.keys(gerenciaBudgetsServicosNovos).forEach(id => {
+    if (!validGerenciaIds.has(id)) {
+      // É um ID falso (Existentes)
+      const realId = getExistentesId(id);
+      gerenciaBudgetsServicosExistentes[realId] = gerenciaBudgetsServicosNovos[id];
+      delete gerenciaBudgetsServicosNovos[id];
+    }
+  });
 
   const routingRules: Record<string, RoutingRule> = {};
   (fluxos || []).forEach(
@@ -722,8 +783,12 @@ export async function getAdminMiniErpConfigDb(): Promise<
   const config: Partial<AdminBudgetConfig> = {
     diretoriaBudgetsAquisicao,
     diretoriaBudgetsServicos,
+    diretoriaBudgetsServicosNovos,
+    diretoriaBudgetsServicosExistentes,
     gerenciaBudgetsAquisicao,
     gerenciaBudgetsServicos,
+    gerenciaBudgetsServicosNovos,
+    gerenciaBudgetsServicosExistentes,
     routingRules,
     updatedAt: new Date().toISOString(),
   };
@@ -734,8 +799,12 @@ export async function getAdminMiniErpConfigDb(): Promise<
 export async function saveAdminMiniErpConfigDb(config: {
   diretoriaBudgetsAquisicao: Record<string, number>;
   diretoriaBudgetsServicos: Record<string, number>;
+  diretoriaBudgetsServicosNovos: Record<string, number>;
+  diretoriaBudgetsServicosExistentes: Record<string, number>;
   gerenciaBudgetsAquisicao: Record<string, number>;
   gerenciaBudgetsServicos: Record<string, number>;
+  gerenciaBudgetsServicosNovos: Record<string, number>;
+  gerenciaBudgetsServicosExistentes: Record<string, number>;
   routingRules: Record<string, RoutingRule>;
 }): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
@@ -1173,6 +1242,61 @@ export const deleteServico = async (id: string): Promise<boolean> => {
   return true;
 };
 
+export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
+  const { error } = await supabase
+    .from("servicos")
+    .delete()
+    .in("id", itemIds);
+
+  if (error) {
+    console.error("Erro ao deletar servicos em massa:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function updateSolicitacoesBulkData(
+  ids: string[],
+  updates: Partial<PlanItem>
+): Promise<void> {
+  const dbUpdates: Record<string, unknown> = {};
+
+  if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
+  if (updates.unidade !== undefined) dbUpdates.unidade = updates.unidade;
+  if (updates.observacao !== undefined) dbUpdates.observacao = updates.observacao;
+  if (updates.prioridade !== undefined) dbUpdates.prioridade = updates.prioridade;
+  if (updates.valorUnitario !== undefined) dbUpdates.valor_unitario = updates.valorUnitario;
+  if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
+  if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
+
+  if (Object.keys(dbUpdates).length === 0) return;
+
+  const { error } = await supabase
+    .from("solicitacoes")
+    .update(dbUpdates)
+    .in("id", ids);
+
+  if (error) throw error;
+}
+
+export async function updateServicosBulkData(
+  ids: string[],
+  updates: Partial<ServicoItem> | any
+): Promise<void> {
+  const dbUpdates = mapServicoItemToDb(updates);
+  dbUpdates.updated_at = new Date().toISOString();
+  delete dbUpdates.id;
+
+  if (Object.keys(dbUpdates).length <= 1) return; 
+
+  const { error } = await supabase
+    .from("servicos")
+    .update(dbUpdates)
+    .in("id", ids);
+
+  if (error) throw error;
+}
+
 // ============ ADMIN SERVIÇOS ============
 
 /**
@@ -1305,5 +1429,75 @@ export async function deleteItemCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
+  return data;
+}
+
+export async function criarOrcamento(
+  diretoriaId: string,
+  tipo: "aquisicao" | "servicos",
+  retidoDiretoria: number,
+  repassesGerencias: Record<string, number>
+): Promise<unknown> {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+
+  const { data, error } = await supabase.functions.invoke("criarOrcamento", {
+    body: {
+      accessCode: adminAccessCode,
+      diretoriaId,
+      tipo,
+      retidoDiretoria,
+      repassesGerencias,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export async function enviarOrcamento(
+  diretoriaId: string,
+  tipo: "aquisicao" | "servicos",
+  retidoDiretoria: number,
+  repassesGerencias: Record<string, number>
+): Promise<unknown> {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+
+  const { data, error } = await supabase.functions.invoke("enviarOrcamento", {
+    body: {
+      accessCode: adminAccessCode,
+      diretoriaId,
+      tipo,
+      retidoDiretoria,
+      repassesGerencias,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export async function deletarOrcamento(
+  diretoriaId: string,
+  tipo: "aquisicao" | "servicos",
+  gerenciasIds: string[]
+): Promise<unknown> {
+  const adminAccessCode = sessionStorage.getItem("access-code:admin");
+  if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
+
+  const { data, error } = await supabase.functions.invoke("deletarOrcamento", {
+    body: {
+      accessCode: adminAccessCode,
+      diretoriaId,
+      tipo,
+      gerenciasIds,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
   return data;
 }

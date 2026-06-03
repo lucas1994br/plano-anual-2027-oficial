@@ -2,11 +2,13 @@ import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, updateServico, deleteServico, createServico } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico } from "@/lib/services";
+import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
@@ -68,6 +70,14 @@ const DiretoriaAprovacao = () => {
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectedOwnItems, setSelectedOwnItems] = useState<Set<string | number>>(new Set());
+  const [activeTabOwnServicos, setActiveTabOwnServicos] = useState<"todos" | "pendentes" | "aprovados" | "enviados_compras">("todos");
+
+  const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
+  const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [editingBulkOwn, setEditingBulkOwn] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
   /** Lista exibida em "Recebidos das Gerências": separa pendentes, aprovados, rejeitados e fluxo de compras. */
   const [recebidosStatusTab, setRecebidosStatusTab] = useState<
     "pendentes" | "aprovados" | "rejeitados" | "em_compra"
@@ -114,7 +124,7 @@ const DiretoriaAprovacao = () => {
   const [novoServicoForm, setNovoServicoForm] = useState({
     objeto: "",
     justificativa: "",
-    tipoContratacao: "Novo",
+    tipoContratacao: "Contínuo",
     gerenciaId: "",
     previsaoInicio: "",
     estimativaValor: "",
@@ -133,6 +143,8 @@ const DiretoriaAprovacao = () => {
       setAuthenticated(true);
     }
   }, []);
+
+
 
   // Buscar diretorias
   const { data: diretorias = [], isLoading: isDiretoriasLoading, isError: isDiretoriasError } = useQuery<any[]>({
@@ -200,13 +212,15 @@ const DiretoriaAprovacao = () => {
 
   const periodAtivo = periodos[0];
 
+  const solicitacoesQueryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+  const servicosQueryKey = ["servicos-diretoria", diretoria?.id, periodAtivo?.id];
   // Buscar solicitações para esta diretoria
   // Busca os itens da própria diretoria (por diretoria_id) garantindo que apareçam
   // independentemente de regras de roteamento orçamentário
   // Pré-carrega solicitações assim que diretoria + período estão disponíveis
   // (não aguarda selectedOption para evitar atraso após autenticação)
   const { data: solicitacoes = [], isLoading: isSolicitacoesLoading } = useQuery({
-    queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id],
+    queryKey: solicitacoesQueryKey,
     queryFn: () => (diretoria && periodAtivo) ? getSolicitacoesByDiretoria(diretoria.id, periodAtivo.id) : [],
     enabled: !!diretoria && !!periodAtivo,
     staleTime: 0,
@@ -214,7 +228,7 @@ const DiretoriaAprovacao = () => {
     refetchOnWindowFocus: true,
   });
   const { data: servicosData = [], isLoading: isServicosLoading } = useQuery({
-    queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id],
+    queryKey: servicosQueryKey,
     queryFn: () => (diretoria && periodAtivo) ? getServicosByDiretoria(diretoria.id, periodAtivo.id) : [],
     enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") && !!diretoria && !!periodAtivo,
     staleTime: 0,
@@ -230,6 +244,17 @@ const DiretoriaAprovacao = () => {
     enabled: authenticated && selectedOption === "aquisicao",
     staleTime: 10 * 60 * 1000,
   });
+
+  const { data: servicosCatalogoData = [] } = useQuery({
+    queryKey: ["servicos-catalogo"],
+    queryFn: getServicosCatalogo,
+    enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos"),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const servicosCatalogoSet = useMemo(() => {
+    return new Set((servicosCatalogoData as any[]).map(c => c.item));
+  }, [servicosCatalogoData]);
 
   const orcamentoConfig = useMemo(() => {
     const localConfig = loadAdminBudgetConfig();
@@ -537,8 +562,11 @@ const DiretoriaAprovacao = () => {
   const orcamentoDiretoriaAquisicao = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "aquisicao")
     : 0;
-  const orcamentoDiretoriaServicos = diretoria?.id
-    ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos")
+  const orcamentoDiretoriaServicosNovos = diretoria?.id
+    ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_novos")
+    : 0;
+  const orcamentoDiretoriaServicosExistentes = diretoria?.id
+    ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoDiretoria = useMemo(
     () => [...filteredOwnItems, ...recebidosTableItems].reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
@@ -547,9 +575,9 @@ const DiretoriaAprovacao = () => {
   const gastoServicosDiretoria = useMemo(() => {
     let list = servicosData.filter((s: ServicoItem) => s.status !== "rascunho");
     if (selectedOption === "servicos_novos") {
-      list = list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+      list = list.filter(s => !servicosCatalogoSet.has(s.item));
     } else if (selectedOption === "servicos_existentes") {
-      list = list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
+      list = list.filter(s => servicosCatalogoSet.has(s.item));
     }
     return list.reduce(
       (acc: number, servico: ServicoItem) =>
@@ -579,10 +607,10 @@ const DiretoriaAprovacao = () => {
       : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
-      return list.filter(s => s.tipoContratacao === "Novo" || (s as any).tipo_contratacao === "Novo");
+      return list.filter(s => !servicosCatalogoSet.has(s.item));
     }
     if (selectedOption === "servicos_existentes") {
-      return list.filter(s => s.tipoContratacao !== "Novo" && (s as any).tipo_contratacao !== "Novo");
+      return list.filter(s => servicosCatalogoSet.has(s.item));
     }
     return list;
   }, [servicosRecebidosBase, selectedGerencia, selectedOption]);
@@ -671,7 +699,7 @@ const DiretoriaAprovacao = () => {
     if (!id) return;
 
     // Atualização otimista no cache local para recálculo instantâneo na UI
-    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    const queryKey = solicitacoesQueryKey;
     queryClient.setQueryData(queryKey, (current: any) => {
       if (!Array.isArray(current)) return current;
       return current.map((row: any) => 
@@ -686,7 +714,7 @@ const DiretoriaAprovacao = () => {
   const handleUpdateObservacao = async (id: string, observacao: string) => {
     if (!id) return;
 
-    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    const queryKey = solicitacoesQueryKey;
     queryClient.setQueryData(queryKey, (current: any) => {
       if (!Array.isArray(current)) return current;
       return current.map((row: any) => 
@@ -701,7 +729,7 @@ const DiretoriaAprovacao = () => {
   const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
     if (!id) return;
 
-    const queryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
+    const queryKey = solicitacoesQueryKey;
     queryClient.setQueryData(queryKey, (current: any) => {
       if (!Array.isArray(current)) return current;
       return current.map((row: any) => 
@@ -721,7 +749,7 @@ const DiretoriaAprovacao = () => {
     const itemExistente = itensProprios.find((item) => Number(item.codigo) === codigo);
 
     if (itemExistente?.id) {
-      queryClient.setQueryData(["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id], (current: any) => {
+      queryClient.setQueryData(solicitacoesQueryKey, (current: any) => {
         if (!Array.isArray(current)) return current;
         return current.map((row: any) =>
           row?.id === itemExistente.id
@@ -787,7 +815,7 @@ const DiretoriaAprovacao = () => {
       const itemToUpdate = [...items, ...itensProprios].find(i => i.id === itemId);
       
       // Atualização otimista
-      queryClient.setQueryData(["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+      queryClient.setQueryData(solicitacoesQueryKey, (oldData: any) => {
         if (!oldData) return oldData;
         return oldData.map((s: any) => {
           if (s.id === itemId) {
@@ -865,7 +893,7 @@ const DiretoriaAprovacao = () => {
       const srv = servicosData.find((s: any) => s.id === servicoId);
       
       // Atualização otimista
-      queryClient.setQueryData(["servicos-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+      queryClient.setQueryData(servicosQueryKey, (oldData: any) => {
         if (!oldData) return oldData;
         return oldData.map((s: any) => {
           if (s.id === servicoId) {
@@ -1121,6 +1149,74 @@ const DiretoriaAprovacao = () => {
     }
   };
 
+  const confirmActionServicosBulk = async () => {
+    if (selectedServicos.size === 0) return;
+    setIsUpdating(true);
+    try {
+      const validIds = Array.from(selectedServicos);
+
+      let newStatus: SolicitacaoStatus = "aprovado";
+      let actionText = "aprovado(s)";
+
+      if (actionServicosDialog.action === "rejeitar") {
+        newStatus = "rejeitado";
+        actionText = "rejeitado(s)";
+      } else if (actionServicosDialog.action === "devolver") {
+        newStatus = "rascunho";
+        actionText = "devolvido(s) ao rascunho";
+      }
+
+      await Promise.all(
+        validIds.map((id) =>
+          updateServico(id, {
+            status: newStatus,
+            justificativa_rejeicao: justificativa || null,
+          })
+        )
+      );
+
+      await queryClient.invalidateQueries({ queryKey: servicosQueryKey, exact: true });
+      setSelectedServicos(new Set());
+      setActionServicosDialog({ open: false, action: null });
+      setJustificativa("");
+      toast({ title: "Sucesso", description: `Serviço(s) ${actionText} com sucesso.` });
+    } catch (error: any) {
+      console.error("Erro na ação em lote de serviços:", error);
+      toast({ title: "Erro", description: error.message || "Ocorreu um erro ao processar a ação.", variant: "destructive" });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleBulkEditAquisicao = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      const ids = editingBulkOwn ? Array.from(selectedOwnItems) : Array.from(selectedItems);
+      await updateSolicitacoesBulkData(ids as string[], updates);
+      await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      toast({ title: "Itens atualizados", description: "Os itens selecionados foram atualizados com sucesso." });
+      setBulkEditAquisicaoOpen(false);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const handleBulkEditServicos = async (updates: any) => {
+    setIsBulkUpdating(true);
+    try {
+      await updateServicosBulkData(Array.from(selectedServicos), updates);
+      await queryClient.invalidateQueries({ queryKey: servicosQueryKey, exact: true });
+      toast({ title: "Serviços atualizados", description: "Os serviços selecionados foram atualizados com sucesso." });
+      setBulkEditServicosOpen(false);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
   const handleAddItem = async () => {
     if (!selectedCatalogItem || !diretoria || !periodAtivo || !selectedGerenciaId) return;
 
@@ -1186,7 +1282,7 @@ const DiretoriaAprovacao = () => {
       const validIds = itemsToUpdate.map(i => i.id!).filter(Boolean);
       if (validIds.length > 0) {
         // Atualização otimista
-        queryClient.setQueryData(["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id], (oldData: any) => {
+        queryClient.setQueryData(solicitacoesQueryKey, (oldData: any) => {
           if (!oldData) return oldData;
           return oldData.map((s: any) => 
             validIds.includes(s.id) ? { ...s, status: newStatus } : s
@@ -1290,6 +1386,7 @@ const DiretoriaAprovacao = () => {
   };
 
   const handleCriarServicoDiretoria = async () => {
+    if (novoServicoLoading) return; // Prevent double submission
     if (!diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
@@ -1335,7 +1432,7 @@ const DiretoriaAprovacao = () => {
       setNovoServicoForm({
         objeto: "",
         justificativa: "",
-        tipoContratacao: "Novo",
+        tipoContratacao: "Contínuo",
         gerenciaId: "",
         previsaoInicio: "",
         estimativaValor: "",
@@ -1632,7 +1729,7 @@ const DiretoriaAprovacao = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-amber-50 rounded-lg overflow-hidden flex items-center justify-center border border-amber-100 group-hover:bg-amber-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/servicos_existentes.png"
                         alt="Serviços Existentes"
@@ -1658,7 +1755,7 @@ const DiretoriaAprovacao = () => {
                   className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
                 >
                   <div className="mb-4 flex justify-center w-full">
-                    <div className="w-48 h-32 bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center border border-purple-100 group-hover:bg-purple-100 transition-colors">
+                    <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
                       <img
                         src="/assets/images/novos_servicos.png"
                         alt="Novos Serviços"
@@ -1771,10 +1868,7 @@ const DiretoriaAprovacao = () => {
                     {isServicoReadOnly(servico) ? (
                       new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(servico.estimativaValor || 0)
                     ) : (
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
+                      <CurrencyInput
                         defaultValue={servico.estimativaValor || 0}
                         className="w-36 h-8 text-right mx-auto"
                         onBlur={(e) => handleUpdateServicoEstimativa(servico, Number(e.target.value) || 0)}
@@ -1901,7 +1995,7 @@ const DiretoriaAprovacao = () => {
                     <div className="max-w-7xl mx-auto px-6 py-6">
             <BudgetConsumptionCard
               titulo={`Orçamento da Diretoria ${siglaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
-              orcamento={orcamentoDiretoriaServicos}
+              orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
               gasto={gastoServicosDiretoria}
             />
 
@@ -2097,16 +2191,28 @@ const DiretoriaAprovacao = () => {
                       </Button>
 
                       {(servicosStatusTab === "pendentes" || servicosStatusTab === "rejeitados") && (
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
-                          onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
-                          disabled={selectedServicos.size === 0}
-                        >
-                          <Undo2 className="h-4 w-4" />
-                          Devolver para Rascunho ({selectedServicos.size})
-                        </Button>
+                        <>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="gap-2 text-primary border-primary hover:bg-primary/10"
+                            onClick={() => setBulkEditServicosOpen(true)}
+                            disabled={selectedServicos.size === 0}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Editar Selecionados
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                            onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
+                            disabled={selectedServicos.size === 0}
+                          >
+                            <Undo2 className="h-4 w-4" />
+                            Devolver para Rascunho ({selectedServicos.size})
+                          </Button>
+                        </>
                       )}
 
                       {servicosStatusTab === "rejeitados" && (
@@ -2237,8 +2343,6 @@ const DiretoriaAprovacao = () => {
                         onChange={(e) => setNovoServicoForm(f => ({ ...f, tipoContratacao: e.target.value }))}
                         className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                       >
-                        <option value="Novo">Novo</option>
-                        <option value="Serviço">Serviço</option>
                         <option value="Contínuo">Contínuo</option>
                         <option value="Outros">Outros</option>
                       </select>
@@ -2266,31 +2370,14 @@ const DiretoriaAprovacao = () => {
                       className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={novoServicoForm.estimativaValor}
-                        onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        placeholder="0,00"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Dotação Orçamentária 2027 (R$)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={novoServicoForm.dotacaoOrcamentaria}
-                        onChange={(e) => setNovoServicoForm(f => ({ ...f, dotacaoOrcamentaria: e.target.value }))}
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        placeholder="0,00"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-medium">Estimativa de Valor (R$)</label>
+                    <CurrencyInput
+                      value={novoServicoForm.estimativaValor}
+                      onChange={(e) => setNovoServicoForm(f => ({ ...f, estimativaValor: e.target.value }))}
+                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                      placeholder="0,00"
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium">Grau de Prioridade</label>
@@ -2336,14 +2423,20 @@ const DiretoriaAprovacao = () => {
                   <Button variant="outline" onClick={() => setNovoServicoOpen(false)} disabled={novoServicoLoading}>
                     Cancelar
                   </Button>
-                  <Button
-                    onClick={handleCriarServicoDiretoria}
-                    disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim() || novoServicoLoading}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    {novoServicoLoading ? "Salvando..." : "Adicionar Serviço"}
-                  </Button>
+                  {!novoServicoLoading ? (
+                    <Button
+                      onClick={handleCriarServicoDiretoria}
+                      disabled={!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar Serviço
+                    </Button>
+                  ) : (
+                    <Button disabled className="gap-2 opacity-50 cursor-not-allowed">
+                      Salvando...
+                    </Button>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
@@ -2552,6 +2645,18 @@ const DiretoriaAprovacao = () => {
                 >
                   <Undo2 className="h-4 w-4" />
                   Devolver para Rascunho ({selectedOwnItems.size})
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2 text-primary border-primary hover:bg-primary/10"
+                  onClick={() => {
+                    setEditingBulkOwn(true);
+                    setBulkEditAquisicaoOpen(true);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Editar Selecionados
                 </Button>
               </div>
             )}
@@ -2814,16 +2919,31 @@ const DiretoriaAprovacao = () => {
                 </Button>
 
                 {(recebidosStatusTab === "pendentes" || recebidosStatusTab === "rejeitados") && (
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
-                    onClick={() => setActionDialog({ open: true, action: "devolver", isBulk: false })}
-                    disabled={selectedItems.size === 0}
-                  >
-                    <Undo2 className="h-4 w-4" />
-                    Devolver para Rascunho ({selectedItems.size})
-                  </Button>
+                  <>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-2 text-primary border-primary hover:bg-primary/10"
+                      onClick={() => {
+                        setEditingBulkOwn(false);
+                        setBulkEditAquisicaoOpen(true);
+                      }}
+                      disabled={selectedItems.size === 0}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Editar Selecionados
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                      onClick={() => setActionDialog({ open: true, action: "devolver", isBulk: false })}
+                      disabled={selectedItems.size === 0}
+                    >
+                      <Undo2 className="h-4 w-4" />
+                      Devolver para Rascunho ({selectedItems.size})
+                    </Button>
+                  </>
                 )}
 
                 {recebidosStatusTab === "rejeitados" && (
@@ -3233,7 +3353,23 @@ const DiretoriaAprovacao = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </div>
+      
+      {/* DIALOGS DE EDIÇÃO EM LOTE */}
+      <BulkEditAquisicaoDialog 
+        open={bulkEditAquisicaoOpen} 
+        onOpenChange={setBulkEditAquisicaoOpen} 
+        selectedCount={editingBulkOwn ? selectedOwnItems.size : selectedItems.size} 
+        onConfirm={handleBulkEditAquisicao} 
+        isUpdating={isBulkUpdating} 
+      />
+      <BulkEditServicosDialog 
+        open={bulkEditServicosOpen} 
+        onOpenChange={setBulkEditServicosOpen} 
+        selectedCount={selectedServicos.size} 
+        onConfirm={handleBulkEditServicos} 
+        isUpdating={isBulkUpdating} 
+      />
+    </div>
     </div>
   );
 };

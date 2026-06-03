@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Select,
@@ -308,8 +309,7 @@ const OrcamentoManager = ({ role }: OrcamentoManagerProps) => {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Input
-                              type="number"
+                            <CurrencyInput
                               value={orc.valor_aprovado}
                               onChange={(e) =>
                                 handleChangeValor(
@@ -317,7 +317,7 @@ const OrcamentoManager = ({ role }: OrcamentoManagerProps) => {
                                   parseFloat(e.target.value) || 0
                                 )
                               }
-                              placeholder="0.00"
+                              placeholder="0,00"
                               className="w-40 text-right"
                               disabled={isPending}
                             />
