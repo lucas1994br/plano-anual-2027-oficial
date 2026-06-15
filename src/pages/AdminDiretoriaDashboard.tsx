@@ -36,7 +36,8 @@ import {
   getTodasGerencias, 
   getSolicitacoesByDiretoria, 
   getServicosByDiretoria,
-  getAdminMiniErpConfigDb
+  getAdminMiniErpConfigDb,
+  getDadosExcel2026
 } from "@/lib/services.ts";
 import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget, getGerenciaBudget } from "@/lib/adminBudgetConfig.ts";
 
@@ -60,7 +61,7 @@ const BIMESTRES = ["1º Bimestre", "2º Bimestre", "3º Bimestre", "4º Bimestre
 const SEMANAS = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"];
 const ANOS = ["2026", "2027", "2028"];
 
-const useDashboardData = (filtroDiretoria: string) => {
+const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
   const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({ queryKey: ["periodos-ativos"], queryFn: getPeriodosAtivos, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
   const periodoAtivoId = periodosAtivos?.[0]?.id as string | undefined;
 
@@ -102,7 +103,14 @@ const useDashboardData = (filtroDiretoria: string) => {
     refetchOnWindowFocus: true,
   });
 
-  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer || isLoadingConfig;
+  const { data: excelData, isLoading: isLoadingExcel } = useQuery({
+    queryKey: ["excel-2026"],
+    queryFn: getDadosExcel2026,
+    enabled: filtroAno === "2026",
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer || isLoadingConfig || (filtroAno === "2026" && isLoadingExcel);
 
   const orcamentoConfig = useMemo(() => {
     const localConfig = loadAdminBudgetConfig();
@@ -116,27 +124,61 @@ const useDashboardData = (filtroDiretoria: string) => {
   }, [adminMiniConfigFromDb]);
 
   const limiteAquisicao = useMemo(() => {
-    if (!diretoria || !orcamentoConfig) return 0;
+    if (!diretoria) return 0;
+    if (filtroAno === "2026" && excelData?.orcamentoData) {
+      let orcAquisicao = 0;
+      excelData.orcamentoData.forEach((row: any) => {
+        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
+        if (d === diretoria.sigla.toUpperCase()) {
+           orcAquisicao += Number(row.ORCAMENTO_AQUISICAO || row.orcamento_aquisicao || 0);
+        }
+      });
+      return orcAquisicao;
+    }
+    if (!orcamentoConfig) return 0;
     const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "aquisicao");
     const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "aquisicao"), 0);
     return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb]);
+  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno, excelData]);
 
   const limiteServicosNovos = useMemo(() => {
+    if (filtroAno === "2026") return 0;
     if (!diretoria || !orcamentoConfig) return 0;
     const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos_novos");
     const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "servicos_novos"), 0);
     return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb]);
+  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno]);
 
   const limiteServicosExistentes = useMemo(() => {
+    if (filtroAno === "2026" && excelData?.orcamentoData) {
+      let orcServico = 0;
+      excelData.orcamentoData.forEach((row: any) => {
+        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
+        if (d === diretoria?.sigla.toUpperCase()) {
+           orcServico += Number(row.orcamento_servico || 0);
+        }
+      });
+      return orcServico;
+    }
     if (!diretoria || !orcamentoConfig) return 0;
     const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos_existentes");
     const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "servicos_existentes"), 0);
     return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb]);
+  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno, excelData]);
 
-  const limiteTotal = limiteAquisicao + limiteServicosNovos + limiteServicosExistentes;
+  const limiteTotal = useMemo(() => {
+    if (filtroAno === "2026" && excelData?.orcamentoData) {
+      let orcAprovado = 0;
+      excelData.orcamentoData.forEach((row: any) => {
+        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
+        if (d === diretoria?.sigla.toUpperCase()) {
+           orcAprovado += Number(row.orcamento_aprovado || 0);
+        }
+      });
+      return orcAprovado;
+    }
+    return limiteAquisicao + limiteServicosNovos + limiteServicosExistentes;
+  }, [filtroAno, excelData, diretoria, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes]);
 
   const mappedData = useMemo(() => {
     const getStatusProgresso = (status?: string) => {
@@ -163,7 +205,85 @@ const useDashboardData = (filtroDiretoria: string) => {
 
     const matrixData: any[] = [];
 
-    solicitacoes.forEach((s: any) => {
+    if (filtroAno === "2026" && excelData?.realizadoData) {
+       excelData.realizadoData.forEach((r: any) => {
+           const row: any = {};
+           for (const key in r) {
+               row[key.trim().toUpperCase()] = r[key];
+           }
+           
+           if (row.DIRETORIA?.toUpperCase() !== diretoria?.sigla?.toUpperCase()) return;
+           
+           const tipoVal = String(row.TIPO || "").trim().toUpperCase();
+           const isAquisicao = tipoVal === "AQUISICAO";
+           
+           let mesStr = "Jan";
+           if (row.DATA) {
+               let date: Date;
+               if (typeof row.DATA === 'number') {
+                   date = new Date(Math.round((row.DATA - 25569)*86400*1000));
+               } else {
+                   date = new Date(row.DATA);
+               }
+               if (!isNaN(date.getTime())) {
+                   mesStr = MOCK_MESES[date.getMonth()] || "Jan";
+               }
+           } else if (row.MES_NOME) {
+               mesStr = row.MES_NOME;
+           }
+           
+           const gerenciaSigla = String(row.GERENCIA || "Indefinido").trim().toUpperCase();
+           const gerenciaFull = gerenciasAtuais.find((g: any) => {
+               const gSigla = g.split(" - ")[0].trim().toUpperCase();
+               return gerenciaSigla === gSigla || gerenciaSigla.startsWith(gSigla) || gSigla.startsWith(gerenciaSigla);
+           }) || row.GERENCIA || "Indefinido";
+            const valOC = Number(row.VALOR_OC) || 0;
+            const valNF = Number(row.VALOR_NF) || 0;
+            
+            let prog = 0;
+            let currentStatus = "Não Iniciado";
+            
+            if (valOC > 0) {
+                 prog = Math.round((valNF / valOC) * 100);
+                 if (prog >= 100) {
+                     currentStatus = "Concluído";
+                     prog = 100;
+                 } else if (prog > 0) {
+                     currentStatus = "Em Andamento";
+                 } else {
+                     currentStatus = "Não Iniciado";
+                 }
+            } else if (valNF > 0) {
+                 // Gasto efetuado, mas sem OC/Orçamento atrelado
+                 prog = 0;
+                 currentStatus = "Não Previsto";
+            }
+
+            matrixData.push({
+                id: `EXC-${row.OC || row.NF || Math.floor(Math.random()*10000)}`,
+                gerencia: gerenciaFull,
+                tipo: isAquisicao ? "Aquisição" : "Serviço Existente", 
+                subcategoria: row.CLASSIFICACAO || row.DESCRICAO || "Geral",
+                status: currentStatus,
+                orcamentoPlanejado: valOC,
+                orcamentoExecutado: valNF,
+                variacao: valOC - valNF,
+                mes: mesStr,
+                ano: "2026",
+                trimestre: "1º Trimestre",
+                bimestre: "1º Bimestre",
+                semana: "Semana 1",
+                progresso: prog,
+                tendencia: (valOC - valNF) >= 0 ? "down" : "up",
+                oc: String(row.OC || ""),
+                fornecedor: String(row.FORNECEDOR || ""),
+                previsto: String(row.PREVISTO || "")
+            });
+       });
+    }
+
+    if (filtroAno !== "2026") {
+      solicitacoes.forEach((s: any) => {
       const orcamentoPlanejado = (s.qtdEstimada || s.qtd_estimada || 0) * (s.valorUnitario || s.valor_unitario || 0);
       const progresso = getStatusProgresso(s.status);
       const orcamentoExecutado = orcamentoPlanejado * (progresso / 100);
@@ -187,7 +307,9 @@ const useDashboardData = (filtroDiretoria: string) => {
         bimestre: "1º Bimestre",
         semana: "Semana 1",
         progresso,
-        tendencia: variacao >= 0 ? "down" : "up"
+        tendencia: variacao >= 0 ? "down" : "up",
+        oc: "",
+        fornecedor: ""
       });
     });
 
@@ -215,9 +337,12 @@ const useDashboardData = (filtroDiretoria: string) => {
         bimestre: "1º Bimestre",
         semana: "Semana 1",
         progresso,
-        tendencia: variacao >= 0 ? "down" : "up"
+        tendencia: variacao >= 0 ? "down" : "up",
+        oc: "",
+        fornecedor: ""
       });
     });
+    }
 
     const evolutionData = MOCK_MESES.map(mes => {
       const itemsInMonth = matrixData.filter(m => m.mes === mes);
@@ -227,6 +352,9 @@ const useDashboardData = (filtroDiretoria: string) => {
         servicosNovos: itemsInMonth.filter(m => m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
         servicosExistentes: itemsInMonth.filter(m => m.tipo === "Serviço Existente").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
         orcamentoPlanejado: itemsInMonth.reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
+        orcamentoExecutado: itemsInMonth.reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
+        realizadoPrevisto: itemsInMonth.filter((m: any) => String(m.previsto).trim().toUpperCase() === "SIM").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
+        naoPrevisto: itemsInMonth.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
       };
     });
 
@@ -279,7 +407,7 @@ const useDashboardData = (filtroDiretoria: string) => {
     const isLimitedData = solicitacoes.length >= 2000 || servicos.length >= 2000;
 
     return { evolutionData, gerenciaData, pieData, statusPieData, matrixData, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes, isLimitedData };
-  }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes]);
+  }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes, filtroAno, excelData]);
 
   return { ...mappedData, isLoading };
 };
@@ -339,7 +467,7 @@ const AdminDiretoriaDashboard = () => {
     navigate(`/admin/diretoria/${val.toLowerCase()}`);
   };
 
-  const { isLoading, ...rawData } = useDashboardData(filtroDiretoria);
+  const { isLoading, ...rawData } = useDashboardData(filtroDiretoria, filtroAno);
 
   const filteredMatrix = useMemo(() => {
     return rawData.matrixData.filter(item => {
@@ -430,6 +558,17 @@ const AdminDiretoriaDashboard = () => {
 
   const totalItens = filteredMatrix.length;
   const execucaoMedia = Math.floor(filteredMatrix.reduce((acc, curr) => acc + curr.progresso, 0) / (totalItens || 1));
+
+  // Novos KPIs de Operação
+  const kpiSomaItensAquisicao = filteredMatrix.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
+  const kpiSomaItensServicos = filteredMatrix.filter(m => m.tipo === "Serviço Existente" || m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
+  const kpiNfServicos = filteredMatrix.filter(m => m.tipo === "Serviço Existente" || m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
+  const kpiNfAquisicoes = filteredMatrix.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
+  const kpiQtdOc = new Set(filteredMatrix.map(m => String(m.oc).trim()).filter(o => o && o !== "-" && o.toUpperCase() !== "INDEFINIDO")).size;
+  const kpiQtdFornecedores = new Set(filteredMatrix.map(m => String(m.fornecedor).trim()).filter(f => f && f !== "-" && f.toUpperCase() !== "INDEFINIDO")).size;
+  const kpiRealizadoPrevisto = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "SIM").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
+  const kpiNaoPrevistoPlanejado = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
+  const kpiNaoPrevistoExecutado = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
 
   const getChartDataKey = () => {
     switch (filtroCategoria) {
@@ -669,33 +808,47 @@ const AdminDiretoriaDashboard = () => {
         </div>
 
         {/* KPIs (Now React to Deep Filters and act as reset buttons) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${filtroAno === "2026" ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
           <Card className="border-l-4 border-l-indigo-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-indigo-50" onClick={() => setFiltroCategoria("todas")} title="Clique para resetar Categoria">
             <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">Limite Orçamentário (Admin)</CardDescription>
-              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(rawData.limiteTotal || 0)}</CardTitle>
-              <div className="text-[10px] text-slate-500 mt-1 font-medium leading-tight">
-                Aquis: {formatCurrency(rawData.limiteAquisicao || 0)} <br/>
-                S. Novos: {formatCurrency(rawData.limiteServicosNovos || 0)} <br/>
-                S. Exist: {formatCurrency(rawData.limiteServicosExistentes || 0)}
-              </div>
+              <CardDescription className="font-medium text-slate-500">
+                {filtroAno === "2026" ? "Orçamento Aprovado" : "Limite Orçamentário (Admin)"}
+              </CardDescription>
+              <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteTotal || 0)}</CardTitle>
             </CardHeader>
           </Card>
           
-          <Card className="border-l-4 border-l-cyan-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-cyan-50" onClick={() => setFiltroGerencia("todas")} title="Clique para resetar Gerência">
-            <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">Orçamento Planejado (Soma Itens)</CardDescription>
-              <CardTitle className="text-3xl font-bold text-slate-800">{formatCurrency(totalPlanejado)}</CardTitle>
-            </CardHeader>
-          </Card>
+          {filtroAno === "2026" ? (
+             <>
+               <Card className="border-l-4 border-l-teal-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-teal-50" onClick={() => setFiltroCategoria("Aquisição")}>
+                 <CardHeader className="pb-2">
+                   <CardDescription className="font-medium text-slate-500">Orçamento Aquisição</CardDescription>
+                   <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteAquisicao || 0)}</CardTitle>
+                 </CardHeader>
+               </Card>
+               <Card className="border-l-4 border-l-blue-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-blue-50" onClick={() => setFiltroCategoria("Serviço Existente")}>
+                 <CardHeader className="pb-2">
+                   <CardDescription className="font-medium text-slate-500">Orçamento Serviços</CardDescription>
+                   <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteServicosExistentes || 0)}</CardTitle>
+                 </CardHeader>
+               </Card>
+             </>
+          ) : (
+             <Card className="border-l-4 border-l-cyan-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-cyan-50" onClick={() => setFiltroGerencia("todas")} title="Clique para resetar Gerência">
+               <CardHeader className="pb-2">
+                 <CardDescription className="font-medium text-slate-500">Orçamento Planejado (Soma Itens)</CardDescription>
+                 <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(totalPlanejado)}</CardTitle>
+               </CardHeader>
+             </Card>
+          )}
           
-          <Card className={`border-l-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${rawData.limiteTotal - totalPlanejado >= 0 ? 'border-l-emerald-500 hover:bg-emerald-50' : 'border-l-rose-500 hover:bg-rose-50'}`} onClick={() => { setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }} title="Clique para resetar Subcategoria">
+          <Card className={`border-l-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? 'border-l-emerald-500 hover:bg-emerald-50' : 'border-l-rose-500 hover:bg-rose-50'}`} onClick={() => { setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }} title="Clique para resetar Subcategoria">
             <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">{rawData.limiteTotal - totalPlanejado >= 0 ? "Saldo Disponível" : "Excedente Orçamentário"}</CardDescription>
-              <CardTitle className={`text-2xl font-bold ${rawData.limiteTotal - totalPlanejado >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {formatCurrency(Math.abs((rawData.limiteTotal || 0) - totalPlanejado))}
+              <CardDescription className="font-medium text-slate-500">{rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? "Saldo Disponível" : "Excedente Orçamentário"}</CardDescription>
+              <CardTitle className={`text-lg xl:text-xl font-bold tracking-tight ${rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatCurrency(Math.abs((rawData.limiteTotal || 0) - (filtroAno === "2026" ? totalExecutado : totalPlanejado)))}
               </CardTitle>
-              {rawData.limiteTotal > 0 && <div className="text-xs text-slate-500 mt-1 font-medium">{Math.abs((totalPlanejado / rawData.limiteTotal) * 100).toFixed(1)}% do limite consumido</div>}
+              {rawData.limiteTotal > 0 && <div className="text-xs text-slate-500 mt-1 font-medium">{Math.abs(((filtroAno === "2026" ? totalExecutado : totalPlanejado) / rawData.limiteTotal) * 100).toFixed(1)}% do limite consumido</div>}
             </CardHeader>
           </Card>
 
@@ -709,6 +862,49 @@ const AdminDiretoriaDashboard = () => {
             </CardHeader>
           </Card>
         </div>
+
+        {/* Novos KPIs de Operação (Adicionados) */}
+        {filtroAno === "2026" && (
+          <div className="flex flex-col gap-4 mt-4 mb-6">
+            {/* Primeira Linha: Métricas de Aquisição/Operação */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-teal-500">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-[10px] font-bold text-teal-700 uppercase tracking-wider">VALOR TOTAL DE AQUISIÇÃO</CardDescription>
+                  <CardTitle className="text-xl font-bold text-teal-800">{formatCurrency(kpiRealizadoPrevisto)}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-blue-500">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">VALOR TOTAL DE SERVIÇOS EXISTENTES</CardDescription>
+                  <CardTitle className="text-xl font-bold text-blue-800">{formatCurrency(kpiSomaItensServicos)}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="shadow-sm border-slate-200 bg-slate-100/50">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">QTD. ORDENS DE COMPRA</CardDescription>
+                  <CardTitle className="text-xl font-bold text-slate-800">{kpiQtdOc}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="shadow-sm border-slate-200 bg-slate-100/50">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">QTD. FORNECEDORES</CardDescription>
+                  <CardTitle className="text-xl font-bold text-slate-800">{kpiQtdFornecedores}</CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+
+            {/* Segunda Linha: Métricas de Previsibilidade */}
+            <div className="grid grid-cols-1 gap-4 w-1/3">
+              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-amber-500">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">NÃO PREVISTO (ORÇADO)</CardDescription>
+                  <CardTitle className="text-xl font-bold text-amber-800">{formatCurrency(kpiNaoPrevistoPlanejado)}</CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {/* CHARTS AREA */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -729,12 +925,55 @@ const AdminDiretoriaDashboard = () => {
                     <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000}k`} />
                     <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
                     <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                    <Bar dataKey="aquisicoes" name="Realizado (Barra)" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
+                    {filtroAno === "2026" ? (
+                      <>
+                        <Bar dataKey="realizadoPrevisto" name="Realizado Previsto" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
+                        <Bar dataKey="naoPrevisto" name="Não Previsto" fill={COLORS[1]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
+                      </>
+                    ) : (
+                      <Bar dataKey="orcamentoExecutado" name="Realizado (Barra)" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
+                    )}
                     <Line type="monotone" dataKey="orcamentoPlanejado" name="Orçamento Base (Linha)" stroke={COLORS[3]} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 8 }} className="cursor-pointer hover:opacity-80" />
                   </ComposedChart>
                </ResponsiveContainer>
             </CardContent>
           </Card>
+
+          {/* ORÇAMENTO AQUISIÇÃO vs REALIZADO (Apenas 2026) */}
+          {filtroAno === "2026" && (
+            <Card className="col-span-1 lg:col-span-3 shadow-sm border-slate-200 hover:shadow-md transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <BarChart3 className="h-5 w-5 text-teal-500" />
+                  Orçamento Aquisição vs Realizado
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={[
+                    { name: "Orçamento Aquisição", valor: rawData.limiteAquisicao, fill: COLORS[3] },
+                    { name: "NF Aquisições", valor: kpiNfAquisicoes, fill: COLORS[0] }
+                  ]} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000}k`} />
+                    <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
+                    <Bar dataKey="valor" radius={[4, 4, 0, 0]}>
+                      {
+                        [
+                          { fill: COLORS[3] },
+                          { fill: COLORS[0] }
+                        ].map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))
+                      }
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
 
           {/* RADAR CHART - PERFORMANCE GERENCIAL */}
           <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow flex flex-col">

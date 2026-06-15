@@ -460,7 +460,7 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
 
 export async function updateSolicitacao(
   id: string,
-  updates: Partial<PlanItem>
+  updates: Partial<PlanItem> | any
 ): Promise<PlanItem> {
   const dbUpdates: Record<string, unknown> = {};
 
@@ -472,6 +472,12 @@ export async function updateSolicitacao(
     dbUpdates.valor_unitario = updates.valorUnitario;
   if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
   if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.justificativa_rejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativa_rejeicao;
+
+  if (Object.keys(dbUpdates).length === 0) {
+    return {} as PlanItem;
+  }
 
   const { data, error } = await supabase
     .from("solicitacoes")
@@ -1500,4 +1506,36 @@ export async function deletarOrcamento(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   return data;
+}
+
+// ============ DADOS 2026 (EXCEL via Edge Function c/ Fallback) ============
+export async function getDadosExcel2026() {
+  try {
+    const { data, error } = await supabase.functions.invoke("get-excel-2026");
+    if (!error && data && !data.error) {
+      return {
+        previstoData: data.previstoData || [],
+        realizadoData: data.realizadoData || [],
+        orcamentoData: data.orcamentoData || []
+      };
+    }
+    console.warn("Edge Function falhou ou não foi implantada. Usando fallback no lado do cliente...");
+  } catch (err) {
+    console.warn("Erro ao invocar Edge Function, usando fallback no lado do cliente...", err);
+  }
+
+  // Fallback: faz o processamento no lado do cliente
+  const XLSX = await import("xlsx-js-style");
+  const res = await fetch("https://docs.google.com/spreadsheets/d/1seIaYVZ1D06jPZm9O7yzXbW8hi8tgV2OzBHguyNrfMY/export?format=xlsx");
+  if (!res.ok) throw new Error("Erro ao baixar planilha do Google Sheets (2026) via cliente");
+  
+  const blob = await res.blob();
+  const arrayBuffer = await blob.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  
+  const previstoData = workbook.Sheets['previsto'] ? XLSX.utils.sheet_to_json(workbook.Sheets['previsto']) : [];
+  const realizadoData = workbook.Sheets['realizado'] ? XLSX.utils.sheet_to_json(workbook.Sheets['realizado']) : [];
+  const orcamentoData = workbook.Sheets['orcamento'] ? XLSX.utils.sheet_to_json(workbook.Sheets['orcamento']) : [];
+  
+  return { previstoData, realizadoData, orcamentoData };
 }

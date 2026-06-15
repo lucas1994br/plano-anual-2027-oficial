@@ -1839,8 +1839,8 @@ const DiretoriaAprovacao = () => {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-4 py-3 text-sm max-w-xs">
-                    <p className="font-medium">{servico.objeto}</p>
+                  <td className="px-4 py-3 text-sm max-w-xs" title={servico.objeto}>
+                    <p className="font-medium line-clamp-2">{servico.objeto}</p>
                     {servico.justificativa && (
                       <>
                         <p
@@ -3032,8 +3032,8 @@ const DiretoriaAprovacao = () => {
                           />
                         </td>
                         <td className="p-3 text-sm font-mono">{item.codigo}</td>
-                        <td className="p-3 text-sm max-w-sm">
-                          <p className="font-medium truncate">{item.descricao}</p>
+                        <td className="p-3 text-sm max-w-sm" title={item.descricao}>
+                          <p className="font-medium line-clamp-2">{item.descricao}</p>
                           <p className="text-xs text-muted-foreground">{item.categoria}</p>
                         </td>
                         <td className="p-3 text-sm">{item.gerencia}</td>

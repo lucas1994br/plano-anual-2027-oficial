@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,7 @@ import {
   deleteServico,
   deleteServicosBulk,
   updateServicosBulkData,
-  getServicosCatalogoByGerencia,
+  getServicosCatalogo,
 } from "@/lib/services";
 import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
@@ -108,7 +108,7 @@ const GerenciaPanel = () => {
     previsaoInicio: "",
     estimativaValor: "",
     dotacaoOrcamentaria: "",
-    grauPrioridade: "Médio" as GrauPrioridade,
+    grauPrioridade: "Baixo" as GrauPrioridade,
     vinculacao: "Não" as "Sim" | "Não",
     dependenciaDescricao: "",
   });
@@ -117,6 +117,10 @@ const GerenciaPanel = () => {
   const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [currentPageServicos, setCurrentPageServicos] = useState(1);
+  useEffect(() => {
+    setCurrentPageServicos(1);
+  }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
   const ITEMS_PER_PAGE = 100;
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -189,10 +193,9 @@ const GerenciaPanel = () => {
     refetchOnMount: true,
   });
 
-  const { data: servicosCatalogoData = [] } = useQuery({
-    queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id],
-    queryFn: () => gerenciaAtual ? getServicosCatalogoByGerencia(gerenciaAtual.id) : [],
-    enabled: !!gerenciaAtual,
+  const { data: servicosCatalogoData = [] } = useQuery<any[]>({
+    queryKey: ["servicos-catalogo"],
+    queryFn: () => getServicosCatalogo(),
   });
 
   console.log("SERVICOS DATA:", servicosData);
@@ -228,7 +231,7 @@ const GerenciaPanel = () => {
         descricao: s.descricao,
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
-        prioridade: s.prioridade || "Média",
+        prioridade: s.prioridade || "Baixa",
         qtdEstimada: s.qtd_estimada || 0,
         unidade: s.unidade || "un",
         valorUnitario: s.valor_unitario || 0,
@@ -404,6 +407,18 @@ const GerenciaPanel = () => {
     }
   };
 
+  const handleDevolverAquisicao = async (itemId: string) => {
+    if (!confirm("Tem certeza que deseja devolver este item para rascunho?")) return;
+    try {
+      await updateSolicitacao(itemId, { status: "rascunho" });
+      toast({ title: "Item devolvido", description: "O item voltou para o status de Rascunho." });
+      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+    } catch (error: any) {
+      console.error("Erro ao devolver item:", error);
+      toast({ title: "Erro", description: "Não foi possível devolver o item.", variant: "destructive" });
+    }
+  };
+
   const handleDeleteItem = async (itemId: string) => {
     if (!confirm("Excluir este item permanentemente?")) return;
 
@@ -507,7 +522,7 @@ const GerenciaPanel = () => {
         previsao_inicio: null,
         estimativa_valor: catalogoItem.estimativa_valor || 0,
         dotacao_orcamentaria: updates.dotacao_orcamentaria !== undefined ? updates.dotacao_orcamentaria : 0,
-        grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Médio"),
+        grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Baixo"),
         vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
         dependencia_descricao: null,
         status: "rascunho",
@@ -541,6 +556,18 @@ const GerenciaPanel = () => {
     await ensureServico(item, { observacao });
   };
 
+
+  const handleDevolverServico = async (servicoId: string) => {
+    if (!confirm("Tem certeza que deseja devolver este serviço para rascunho?")) return;
+    try {
+      await updateServico(servicoId, { status: "rascunho" });
+      toast({ title: "Serviço devolvido", description: "O serviço voltou para o status de Rascunho." });
+      queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    } catch (error: any) {
+      console.error("Erro ao devolver serviço:", error);
+      toast({ title: "Erro", description: "Não foi possível devolver o serviço.", variant: "destructive" });
+    }
+  };
 
   const handleDeleteServico = async (servicoId: string | undefined, itemCode: number) => {
     if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
@@ -629,7 +656,7 @@ const GerenciaPanel = () => {
         previsaoInicio: "",
         estimativaValor: "",
         dotacaoOrcamentaria: "",
-        grauPrioridade: "Médio",
+        grauPrioridade: "Baixo",
         vinculacao: "Não",
         dependenciaDescricao: "",
       });
@@ -1086,7 +1113,7 @@ const GerenciaPanel = () => {
       previsaoInicio: s.previsaoInicio || s.previsao_inicio,
       estimativaValor: s.estimativaValor || s.estimativa_valor,
       dotacaoOrcamentaria: s.dotacaoOrcamentaria || s.dotacao_orcamentaria,
-      grauPrioridade: s.grauPrioridade || s.grau_prioridade || "Médio",
+      grauPrioridade: s.grauPrioridade || s.grau_prioridade || "Baixo",
       vinculacao: s.vinculacao || "Não",
       dependenciaDescricao: s.dependenciaDescricao || s.dependencia_descricao,
       gerencia: gerenciaUpper,
@@ -1115,7 +1142,7 @@ const GerenciaPanel = () => {
         previsaoInicio: catalogoItem.previsao_inicio || undefined,
         estimativaValor: catalogoItem.estimativa_valor || 0,
         dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
-        grauPrioridade: catalogoItem.grau_prioridade || "Médio",
+        grauPrioridade: catalogoItem.grau_prioridade || "Baixo",
         vinculacao: catalogoItem.vinculacao || "Não",
         dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
         status: catalogoItem.status || "rascunho",
@@ -1210,29 +1237,47 @@ const GerenciaPanel = () => {
       doc.save(`PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.pdf`);
     };
 
-    const ServicosSection = ({ lista, titulo, badge }: { lista: ServicoItem[]; titulo: string; badge?: React.ReactNode }) => (
+    const ServicosSection = ({ lista, titulo, badge }: { lista: ServicoItem[]; titulo: string; badge?: React.ReactNode }) => {
+      const valorTotal = lista.reduce((acc, s) => acc + (s.estimativaValor || s.dotacaoOrcamentaria || 0), 0);
+      const totalPages = Math.ceil(lista.length / ITEMS_PER_PAGE);
+      const startIdx = (currentPageServicos - 1) * ITEMS_PER_PAGE;
+      const paginatedLista = lista.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+
+      return (
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-2 px-1">
           <h3 className="text-sm font-semibold text-foreground">{titulo}</h3>
           {badge}
-          <span className="text-xs text-muted-foreground">({lista.length} serviço{lista.length !== 1 ? "s" : ""})</span>
         </div>
         <div className="bg-card rounded-lg border overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b">
+            <h2 className="text-sm font-semibold text-foreground">
+              {lista.length} serviço(s) encontrado(s)
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              Total: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valorTotal)}
+            </span>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-muted/50 border-b">
                 <tr>
                   <th className="p-3 text-left w-10">
                     <Checkbox
-                      checked={lista.filter(s => !isServicoReadOnly(s)).length > 0 && lista.filter(s => !isServicoReadOnly(s)).every(s => s.id && selectedServicos.has(s.id!))}
-                      onCheckedChange={() => {
-                        const editaveis = lista.filter(s => !isServicoReadOnly(s) && s.id);
-                        const allSelected = editaveis.every(s => selectedServicos.has(s.id!));
-                        const next = new Set(selectedServicos);
-                        editaveis.forEach(s => allSelected ? next.delete(s.id!) : next.add(s.id!));
-                        setSelectedServicos(next);
+                      checked={paginatedLista.filter(s => !isServicoReadOnly(s)).length > 0 && paginatedLista.filter(s => !isServicoReadOnly(s)).every(s => s.id && selectedServicos.has(s.id!))}
+                      onCheckedChange={(checked) => {
+                        const editaveis = paginatedLista.filter(s => !isServicoReadOnly(s) && s.id);
+                        if (checked) {
+                          const newSet = new Set(selectedServicos);
+                          editaveis.forEach(s => newSet.add(s.id!));
+                          setSelectedServicos(newSet);
+                        } else {
+                          const newSet = new Set(selectedServicos);
+                          editaveis.forEach(s => newSet.delete(s.id!));
+                          setSelectedServicos(newSet);
+                        }
                       }}
-                      disabled={lista.filter(s => !isServicoReadOnly(s)).length === 0}
+                      disabled={paginatedLista.filter(s => !isServicoReadOnly(s)).length === 0}
                     />
                   </th>
                   <th className="p-3 text-left text-xs font-medium text-muted-foreground w-12">Nº</th>
@@ -1246,14 +1291,14 @@ const GerenciaPanel = () => {
                 </tr>
               </thead>
               <tbody>
-                {lista.length === 0 ? (
+                {paginatedLista.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="text-center py-6 text-muted-foreground text-sm">
                       Nenhum serviço nesta seção.
                     </td>
                   </tr>
                 ) : (
-                  lista.map((servico, index) => {
+                  paginatedLista.map((servico, index) => {
                     const readOnly = isServicoReadOnly(servico);
                     return (
                       <tr
@@ -1268,7 +1313,7 @@ const GerenciaPanel = () => {
                           />
                         </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
-                        <td className="p-3 text-sm max-w-xs">
+                        <td className="p-3 text-sm max-w-xs" title={servico.objeto}>
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {servico.tipoContratacao} · {servico.unidadeDemandante}
@@ -1368,6 +1413,16 @@ const GerenciaPanel = () => {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                          ) : servico.status === "enviado" && servico.id ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-amber-500"
+                              onClick={() => handleDevolverServico(servico.id!)}
+                              title="Devolver serviço para Rascunho"
+                            >
+                              <Undo2 className="h-4 w-4" />
+                            </Button>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
@@ -1380,8 +1435,60 @@ const GerenciaPanel = () => {
             </table>
           </div>
         </div>
+        
+        {totalPages > 1 && (
+          <div className="py-6">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPageServicos(Math.max(1, currentPageServicos - 1))}
+                    className={currentPageServicos === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+                {currentPageServicos > 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPageServicos(currentPageServicos - 1)} className="cursor-pointer">
+                      {currentPageServicos - 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationLink isActive>{currentPageServicos}</PaginationLink>
+                </PaginationItem>
+                {currentPageServicos < totalPages && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPageServicos(currentPageServicos + 1)} className="cursor-pointer">
+                      {currentPageServicos + 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                {currentPageServicos < totalPages - 1 && (
+                  <PaginationItem><PaginationEllipsis /></PaginationItem>
+                )}
+                {currentPageServicos < totalPages - 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPageServicos(totalPages)} className="cursor-pointer">
+                      {totalPages}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPageServicos(Math.min(totalPages, currentPageServicos + 1))}
+                    className={currentPageServicos === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
+              Página {currentPageServicos} de {totalPages} • Total: {lista.length} serviços
+            </div>
+          </div>
+        )}
       </div>
     );
+  };
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
@@ -1420,15 +1527,7 @@ const GerenciaPanel = () => {
                     <Trash2 className="h-4 w-4" />
                     Excluir Selecionados
                   </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 text-primary border-primary hover:bg-primary/10"
-                    onClick={() => setBulkEditServicosOpen(true)}
-                    disabled={selectedServicos.size === 0}
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Editar Selecionados
-                  </Button>
+
                   <Button
                     className="gap-2"
                     onClick={() => setConfirmSendServicosOpen(true)}
@@ -1748,10 +1847,21 @@ const GerenciaPanel = () => {
               </div>
               <div className="flex justify-end gap-3">
                 <Button variant="outline" onClick={() => setConfirmSendServicosOpen(false)}>Cancelar</Button>
-                <Button onClick={handleSendServicosToDir} className="gap-2">
-                  <Send className="h-4 w-4" />
-                  Confirmar Envio
-                </Button>
+                {servicosData.some((s: any) => 
+                  (s.status === "enviado" || s.status === "em_analise") && 
+                  (selectedOption === "servicos_novos" 
+                    ? !servicosCatalogoData.some((c: any) => c.item === s.item) 
+                    : servicosCatalogoData.some((c: any) => c.item === s.item))
+                ) ? (
+                  <p className="text-sm text-amber-600 font-medium py-2">
+                    Aguarde a diretoria aprovar/rejeitar os envios pendentes desta aba.
+                  </p>
+                ) : (
+                  <Button onClick={handleSendServicosToDir} className="gap-2">
+                    <Send className="h-4 w-4" />
+                    Confirmar Envio
+                  </Button>
+                )}
               </div>
             </DialogContent>
           </Dialog>
@@ -1796,15 +1906,7 @@ const GerenciaPanel = () => {
                   <Trash2 className="h-4 w-4" />
                   Excluir Selecionados
                 </Button>
-                <Button
-                  variant="outline"
-                  className="gap-2 text-primary border-primary hover:bg-primary/10"
-                  onClick={() => setBulkEditAquisicaoOpen(true)}
-                  disabled={selectedAquisicaoIds.size === 0}
-                >
-                  <Pencil className="h-4 w-4" />
-                  Editar Selecionados
-                </Button>
+
                 <Button
                   className="gap-2"
                   disabled={!canSend || selectedAquisicaoIds.size === 0}
@@ -2029,8 +2131,8 @@ const GerenciaPanel = () => {
                           />
                         </td>
                         <td className="p-3 text-sm font-mono text-primary">{item.codigo}</td>
-                        <td className="p-3 text-sm">
-                          <p className="font-medium">{item.descricao}</p>
+                        <td className="p-3 text-sm max-w-md" title={item.descricao}>
+                          <p className="font-medium line-clamp-2">{item.descricao}</p>
                           <p className="text-xs text-primary">{item.categoria}</p>
                           {item.observacao && (
                             <p className="text-xs text-success mt-1">💬 {item.observacao}</p>
@@ -2099,6 +2201,17 @@ const GerenciaPanel = () => {
                                 onClick={() => handleDeleteItem(item.id!)}
                               >
                                 <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {item.status === "enviado" && item.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-amber-500"
+                                title="Devolver item para Rascunho"
+                                onClick={() => handleDevolverAquisicao(item.id!)}
+                              >
+                                <Undo2 className="h-4 w-4" />
                               </Button>
                             )}
                             <Badge variant={item.status === "enviado" || item.status === "em_analise" ? "secondary" : item.status === "aprovado" ? "success" : "outline"} className="text-xs">
@@ -2198,10 +2311,16 @@ const GerenciaPanel = () => {
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => setConfirmSendOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSendToDiretoria} className="gap-2">
-              <Send className="h-4 w-4" />
-              Confirmar Envio
-            </Button>
+            {items.some(i => i.status === "enviado" || i.status === "em_analise") ? (
+              <p className="text-sm text-amber-600 font-medium py-2">
+                Aguarde a diretoria aprovar/rejeitar os itens já enviados.
+              </p>
+            ) : (
+              <Button onClick={handleSendToDiretoria} className="gap-2">
+                <Send className="h-4 w-4" />
+                Confirmar Envio
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
