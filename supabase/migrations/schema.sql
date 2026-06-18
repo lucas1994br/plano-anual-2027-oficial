@@ -101,6 +101,14 @@ create table if not exists fornecedor (
   created_at timestamptz not null default now()
 );
 
+create table if not exists fornecedor_item (
+  fornecedor_id uuid not null references fornecedor(id) on delete cascade,
+  item_catalogo_id uuid not null references itens_catalogo(id) on delete cascade,
+  preco_sugerido numeric(14,2),
+  created_at timestamptz not null default now(),
+  primary key (fornecedor_id, item_catalogo_id)
+);
+
 create table if not exists itens_catalogo (
   id uuid primary key default gen_random_uuid(),
   codigo integer not null unique,
@@ -141,7 +149,7 @@ create table if not exists servicos (
   periodo_id uuid not null references periodos(id) on delete restrict,
   diretoria_id uuid not null references diretorias(id) on delete restrict,
   gerencia_id uuid not null references gerencias(id) on delete restrict,
-  item integer not null,
+  item integer not null references itens_catalogo(codigo) on delete restrict,
   tipo_contratacao text not null,
   unidade_demandante text not null,
   objeto text not null,
@@ -329,6 +337,7 @@ alter table categoria_diretoria_orcamentaria enable row level security;
 alter table admin_orcamento_config enable row level security;
 alter table admin_fluxo_config enable row level security;
 alter table fornecedor enable row level security;
+alter table fornecedor_item enable row level security;
 alter table plano_anual enable row level security;
 alter table plano_diretoria enable row level security;
 alter table plano_item enable row level security;
@@ -371,6 +380,8 @@ drop policy if exists "regra_categoria_read" on regra_categoria_centro_custo;
 drop policy if exists "regra_categoria_admin_write" on regra_categoria_centro_custo;
 drop policy if exists "fornecedor_read" on fornecedor;
 drop policy if exists "fornecedor_admin_write" on fornecedor;
+drop policy if exists "fornecedor_item_read" on fornecedor_item;
+drop policy if exists "fornecedor_item_admin_write" on fornecedor_item;
 drop policy if exists "plano_anual_read" on plano_anual;
 drop policy if exists "plano_anual_write" on plano_anual;
 drop policy if exists "plano_diretoria_read" on plano_diretoria;
@@ -520,6 +531,14 @@ create policy "fornecedor_read" on fornecedor
   for select using (auth.role() in ('authenticated','anon'));
 
 create policy "fornecedor_admin_write" on fornecedor
+  for all using ((auth.jwt() ->> 'app_role') = 'admin')
+  with check ((auth.jwt() ->> 'app_role') = 'admin');
+
+-- fornecedor_item (leitura pública, escrita admin)
+create policy "fornecedor_item_read" on fornecedor_item
+  for select using (auth.role() in ('authenticated','anon'));
+
+create policy "fornecedor_item_admin_write" on fornecedor_item
   for all using ((auth.jwt() ->> 'app_role') = 'admin')
   with check ((auth.jwt() ->> 'app_role') = 'admin');
 

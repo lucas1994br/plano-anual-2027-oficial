@@ -98,11 +98,11 @@ async function fetchAllPages<T>(
       }
     }
     
-    // SAFETY LIMIT to prevent browser crashes (max ~2000 items)
-    if (allRows.length >= 2000) {
-      hasMore = false;
-      break;
-    }
+    // SAFETY LIMIT removido a pedido do usuário para carregar todos os itens
+    // if (allRows.length >= 50000) {
+    //   hasMore = false;
+    //   break;
+    // }
     
     if (hasMore) {
       currentFrom += CHUNK_SIZE * SUPABASE_PAGE_SIZE;
