@@ -97,7 +97,7 @@ const GerenciaPanel = () => {
   const [showOnlySent, setShowOnlySent] = useState(false);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [selectedServicos, setSelectedServicos] = useState<Set<string>>(new Set());
+  const [selectedServicos, setSelectedServicos] = useState<Set<number>>(new Set());
   const [confirmSendServicosOpen, setConfirmSendServicosOpen] = useState(false);
   const [novoServicoOpen, setNovoServicoOpen] = useState(false);
   const [novoServicoForm, setNovoServicoForm] = useState({
@@ -525,7 +525,7 @@ const GerenciaPanel = () => {
         grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Baixo"),
         vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
         dependencia_descricao: null,
-        status: "rascunho",
+        status: updates.status || "rascunho",
       });
       
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual.id, periodAtivo.id] });
@@ -599,12 +599,12 @@ const GerenciaPanel = () => {
     }
   };
 
-  const toggleSelectServico = (servicoId: string) => {
+  const toggleSelectServico = (itemCode: number) => {
     const newSelected = new Set(selectedServicos);
-    if (newSelected.has(servicoId)) {
-      newSelected.delete(servicoId);
+    if (newSelected.has(itemCode)) {
+      newSelected.delete(itemCode);
     } else {
-      newSelected.add(servicoId);
+      newSelected.add(itemCode);
     }
     setSelectedServicos(newSelected);
   };
@@ -613,7 +613,7 @@ const GerenciaPanel = () => {
     if (selectedServicos.size === todos.length) {
       setSelectedServicos(new Set());
     } else {
-      setSelectedServicos(new Set(todos.map(s => s.id).filter(Boolean) as string[]));
+      setSelectedServicos(new Set(todos.map(s => s.item)));
     }
   };
 
@@ -624,9 +624,10 @@ const GerenciaPanel = () => {
 
     setNovoServicoLoading(true);
     try {
-      const proximoItem = servicosData.length > 0
-        ? Math.max(...servicosData.map((s: ServicoItem) => s.item || 0)) + 1
-        : 1;
+      const maxItem = servicosData.length > 0
+        ? Math.max(...servicosData.map((s: ServicoItem) => s.item || 0))
+        : 0;
+      const proximoItem = maxItem < 9000000 ? 9000000 : maxItem + 1;
 
       await createServico({
         periodo_id: periodAtivo.id,
@@ -671,21 +672,13 @@ const GerenciaPanel = () => {
     if (!gerenciaAtual || !periodAtivo) return;
     
     try {
-      const catalogoItemsSet = new Set((servicosCatalogoData as any[]).map(c => c.item));
-
-      const filterFn = selectedOption === "servicos_novos"
-        ? (s: any) => !catalogoItemsSet.has(s.item) && s.status === "rascunho"
-        : (s: any) => catalogoItemsSet.has(s.item) && s.status === "rascunho";
-
-      const servicosParaEnviar = servicosData.filter(filterFn);
-
-      if (servicosParaEnviar.length === 0) {
+      if (selectedServicos.size === 0) {
         setConfirmSendServicosOpen(false);
         return;
       }
 
-      const updates = servicosParaEnviar.map((s: any) => 
-        updateServico(s.id, { status: "enviado" })
+      const updates = Array.from(selectedServicos).map((itemCode: any) => 
+        ensureServico(itemCode, { status: "enviado" })
       );
       
       await Promise.all(updates);
@@ -705,7 +698,7 @@ const GerenciaPanel = () => {
       
       toast({
         title: "Serviços enviados",
-        description: `${servicosParaEnviar.length} serviço(s) enviado(s) para a diretoria com sucesso.`
+        description: `${selectedServicos.size} serviço(s) enviado(s) para a diretoria com sucesso.`
       });
     } catch (error) {
       console.error("Erro ao enviar serviços para diretoria:", error);
@@ -716,7 +709,10 @@ const GerenciaPanel = () => {
   const handleBulkEditServicos = async (updates: any) => {
     setIsBulkUpdating(true);
     try {
-      await updateServicosBulkData(Array.from(selectedServicos), updates);
+      const idsToEdit = Array.from(selectedServicos)
+        .map(itemCode => servicosData.find((s: any) => s.item === itemCode)?.id)
+        .filter(Boolean) as string[];
+      await updateServicosBulkData(idsToEdit, updates);
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       toast({ title: "Serviços atualizados", description: "Os serviços selecionados foram atualizados com sucesso." });
       setBulkEditServicosOpen(false);
@@ -730,7 +726,10 @@ const GerenciaPanel = () => {
   const handleBulkDeleteServicos = async () => {
     if (!confirm("Excluir os serviços selecionados permanentemente?")) return;
     try {
-      await deleteServicosBulk(Array.from(selectedServicos));
+      const idsToDelete = Array.from(selectedServicos)
+        .map(itemCode => servicosData.find((s: any) => s.item === itemCode)?.id)
+        .filter(Boolean) as string[];
+      await deleteServicosBulk(idsToDelete);
       setSelectedServicos(new Set());
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       toast({ title: "Serviços excluídos", description: "Os serviços foram removidos." });
@@ -914,7 +913,7 @@ const GerenciaPanel = () => {
         <div className="relative z-10">
           {/* Top Bar */}
           <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate(`/diretoria/${sigla}`)}>
                 <ArrowLeft className="h-4 w-4" />
                 Voltar
@@ -1001,7 +1000,7 @@ const GerenciaPanel = () => {
         <div className="relative z-10">
           {/* Top Bar */}
           <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
                 <ArrowLeft className="h-4 w-4" />
                 Voltar
@@ -1259,21 +1258,21 @@ const GerenciaPanel = () => {
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full whitespace-nowrap lg:whitespace-normal text-sm md:text-base">
               <thead className="bg-muted/50 border-b">
                 <tr>
                   <th className="p-3 text-left w-10">
                     <Checkbox
-                      checked={paginatedLista.filter(s => !isServicoReadOnly(s)).length > 0 && paginatedLista.filter(s => !isServicoReadOnly(s)).every(s => s.id && selectedServicos.has(s.id!))}
+                      checked={paginatedLista.filter(s => !isServicoReadOnly(s)).length > 0 && paginatedLista.filter(s => !isServicoReadOnly(s)).every(s => selectedServicos.has(s.item))}
                       onCheckedChange={(checked) => {
-                        const editaveis = paginatedLista.filter(s => !isServicoReadOnly(s) && s.id);
+                        const editaveis = paginatedLista.filter(s => !isServicoReadOnly(s));
                         if (checked) {
                           const newSet = new Set(selectedServicos);
-                          editaveis.forEach(s => newSet.add(s.id!));
+                          editaveis.forEach(s => newSet.add(s.item));
                           setSelectedServicos(newSet);
                         } else {
                           const newSet = new Set(selectedServicos);
-                          editaveis.forEach(s => newSet.delete(s.id!));
+                          editaveis.forEach(s => newSet.delete(s.item));
                           setSelectedServicos(newSet);
                         }
                       }}
@@ -1307,9 +1306,9 @@ const GerenciaPanel = () => {
                       >
                         <td className="p-3">
                           <Checkbox
-                            checked={servico.id ? selectedServicos.has(servico.id) : false}
-                            onCheckedChange={() => !readOnly && servico.id && toggleSelectServico(servico.id)}
-                            disabled={readOnly || !servico.id}
+                            checked={selectedServicos.has(servico.item)}
+                            onCheckedChange={() => !readOnly && toggleSelectServico(servico.item)}
+                            disabled={readOnly}
                           />
                         </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
@@ -1645,7 +1644,7 @@ const GerenciaPanel = () => {
               {!isAllSent && servicosEditaveis.length > 0 && (
                 <>
                   <Checkbox
-                    checked={servicosEditaveis.length > 0 && servicosEditaveis.every(s => s.id && selectedServicos.has(s.id!))}
+                    checked={servicosEditaveis.length > 0 && servicosEditaveis.every(s => selectedServicos.has(s.item))}
                     onCheckedChange={() => toggleSelectAllServicos(servicosEditaveis)}
                   />
                   <span className="text-sm text-muted-foreground">
@@ -1701,7 +1700,7 @@ const GerenciaPanel = () => {
 
           {/* Dialog Novo Serviço */}
           <Dialog open={novoServicoOpen} onOpenChange={setNovoServicoOpen}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Adicionar Novo Serviço</DialogTitle>
                 <DialogDescription>
@@ -1834,7 +1833,7 @@ const GerenciaPanel = () => {
 
           {/* Dialog Confirmação Envio Serviços */}
           <Dialog open={confirmSendServicosOpen} onOpenChange={setConfirmSendServicosOpen}>
-            <DialogContent>
+            <DialogContent className="w-[95vw] sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Confirmar envio de Serviços</DialogTitle>
                 <DialogDescription>
@@ -1884,8 +1883,8 @@ const GerenciaPanel = () => {
       </div>
       <div className="relative z-10">
       <div className="px-6 py-3 bg-card border-b">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
               <ArrowLeft className="h-4 w-4" />
               Voltar
@@ -1894,26 +1893,26 @@ const GerenciaPanel = () => {
             <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
             <Badge variant="outline" className="text-xs bg-blue-50">Aquisição</Badge>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             {hasRascunhoItems && !hasApprovedItems && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <Button
                   variant="outline"
-                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10 flex-1 sm:flex-none"
                   onClick={handleBulkDeleteAquisicao}
                   disabled={selectedAquisicaoIds.size === 0}
                 >
                   <Trash2 className="h-4 w-4" />
-                  Excluir Selecionados
+                  Excluir
                 </Button>
 
                 <Button
-                  className="gap-2"
+                  className="gap-2 flex-1 sm:flex-none"
                   disabled={!canSend || selectedAquisicaoIds.size === 0}
                   onClick={() => setConfirmSendOpen(true)}
                 >
                   <Send className="h-4 w-4" />
-                  Enviar Selecionados ({selectedAquisicaoIds.size})
+                  Enviar ({selectedAquisicaoIds.size})
                 </Button>
               </div>
             )}
@@ -2077,7 +2076,7 @@ const GerenciaPanel = () => {
               </span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full whitespace-nowrap lg:whitespace-normal text-sm md:text-base">
                 <thead className="bg-muted/50 border-b">
                   <tr>
                     <th className="p-3 text-left w-10">
@@ -2283,7 +2282,7 @@ const GerenciaPanel = () => {
 
       {/* Confirm Send Dialog */}
       <Dialog open={confirmSendOpen} onOpenChange={setConfirmSendOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmar Envio</DialogTitle>
             <DialogDescription>

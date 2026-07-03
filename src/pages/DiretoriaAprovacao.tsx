@@ -1395,10 +1395,10 @@ const DiretoriaAprovacao = () => {
 
     setNovoServicoLoading(true);
     try {
-      const proximoItem =
-        servicosData.length > 0
-          ? Math.max(...servicosData.map((s: any) => s.item || 0)) + 1
-          : 1;
+      const maxItem = servicosData.length > 0
+        ? Math.max(...servicosData.map((s: any) => s.item || 0))
+        : 0;
+      const proximoItem = maxItem < 9000000 ? 9000000 : maxItem + 1;
 
       await createServico({
         periodo_id: periodAtivo.id,
