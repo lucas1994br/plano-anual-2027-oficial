@@ -61,7 +61,7 @@ import {
   updateServicosBulkData,
   getServicosCatalogo,
 } from "@/lib/services";
-import { getBudgetOwnerDiretoriaId, getGerenciaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
+import { getBudgetOwnerDiretoriaId, getGerenciaBudget, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -277,14 +277,14 @@ const GerenciaPanel = () => {
     return { totalPages, currentPage, paginatedItems };
   }, [filteredItems, currentPage]);
 
-  const orcamentoGerenciaAquisicao = gerenciaAtual?.id
-    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "aquisicao")
+  const orcamentoDiretoriaAquisicao = diretoria?.id
+    ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "aquisicao")
     : 0;
-  const orcamentoGerenciaServicosNovos = gerenciaAtual?.id
-    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "servicos_novos")
+  const orcamentoDiretoriaServicosNovos = diretoria?.id
+    ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "servicos_novos")
     : 0;
-  const orcamentoGerenciaServicosExistentes = gerenciaAtual?.id
-    ? getGerenciaBudget(orcamentoConfig as AdminBudgetConfig | null, gerenciaAtual.id, "servicos_existentes")
+  const orcamentoDiretoriaServicosExistentes = diretoria?.id
+    ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoGerencia = useMemo(
     () =>
@@ -1550,8 +1550,8 @@ const GerenciaPanel = () => {
           <SummaryCards totalItens={servicosSummary.totalItens} valorTotal={servicosSummary.valorTotal} />
 
           <BudgetConsumptionCard
-            titulo={`Orçamento da Gerência ${gerenciaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
-            orcamento={selectedOption === "servicos_existentes" ? orcamentoGerenciaServicosExistentes : orcamentoGerenciaServicosNovos}
+            titulo={`Orçamento da Diretoria ${diretoria?.sigla} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
+            orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
             gasto={displayedServicos.reduce(
               (acc, servico) =>
                 acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
@@ -1940,8 +1940,8 @@ const GerenciaPanel = () => {
       <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
 
       <BudgetConsumptionCard
-        titulo={`Orçamento da Gerência ${gerenciaUpper} (aquisição)`}
-        orcamento={orcamentoGerenciaAquisicao}
+        titulo={`Orçamento da Diretoria ${diretoria?.sigla} (aquisição)`}
+        orcamento={orcamentoDiretoriaAquisicao}
         gasto={gastoAquisicaoGerencia}
       />
 
