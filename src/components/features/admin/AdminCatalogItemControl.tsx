@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -134,14 +136,14 @@ export function AdminCatalogItemControl() {
   }, [filteredItens, currentPage]);
 
   const summary = useMemo(() => {
-    // Calculamos o total de itens e, opcionalmente, a média do valor unitário, mas o SummaryCards espera "valorTotal"
     const totalItens = itens.length;
     const somaValores = (itens as ItemCatalogo[]).reduce((acc, item) => acc + (item.valor_unitario || 0), 0);
     const mediaValor = totalItens > 0 ? somaValores / totalItens : 0;
     
     return {
       totalItens,
-      valorTotal: mediaValor, // Estamos usando o slot de valorTotal para mostrar a Média no caso de itens
+      mediaValor,
+      somaTotal: somaValores,
     };
   }, [itens]);
 
@@ -314,6 +316,63 @@ export function AdminCatalogItemControl() {
     );
   };
 
+  const handleExportExcel = async () => {
+    // @ts-ignore
+    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
+    const XLSX = xlsxModule.default ?? xlsxModule;
+    const wb = XLSX.utils.book_new();
+    const wsData: any[][] = [];
+
+    wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Aquisições`]);
+    wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
+    wsData.push([]);
+    wsData.push(["Código", "Descrição", "Categoria", "Unidade", "Valor Unitário"]);
+
+    (filteredItens as any[]).forEach((item) => {
+      wsData.push([
+        item.codigo,
+        item.descricao,
+        item.categoria,
+        item.unidade,
+        item.valor_unitario
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [{ wch: 10 }, { wch: 45 }, { wch: 20 }, { wch: 10 }, { wch: 15 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Catálogo");
+    XLSX.writeFile(wb, `PAC_2027_Catalogo_Aquisicoes_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF({ orientation: "portrait", format: "a4" });
+    doc.setFontSize(14);
+    doc.text(`PAC 2027 — Catálogo de Aquisições`, 14, 18);
+    doc.setFontSize(9);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
+    
+    const formatCurrency = (value?: number) =>
+      value != null
+        ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
+        : "—";
+
+    autoTable(doc, {
+      head: [["Cód.", "Descrição", "Categoria", "Unid.", "Valor Unit."]],
+      body: (filteredItens as any[]).map((item) => [
+        item.codigo,
+        item.descricao.length > 60 ? item.descricao.substring(0, 60) + "…" : item.descricao,
+        item.categoria,
+        item.unidade,
+        formatCurrency(item.valor_unitario),
+      ]) as any,
+      startY: 30,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 247, 254] },
+    });
+    doc.save(`PAC_2027_Catalogo_Aquisicoes_${new Date().toISOString().split("T")[0]}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Card principal com botão Novo Item */}
@@ -334,7 +393,7 @@ export function AdminCatalogItemControl() {
       </Card>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600 rounded-l-lg"></div>
           <p className="text-sm text-muted-foreground font-medium z-10">Total de Itens</p>
@@ -344,7 +403,14 @@ export function AdminCatalogItemControl() {
           <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 rounded-l-lg"></div>
           <p className="text-sm text-muted-foreground font-medium z-10">Média do Valor Unitário</p>
           <p className="text-2xl font-bold text-slate-800 z-10 mt-1">
-            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(summary.valorTotal)}
+            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(summary.mediaValor)}
+          </p>
+        </Card>
+        <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
+          <div className="absolute top-0 left-0 w-1 h-full bg-green-500 rounded-l-lg"></div>
+          <p className="text-sm text-muted-foreground font-medium z-10">Soma</p>
+          <p className="text-2xl font-bold text-slate-800 z-10 mt-1">
+            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(summary.somaTotal)}
           </p>
         </Card>
       </div>
@@ -366,6 +432,26 @@ export function AdminCatalogItemControl() {
                   setSelectedIds([]);
                 }}
               />
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportExcel}
+                disabled={filteredItens.length === 0}
+              >
+                <FileSpreadsheet className="h-4 w-4" />Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportPDF}
+                disabled={filteredItens.length === 0}
+              >
+                <FileDown className="h-4 w-4" />PDF
+              </Button>
             </div>
             {selectedIds.length > 0 && (
               <>

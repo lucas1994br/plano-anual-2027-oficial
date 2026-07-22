@@ -708,6 +708,8 @@ export async function getAdminMiniErpConfigDb() {
   const gerenciaBudgetsServicos: Record<string, number> = {};
   const gerenciaBudgetsServicosNovos: Record<string, number> = {};
   const gerenciaBudgetsServicosExistentes: Record<string, number> = {};
+  const diretoriaBudgetsOrcamentoGeral: Record<string, number> = {};
+  const gerenciaBudgetsOrcamentoGeral: Record<string, number> = {};
 
   (orcamentos || []).forEach(
     (row: {
@@ -722,6 +724,7 @@ export async function getAdminMiniErpConfigDb() {
 
       if (escopo === "diretoria") {
         if (tipo === "aquisicao") diretoriaBudgetsAquisicao[row.referencia_id] = valor;
+        if (tipo === "orcamento_geral") diretoriaBudgetsOrcamentoGeral[row.referencia_id] = valor;
         if (tipo === "servicos") {
           // As servicos_novos uses the real UUID, and servicos_existentes uses the faked UUID
           // We will resolve this after gathering all rows because we need the list of real UUIDs.
@@ -732,6 +735,7 @@ export async function getAdminMiniErpConfigDb() {
 
       if (escopo === "gerencia") {
         if (tipo === "aquisicao") gerenciaBudgetsAquisicao[row.referencia_id] = valor;
+        if (tipo === "orcamento_geral") gerenciaBudgetsOrcamentoGeral[row.referencia_id] = valor;
         if (tipo === "servicos") {
           gerenciaBudgetsServicosNovos[row.referencia_id] = valor;
         }
@@ -791,10 +795,12 @@ export async function getAdminMiniErpConfigDb() {
     diretoriaBudgetsServicos,
     diretoriaBudgetsServicosNovos,
     diretoriaBudgetsServicosExistentes,
+    diretoriaBudgetsOrcamentoGeral,
     gerenciaBudgetsAquisicao,
     gerenciaBudgetsServicos,
     gerenciaBudgetsServicosNovos,
     gerenciaBudgetsServicosExistentes,
+    gerenciaBudgetsOrcamentoGeral,
     routingRules,
     updatedAt: new Date().toISOString(),
   };
@@ -807,10 +813,12 @@ export async function saveAdminMiniErpConfigDb(config: {
   diretoriaBudgetsServicos: Record<string, number>;
   diretoriaBudgetsServicosNovos: Record<string, number>;
   diretoriaBudgetsServicosExistentes: Record<string, number>;
+  diretoriaBudgetsOrcamentoGeral?: Record<string, number>;
   gerenciaBudgetsAquisicao: Record<string, number>;
   gerenciaBudgetsServicos: Record<string, number>;
   gerenciaBudgetsServicosNovos: Record<string, number>;
   gerenciaBudgetsServicosExistentes: Record<string, number>;
+  gerenciaBudgetsOrcamentoGeral?: Record<string, number>;
   routingRules: Record<string, RoutingRule>;
 }): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");

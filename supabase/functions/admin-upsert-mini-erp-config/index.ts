@@ -21,7 +21,7 @@ async function hashCode(code: string) {
 
 function toBudgetRows(
   escopo: "diretoria" | "gerencia",
-  tipo: "aquisicao" | "servicos",
+  tipo: "aquisicao" | "servicos" | "orcamento_geral",
   values: Record<string, number>,
 ) {
   return Object.entries(values || {}).map(([referenciaId, valor]) => ({
@@ -136,9 +136,11 @@ serve(async (req: Request) => {
       ...toBudgetRows("diretoria", "aquisicao", config.diretoriaBudgetsAquisicao || {}),
       ...toBudgetRows("diretoria", "servicos", config.diretoriaBudgetsServicosNovos || config.diretoriaBudgetsServicos || {}),
       ...toBudgetRows("diretoria", "servicos", configExistentesDir),
+      ...toBudgetRows("diretoria", "orcamento_geral", config.diretoriaBudgetsOrcamentoGeral || {}),
       ...toBudgetRows("gerencia", "aquisicao", config.gerenciaBudgetsAquisicao || {}),
       ...toBudgetRows("gerencia", "servicos", config.gerenciaBudgetsServicosNovos || config.gerenciaBudgetsServicos || {}),
       ...toBudgetRows("gerencia", "servicos", configExistentesGer),
+      ...toBudgetRows("gerencia", "orcamento_geral", config.gerenciaBudgetsOrcamentoGeral || {}),
     ];
 
     const budgetRows = rawBudgetRows.filter((row) => {

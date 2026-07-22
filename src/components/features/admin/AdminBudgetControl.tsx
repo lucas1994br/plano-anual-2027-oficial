@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Save, Waypoints, Wallet, Building2, CheckCircle2, TrendingUp, ChevronRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -69,12 +69,14 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
   const [gerenciaBudgetsServicos, setGerenciaBudgetsServicos] = useState<Record<string, number>>({});
   const [gerenciaBudgetsServicosNovos, setGerenciaBudgetsServicosNovos] = useState<Record<string, number>>({});
   const [gerenciaBudgetsServicosExistentes, setGerenciaBudgetsServicosExistentes] = useState<Record<string, number>>({});
+  const [diretoriaBudgetsOrcamentoGeral, setDiretoriaBudgetsOrcamentoGeral] = useState<Record<string, number>>({});
+  const [gerenciaBudgetsOrcamentoGeral, setGerenciaBudgetsOrcamentoGeral] = useState<Record<string, number>>({});
 
   const [routingRules, setRoutingRules] = useState<Record<string, RoutingRule>>({});
   const [categoryBudgetOwners, setCategoryBudgetOwners] = useState<Record<string, string>>({});
   
   const [selectedDirId, setSelectedDirId] = useState<string | null>(diretorias[0]?.id || null);
-  const [activeTab, setActiveTab] = useState<"aquisicao" | "servicos_novos" | "servicos_existentes">("aquisicao");
+  const [activeTab, setActiveTab] = useState<"aquisicao" | "servicos_novos" | "servicos_existentes" | "orcamento_geral">("aquisicao");
   const [isSaving, setIsSaving] = useState(false);
 
   const { data: gerencias = [], isLoading: isLoadingGerencias } = useQuery({
@@ -123,16 +125,19 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
     const dirServicos: Record<string, number> = {};
     const dirServicosNovos: Record<string, number> = {};
     const dirServicosExistentes: Record<string, number> = {};
+    const dirOrcamentoGeral: Record<string, number> = {};
     const gerAquisicao: Record<string, number> = {};
     const gerServicos: Record<string, number> = {};
     const gerServicosNovos: Record<string, number> = {};
     const gerServicosExistentes: Record<string, number> = {};
+    const gerOrcamentoGeral: Record<string, number> = {};
 
     diretorias.forEach(dir => {
         dirAquisicao[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsAquisicao?.[dir.id] || 0;
         dirServicos[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicos?.[dir.id] || 0;
         dirServicosNovos[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicosNovos?.[dir.id] || 0;
         dirServicosExistentes[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsServicosExistentes?.[dir.id] || 0;
+        dirOrcamentoGeral[dir.id] = (miniConfigFromDb as any)?.diretoriaBudgetsOrcamentoGeral?.[dir.id] || 0;
     });
 
     gerencias.forEach(ger => {
@@ -140,16 +145,19 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
         gerServicos[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicos?.[ger.id] || 0;
         gerServicosNovos[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicosNovos?.[ger.id] || 0;
         gerServicosExistentes[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsServicosExistentes?.[ger.id] || 0;
+        gerOrcamentoGeral[ger.id] = (miniConfigFromDb as any)?.gerenciaBudgetsOrcamentoGeral?.[ger.id] || 0;
     });
 
     setDiretoriaBudgetsAquisicao(dirAquisicao);
     setDiretoriaBudgetsServicos(dirServicos);
     setDiretoriaBudgetsServicosNovos(dirServicosNovos);
     setDiretoriaBudgetsServicosExistentes(dirServicosExistentes);
+    setDiretoriaBudgetsOrcamentoGeral(dirOrcamentoGeral);
     setGerenciaBudgetsAquisicao(gerAquisicao);
     setGerenciaBudgetsServicos(gerServicos);
     setGerenciaBudgetsServicosNovos(gerServicosNovos);
     setGerenciaBudgetsServicosExistentes(gerServicosExistentes);
+    setGerenciaBudgetsOrcamentoGeral(gerOrcamentoGeral);
 
     const defaultRules = gerencias.reduce<Record<string, RoutingRule>>((acc, ger) => {
       acc[ger.id] = ((miniConfigFromDb as any)?.routingRules?.[ger.id]) ?? saved?.routingRules?.[ger.id] ?? {
@@ -188,7 +196,11 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
   const totalGerenciasServicosExistentes = useMemo(() => Object.values(gerenciaBudgetsServicosExistentes).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsServicosExistentes]);
   const fundoGlobalServicosExistentes = totalDiretoriasServicosExistentes + totalGerenciasServicosExistentes;
 
-  const fundoGlobalAcumulado = fundoGlobalAquisicao + fundoGlobalServicosNovos + fundoGlobalServicosExistentes;
+  const totalDiretoriasOrcamentoGeral = useMemo(() => Object.values(diretoriaBudgetsOrcamentoGeral).reduce((acc, v) => acc + v, 0), [diretoriaBudgetsOrcamentoGeral]);
+  const totalGerenciasOrcamentoGeral = useMemo(() => Object.values(gerenciaBudgetsOrcamentoGeral).reduce((acc, v) => acc + v, 0), [gerenciaBudgetsOrcamentoGeral]);
+  const fundoGlobalOrcamentoGeral = totalDiretoriasOrcamentoGeral + totalGerenciasOrcamentoGeral;
+
+  const fundoGlobalAcumulado = fundoGlobalAquisicao + fundoGlobalServicosNovos + fundoGlobalServicosExistentes + fundoGlobalOrcamentoGeral;
 
   const handleSaveConfig = async () => {
     setIsSaving(true);
@@ -201,10 +213,12 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
           diretoriaBudgetsServicos,
           diretoriaBudgetsServicosNovos,
           diretoriaBudgetsServicosExistentes,
+          diretoriaBudgetsOrcamentoGeral,
           gerenciaBudgetsAquisicao,
           gerenciaBudgetsServicos,
           gerenciaBudgetsServicosNovos,
           gerenciaBudgetsServicosExistentes,
+          gerenciaBudgetsOrcamentoGeral,
           routingRules
       });
       
@@ -236,18 +250,24 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
   const repassadoGerenciasServicosExistentes = gerenciasOfSelectedDir.reduce((acc, g) => acc + (gerenciaBudgetsServicosExistentes[g.id] || 0), 0);
   const fundoDCServicosExistentes = retidoDirServicosExistentes + repassadoGerenciasServicosExistentes;
 
-  const currentFundo = activeTab === "aquisicao" ? fundoDCAquisicao : (activeTab === "servicos_novos" ? fundoDCServicosNovos : fundoDCServicosExistentes);
-  const currentRetido = activeTab === "aquisicao" ? retidoDirAquisicao : (activeTab === "servicos_novos" ? retidoDirServicosNovos : retidoDirServicosExistentes);
-  const currentRepassado = activeTab === "aquisicao" ? repassadoGerenciasAquisicao : (activeTab === "servicos_novos" ? repassadoGerenciasServicosNovos : repassadoGerenciasServicosExistentes);
-  const currentGerenciaBudgets = activeTab === "aquisicao" ? gerenciaBudgetsAquisicao : (activeTab === "servicos_novos" ? gerenciaBudgetsServicosNovos : gerenciaBudgetsServicosExistentes);
+  const retidoDirOrcamentoGeral = diretoriaBudgetsOrcamentoGeral[selectedDir?.id || ""] || 0;
+  const repassadoGerenciasOrcamentoGeral = gerenciasOfSelectedDir.reduce((acc, g) => acc + (gerenciaBudgetsOrcamentoGeral[g.id] || 0), 0);
+  const fundoDCOrcamentoGeral = retidoDirOrcamentoGeral + repassadoGerenciasOrcamentoGeral;
+
+  const currentFundo = activeTab === "aquisicao" ? fundoDCAquisicao : (activeTab === "servicos_novos" ? fundoDCServicosNovos : (activeTab === "servicos_existentes" ? fundoDCServicosExistentes : fundoDCOrcamentoGeral));
+  const currentRetido = activeTab === "aquisicao" ? retidoDirAquisicao : (activeTab === "servicos_novos" ? retidoDirServicosNovos : (activeTab === "servicos_existentes" ? retidoDirServicosExistentes : retidoDirOrcamentoGeral));
+  const currentRepassado = activeTab === "aquisicao" ? repassadoGerenciasAquisicao : (activeTab === "servicos_novos" ? repassadoGerenciasServicosNovos : (activeTab === "servicos_existentes" ? repassadoGerenciasServicosExistentes : repassadoGerenciasOrcamentoGeral));
+  const currentGerenciaBudgets = activeTab === "aquisicao" ? gerenciaBudgetsAquisicao : (activeTab === "servicos_novos" ? gerenciaBudgetsServicosNovos : (activeTab === "servicos_existentes" ? gerenciaBudgetsServicosExistentes : gerenciaBudgetsOrcamentoGeral));
   
   const handleRetidoChange = (val: number) => {
       if (activeTab === "aquisicao") {
           setDiretoriaBudgetsAquisicao(prev => ({ ...prev, [selectedDir.id]: val }));
       } else if (activeTab === "servicos_novos") {
           setDiretoriaBudgetsServicosNovos(prev => ({ ...prev, [selectedDir.id]: val }));
-      } else {
+      } else if (activeTab === "servicos_existentes") {
           setDiretoriaBudgetsServicosExistentes(prev => ({ ...prev, [selectedDir.id]: val }));
+      } else {
+          setDiretoriaBudgetsOrcamentoGeral(prev => ({ ...prev, [selectedDir.id]: val }));
       }
   };
 
@@ -256,8 +276,10 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
           setGerenciaBudgetsAquisicao(prev => ({ ...prev, [gerId]: val }));
       } else if (activeTab === "servicos_novos") {
           setGerenciaBudgetsServicosNovos(prev => ({ ...prev, [gerId]: val }));
-      } else {
+      } else if (activeTab === "servicos_existentes") {
           setGerenciaBudgetsServicosExistentes(prev => ({ ...prev, [gerId]: val }));
+      } else {
+          setGerenciaBudgetsOrcamentoGeral(prev => ({ ...prev, [gerId]: val }));
       }
   };
 
@@ -321,6 +343,12 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
             <p className="text-[10px] font-bold tracking-widest text-teal-600/70 uppercase mb-2">Fundos: Serv. Existentes</p>
             <p className="text-xl font-bold text-teal-800 tracking-tight">{formatCurrency(fundoGlobalServicosExistentes)}</p>
         </Card>
+
+        <Card className="p-6 rounded-2xl shadow-sm border-0 ring-1 ring-purple-100 bg-purple-50 relative overflow-hidden md:col-span-4 lg:col-span-1">
+            <div className="h-1.5 w-16 bg-purple-500/40 rounded-full absolute bottom-6 left-6"></div>
+            <p className="text-[10px] font-bold tracking-widest text-purple-600/70 uppercase mb-2">Fundos: Orçamento Geral</p>
+            <p className="text-xl font-bold text-purple-800 tracking-tight">{formatCurrency(fundoGlobalOrcamentoGeral)}</p>
+        </Card>
       </div>
 
       {/* Main Layout Area */}
@@ -372,6 +400,12 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                         >
                             Serviços Existentes
                         </TabsTrigger>
+                        <TabsTrigger 
+                            value="orcamento_geral" 
+                            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-purple-600 rounded-none px-2 py-3 text-sm font-semibold text-slate-500 data-[state=active]:text-purple-700 transition-none"
+                        >
+                            Orçamento Geral
+                        </TabsTrigger>
                     </TabsList>
                 </div>
 
@@ -381,14 +415,14 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
                             <div className="flex items-start justify-between mb-8 pb-8 border-b border-slate-100">
                                 <div>
                                     <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                        <Waypoints className={cn("h-5 w-5", activeTab === "aquisicao" ? "text-blue-500" : "text-emerald-500")} />
+                                        <Waypoints className={cn("h-5 w-5", activeTab === "aquisicao" ? "text-blue-500" : (activeTab === "servicos_novos" ? "text-emerald-500" : (activeTab === "servicos_existentes" ? "text-teal-500" : "text-purple-500")))} />
                                         Pirâmide de Repasses
                                     </h3>
                                     <p className="text-sm text-slate-500 mt-1">Configure o fundo total da {selectedDir.sigla} e distribua os repasses.</p>
                                 </div>
                                 <div className="text-right">
                                     <p className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-1">Fundo {selectedDir.sigla}</p>
-                                    <p className={cn("text-3xl font-black tracking-tight", activeTab === "aquisicao" ? "text-slate-800" : (activeTab === "servicos_novos" ? "text-emerald-600" : "text-teal-600"))}>
+                                    <p className={cn("text-3xl font-black tracking-tight", activeTab === "aquisicao" ? "text-slate-800" : (activeTab === "servicos_novos" ? "text-emerald-600" : (activeTab === "servicos_existentes" ? "text-teal-600" : "text-purple-600")))}>
                                         {formatCurrency(currentFundo)}
                                     </p>
                                 </div>

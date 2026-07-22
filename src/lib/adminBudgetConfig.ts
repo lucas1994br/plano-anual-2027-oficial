@@ -8,10 +8,12 @@ export interface AdminBudgetConfig {
   diretoriaBudgetsServicos?: Record<string, number>;
   diretoriaBudgetsServicosNovos?: Record<string, number>;
   diretoriaBudgetsServicosExistentes?: Record<string, number>;
+  diretoriaBudgetsOrcamentoGeral?: Record<string, number>;
   gerenciaBudgetsAquisicao?: Record<string, number>;
   gerenciaBudgetsServicos?: Record<string, number>;
   gerenciaBudgetsServicosNovos?: Record<string, number>;
   gerenciaBudgetsServicosExistentes?: Record<string, number>;
+  gerenciaBudgetsOrcamentoGeral?: Record<string, number>;
   // Legado
   diretoriaBudgets?: Record<string, number>;
   gerenciaBudgets?: Record<string, number>;
@@ -79,19 +81,21 @@ export function getDiretoriaBudget(
 ) {
   if (!config) return 0;
 
-  if (tipo === "aquisicao") {
-    return config.diretoriaBudgetsAquisicao?.[diretoriaId] ?? config.diretoriaBudgets?.[diretoriaId] ?? 0;
-  }
+  const baseBudget = (() => {
+    if (tipo === "aquisicao") {
+      return config.diretoriaBudgetsAquisicao?.[diretoriaId] ?? config.diretoriaBudgets?.[diretoriaId] ?? 0;
+    }
+    if (tipo === "servicos_novos") {
+      return config.diretoriaBudgetsServicosNovos?.[diretoriaId] ?? 0;
+    }
+    if (tipo === "servicos_existentes") {
+      return config.diretoriaBudgetsServicosExistentes?.[diretoriaId] ?? 0;
+    }
+    return config.diretoriaBudgetsServicos?.[diretoriaId] ?? 0;
+  })();
 
-  if (tipo === "servicos_novos") {
-    return config.diretoriaBudgetsServicosNovos?.[diretoriaId] ?? 0;
-  }
-
-  if (tipo === "servicos_existentes") {
-    return config.diretoriaBudgetsServicosExistentes?.[diretoriaId] ?? 0;
-  }
-
-  return config.diretoriaBudgetsServicos?.[diretoriaId] ?? 0;
+  const geralBudget = config.diretoriaBudgetsOrcamentoGeral?.[diretoriaId] ?? 0;
+  return baseBudget + geralBudget;
 }
 
 export function getGerenciaBudget(
@@ -101,17 +105,19 @@ export function getGerenciaBudget(
 ) {
   if (!config) return 0;
 
-  if (tipo === "aquisicao") {
-    return config.gerenciaBudgetsAquisicao?.[gerenciaId] ?? config.gerenciaBudgets?.[gerenciaId] ?? 0;
-  }
+  const baseBudget = (() => {
+    if (tipo === "aquisicao") {
+      return config.gerenciaBudgetsAquisicao?.[gerenciaId] ?? config.gerenciaBudgets?.[gerenciaId] ?? 0;
+    }
+    if (tipo === "servicos_novos") {
+      return config.gerenciaBudgetsServicosNovos?.[gerenciaId] ?? 0;
+    }
+    if (tipo === "servicos_existentes") {
+      return config.gerenciaBudgetsServicosExistentes?.[gerenciaId] ?? 0;
+    }
+    return config.gerenciaBudgetsServicos?.[gerenciaId] ?? 0;
+  })();
 
-  if (tipo === "servicos_novos") {
-    return config.gerenciaBudgetsServicosNovos?.[gerenciaId] ?? 0;
-  }
-
-  if (tipo === "servicos_existentes") {
-    return config.gerenciaBudgetsServicosExistentes?.[gerenciaId] ?? 0;
-  }
-
-  return config.gerenciaBudgetsServicos?.[gerenciaId] ?? 0;
+  const geralBudget = config.gerenciaBudgetsOrcamentoGeral?.[gerenciaId] ?? 0;
+  return baseBudget + geralBudget;
 }

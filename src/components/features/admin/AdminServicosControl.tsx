@@ -1,9 +1,11 @@
 // deno-lint-ignore-file no-explicit-any
 // AdminServicosControl.tsx - Versão CORRIGIDA SEM ANY
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -244,10 +246,17 @@ export function AdminServicosControl() {
     return { totalPages, currentPage, paginatedItems, totalFiltered: filteredServicos.length };
   }, [filteredServicos, currentPage]);
 
-  const summary = useMemo(() => ({
-    totalItens: servicos.length,
-    valorTotal: (servicos as ServicoCatalogo[]).reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0),
-  }), [servicos]);
+  const summary = useMemo(() => {
+    const totalItens = servicos.length;
+    const somaValores = (servicos as ServicoCatalogo[]).reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0);
+    const mediaValor = totalItens > 0 ? somaValores / totalItens : 0;
+    
+    return {
+      totalItens,
+      mediaValor,
+      somaTotal: somaValores,
+    };
+  }, [servicos]);
 
   const resetForm = () => {
     setFormData({
@@ -475,6 +484,68 @@ export function AdminServicosControl() {
     return ger?.sigla || gerenciaId.slice(0, 8);
   };
 
+  const handleExportExcel = async () => {
+    // @ts-ignore
+    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
+    const XLSX = xlsxModule.default ?? xlsxModule;
+    const wb = XLSX.utils.book_new();
+    const wsData: any[][] = [];
+
+    wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Serviços`]);
+    wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
+    wsData.push([]);
+    wsData.push(["Item", "Objeto", "Tipo", "Prioridade", "Estimativa Valor", "Vinculação", "Diretoria", "Gerência", "Status"]);
+
+    (filteredServicos as any[]).forEach((s) => {
+      wsData.push([
+        s.item,
+        s.objeto,
+        s.tipo_contratacao,
+        s.grau_prioridade,
+        s.estimativa_valor,
+        s.vinculacao,
+        getDiretoriaSigla(s.diretoria_id),
+        getGerenciaSigla(s.gerencia_id),
+        s.ativo ? "Ativo" : "Inativo"
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [{ wch: 10 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Serviços");
+    XLSX.writeFile(wb, `PAC_2027_Catalogo_Servicos_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+    doc.setFontSize(14);
+    doc.text(`PAC 2027 — Catálogo de Serviços`, 14, 18);
+    doc.setFontSize(9);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
+    
+    const formatCurrency = (value?: number) =>
+      value != null
+        ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
+        : "—";
+
+    autoTable(doc, {
+      head: [["Item", "Objeto", "Tipo", "Estimativa", "Diretoria", "Gerência"]],
+      body: (filteredServicos as any[]).map((s) => [
+        s.item,
+        s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
+        s.tipo_contratacao,
+        formatCurrency(s.estimativa_valor),
+        getDiretoriaSigla(s.diretoria_id),
+        getGerenciaSigla(s.gerencia_id),
+      ]) as any,
+      startY: 30,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [22, 163, 74], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 250, 246] },
+    });
+    doc.save(`PAC_2027_Catalogo_Servicos_${new Date().toISOString().split("T")[0]}.pdf`);
+  };
+
   const getPrioridadeColor = (prioridade: GrauPrioridade): string => {
     const colors: Record<GrauPrioridade, string> = {
       "Baixo": "bg-blue-100 text-blue-800",
@@ -504,7 +575,27 @@ export function AdminServicosControl() {
       </Card>
 
       {/* KPI Cards */}
-      <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
+          <div className="absolute top-0 left-0 w-1 h-full bg-blue-600 rounded-l-lg"></div>
+          <p className="text-sm text-muted-foreground font-medium z-10">Total de Serviços</p>
+          <p className="text-3xl font-bold text-slate-800 z-10 mt-1">{summary.totalItens}</p>
+        </Card>
+        <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
+          <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 rounded-l-lg"></div>
+          <p className="text-sm text-muted-foreground font-medium z-10">Média de Valor</p>
+          <p className="text-2xl font-bold text-slate-800 z-10 mt-1">
+            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(summary.mediaValor)}
+          </p>
+        </Card>
+        <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
+          <div className="absolute top-0 left-0 w-1 h-full bg-green-500 rounded-l-lg"></div>
+          <p className="text-sm text-muted-foreground font-medium z-10">Soma Total</p>
+          <p className="text-2xl font-bold text-slate-800 z-10 mt-1">
+            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(summary.somaTotal)}
+          </p>
+        </Card>
+      </div>
 
       {/* Lista de Serviços */}
       <Card className="p-6 card-shadow">
@@ -523,6 +614,26 @@ export function AdminServicosControl() {
                   setSelectedIds([]);
                 }}
               />
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportExcel}
+                disabled={filteredServicos.length === 0}
+              >
+                <FileSpreadsheet className="h-4 w-4" />Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleExportPDF}
+                disabled={filteredServicos.length === 0}
+              >
+                <FileDown className="h-4 w-4" />PDF
+              </Button>
             </div>
             {selectedIds.length > 0 && (
               <>
