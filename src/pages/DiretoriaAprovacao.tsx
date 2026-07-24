@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
+import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode";
 import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -287,9 +288,12 @@ const DiretoriaAprovacao = () => {
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
       .map((s: any) => {
-        const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0)
-          ? s.categoria
-          : "diversos";
+        const mappedCategory = MATERIAL_DESCRIPTION_BY_CODE[String(s.codigo)];
+        const categoriaItem = mappedCategory
+          ? mappedCategory
+          : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
+            ? s.categoria
+            : "diversos";
         const diretoriaOrcamentariaIdRaw = getBudgetOwnerDiretoriaId(
           orcamentoConfig,
           categoriaItem,

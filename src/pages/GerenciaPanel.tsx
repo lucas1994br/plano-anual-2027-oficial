@@ -67,6 +67,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
 import { resolveGerenciaNome } from "@/data/gerencias";
+import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode";
 
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string): string | null => {
@@ -217,9 +218,12 @@ const GerenciaPanel = () => {
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
     return solicitacoes.map((s: any) => {
-      const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0)
-        ? s.categoria
-        : "diversos";
+      const mappedCategory = MATERIAL_DESCRIPTION_BY_CODE[String(s.codigo)];
+      const categoriaItem = mappedCategory
+        ? mappedCategory
+        : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
+          ? s.categoria
+          : "diversos";
       const diretoriaOrcamentariaId = diretoria
         ? getBudgetOwnerDiretoriaId(orcamentoConfig, categoriaItem, diretoria.id, categoryBudgetOwnersFromDb)
         : s.diretoria_id;
@@ -306,7 +310,7 @@ const GerenciaPanel = () => {
       items
         .filter((item) => item.qtdEstimada > 0)
         .forEach((item) => {
-          const siglaDestino = item.diretoriaOrcamentariaSigla || diretoria?.sigla || "N/D";
+          const siglaDestino = diretoria?.sigla || "N/D";
           const atual = grupos.get(siglaDestino) || { sigla: siglaDestino, total: 0, itens: 0 };
           atual.total += item.qtdEstimada * item.valorUnitario;
           atual.itens += 1;
@@ -322,7 +326,7 @@ const GerenciaPanel = () => {
       items
         .filter((item) => item.qtdEstimada > 0 && item.status === "rascunho")
         .forEach((item) => {
-          const siglaDestino = item.diretoriaOrcamentariaSigla || diretoria?.sigla || "N/D";
+          const siglaDestino = diretoria?.sigla || "N/D";
           const atual = grupos.get(siglaDestino) || { sigla: siglaDestino, total: 0, itens: 0 };
           atual.total += item.qtdEstimada * item.valorUnitario;
           atual.itens += 1;
