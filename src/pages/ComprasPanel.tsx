@@ -192,10 +192,7 @@ const ComprasPanel = () => {
   });
 
   const getSelectedAquisicaoDbIds = () => {
-    return Array.from(selectedItems).map(idStr => {
-      const item = allApprovedItems.find(i => String(i.codigo) === idStr);
-      return item?.id;
-    }).filter(Boolean) as string[];
+    return Array.from(selectedItems) as string[];
   };
 
   const handleBulkEditAquisicao = async (updates: any) => {

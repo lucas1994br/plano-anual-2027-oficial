@@ -66,7 +66,9 @@ const DiretoriaAprovacao = () => {
   const [ownPrioridade, setOwnPrioridade] = useState("todas");
   const [ownGerenciaId, setOwnGerenciaId] = useState<string>("diretoria");
   const [ownShowOnlyComQuantidade, setOwnShowOnlyComQuantidade] = useState(false);
+  const [ownShowOnlyZerados, setOwnShowOnlyZerados] = useState(false);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
+  const [showOnlyZerados, setShowOnlyZerados] = useState(false);
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -421,11 +423,14 @@ const DiretoriaAprovacao = () => {
     if (selectedCategoria !== "todas") {
       filtered = filtered.filter((i) => i.categoria === selectedCategoria);
     }
+    if (showOnlyZerados) {
+      filtered = filtered.filter((i) => i.qtdEstimada === 0);
+    }
     if (showOnlyComQuantidade) {
       filtered = filtered.filter((i) => i.qtdEstimada > 0);
     }
     return filtered;
-  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
+  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados]);
 
   const recebidosTabCounts = useMemo(() => {
     const base = filteredItems;
@@ -474,7 +479,7 @@ const DiretoriaAprovacao = () => {
     const term = debouncedOwnSearchTerm.trim().toLowerCase();
     
     // Otimização extrema de performance: se a UI vai esconder a tabela, nem processe os 4000 itens
-    if (term === "" && !ownShowOnlyComQuantidade) {
+    if (term === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados) {
       return [];
     }
 
@@ -511,6 +516,9 @@ const DiretoriaAprovacao = () => {
       // Filtro de prioridade
       if (ownPrioridade !== "todas" && planItem.prioridade !== ownPrioridade) continue;
 
+      // Filtro de itens zerados
+      if (ownShowOnlyZerados && planItem.qtdEstimada !== 0) continue;
+
       // Filtro de itens com quantidade
       if (ownShowOnlyComQuantidade && planItem.qtdEstimada <= 0) continue;
 
@@ -518,7 +526,7 @@ const DiretoriaAprovacao = () => {
     }
 
     return results;
-  }, [catalogItems, itensPropriosMap, ownGerenciaId, debouncedOwnSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade]);
+  }, [catalogItems, itensPropriosMap, ownGerenciaId, debouncedOwnSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade, ownShowOnlyZerados]);
 
 
 
@@ -556,12 +564,12 @@ const DiretoriaAprovacao = () => {
 
   const summary = useMemo(() => ({
     totalItens:
-      items.filter((item) => item.qtdEstimada > 0).length +
-      itensProprios.filter((item) => item.qtdEstimada > 0).length,
+      recebidosTableItems.filter((item) => item.qtdEstimada > 0).length +
+      filteredOwnItems.filter((item) => item.qtdEstimada > 0).length,
     valorTotal:
-      filteredItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0) +
-      itensProprios.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-  }), [filteredItems, itensProprios, items]);
+      recebidosTableItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0) +
+      filteredOwnItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+  }), [recebidosTableItems, filteredOwnItems]);
 
   const orcamentoDiretoriaAquisicao = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "aquisicao")
@@ -783,6 +791,29 @@ const DiretoriaAprovacao = () => {
     const itemCatalogo = catalogItems.find((item) => Number(item.codigo) === codigo);
     if (!itemCatalogo) return;
 
+    // Optimistic Update for creation
+    const tempId = `temp-${Date.now()}`;
+    const newItem = {
+      id: tempId,
+      codigo: itemCatalogo.codigo,
+      descricao: updates.descricao ?? itemCatalogo.descricao,
+      categoria: updates.categoria ?? itemCatalogo.categoria,
+      gerencia_id: gerenciaIdDestino,
+      prioridade: updates.prioridade ?? itemCatalogo.prioridade,
+      qtd_estimada: updates.qtdEstimada ?? 0,
+      unidade: updates.unidade ?? itemCatalogo.unidade,
+      valor_unitario: updates.valorUnitario ?? itemCatalogo.valorUnitario,
+      observacao: updates.observacao || "",
+      status: "rascunho",
+      diretoria_id: diretoria.id,
+      periodo_id: periodAtivo.id,
+    };
+
+    queryClient.setQueryData(solicitacoesQueryKey, (current: any) => {
+      if (!Array.isArray(current)) return [newItem];
+      return [...current.filter((c: any) => Number(c.codigo) !== codigo), newItem];
+    });
+
     await createSolicitacao({
       periodo_id: periodAtivo.id,
       diretoria_id: diretoria.id,
@@ -892,34 +923,21 @@ const DiretoriaAprovacao = () => {
   };
 
   const handleDeleteServicoDiretoria = async (servicoId: string) => {
-    if (!confirm("Deseja realmente devolver este serviço para rascunho?")) return;
+    if (!confirm("Deseja realmente excluir este serviço?")) return;
     try {
-      const srv = servicosData.find((s: any) => s.id === servicoId);
-      
       // Atualização otimista
       queryClient.setQueryData(servicosQueryKey, (oldData: any) => {
         if (!oldData) return oldData;
-        return oldData.map((s: any) => {
-          if (s.id === servicoId) {
-            if (srv && srv.status === "rascunho") {
-              return { ...s, estimativa_valor: 0, dotacao_orcamentaria: 0 };
-            }
-            return { ...s, status: "rascunho" };
-          }
-          return s;
-        });
+        return oldData.filter((s: any) => s.id !== servicoId);
       });
 
-      if (srv && srv.status === "rascunho") {
-        await updateServico(servicoId, { estimativa_valor: 0, dotacao_orcamentaria: 0 });
-      } else {
-        await updateServico(servicoId, { status: "rascunho" });
-      }
+      await deleteServicosBulk([servicoId]);
+      
       await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
-      toast({ title: "Serviço devolvido", description: "Serviço devolvido para rascunho com sucesso." });
+      toast({ title: "Serviço excluído", description: "Serviço excluído com sucesso." });
     } catch (error) {
-      console.error("Erro ao devolver serviço:", error);
-      toast({ title: "Erro ao devolver", description: "Não foi possível devolver o serviço.", variant: "destructive" });
+      console.error("Erro ao excluir serviço:", error);
+      toast({ title: "Erro ao excluir", description: "Não foi possível excluir o serviço.", variant: "destructive" });
     }
   };
 
@@ -2599,14 +2617,34 @@ const DiretoriaAprovacao = () => {
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              variant={ownShowOnlyComQuantidade ? "default" : "outline"}
-              size="sm"
-              className="gap-2"
-              onClick={() => { setOwnShowOnlyComQuantidade(!ownShowOnlyComQuantidade); setOwnCurrentPage(1); }}
-            >
-              {ownShowOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={ownShowOnlyZerados ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !ownShowOnlyZerados;
+                  setOwnShowOnlyZerados(next);
+                  if (next) setOwnShowOnlyComQuantidade(false);
+                  setOwnCurrentPage(1);
+                }}
+              >
+                {ownShowOnlyZerados ? "Mostrando apenas itens zerados" : "Filtrar itens zerados"}
+              </Button>
+              <Button
+                variant={ownShowOnlyComQuantidade ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !ownShowOnlyComQuantidade;
+                  setOwnShowOnlyComQuantidade(next);
+                  if (next) setOwnShowOnlyZerados(false);
+                  setOwnCurrentPage(1);
+                }}
+              >
+                {ownShowOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -2620,7 +2658,7 @@ const DiretoriaAprovacao = () => {
           categorias={categoriasItensProprios}
         />
 
-        {ownSearchTerm.trim() === "" && !ownShowOnlyComQuantidade ? (
+        {ownSearchTerm.trim() === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados ? (
           <div className="text-center py-8 bg-card rounded-lg border border-dashed">
             <p className="text-sm text-muted-foreground">🔍 Digite o código ou descrição para buscar itens do catálogo.</p>
           </div>
@@ -2791,14 +2829,32 @@ const DiretoriaAprovacao = () => {
               </SelectContent>
             </Select>
           </div>
-          <Button
-            variant={showOnlyComQuantidade ? "default" : "outline"}
-            size="sm"
-            className="gap-2"
-            onClick={() => setShowOnlyComQuantidade(!showOnlyComQuantidade)}
-          >
-            {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={showOnlyZerados ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                const next = !showOnlyZerados;
+                setShowOnlyZerados(next);
+                if (next) setShowOnlyComQuantidade(false);
+              }}
+            >
+              {showOnlyZerados ? "Mostrando apenas itens zerados" : "Filtrar itens zerados"}
+            </Button>
+            <Button
+              variant={showOnlyComQuantidade ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                const next = !showOnlyComQuantidade;
+                setShowOnlyComQuantidade(next);
+                if (next) setShowOnlyZerados(false);
+              }}
+            >
+              {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
+            </Button>
+          </div>
         </div>
       </div>
 

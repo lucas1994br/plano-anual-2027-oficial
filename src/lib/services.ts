@@ -12,6 +12,108 @@ import type {
 } from "@supabase/supabase-js";
 
 const SUPABASE_PAGE_SIZE = 1000;
+
+export async function registrarLogAtividade(
+  acao: string,
+  tabelaAfetada: string,
+  registroId: string,
+  detalhes?: any
+) {
+  try {
+    let accessCode = "";
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (path.startsWith("/admin")) {
+        accessCode = sessionStorage.getItem("access-code:admin") || "";
+      } else if (path.includes("/gerencia/")) {
+        accessCode = sessionStorage.getItem("access-code:gerencia") || "";
+      } else if (path.startsWith("/diretoria")) {
+        accessCode = sessionStorage.getItem("access-code:diretoria") || "";
+      } else if (path.startsWith("/compras")) {
+        accessCode = sessionStorage.getItem("access-code:compras") || "";
+      } else {
+        accessCode = 
+          sessionStorage.getItem("access-code:admin") || 
+          sessionStorage.getItem("access-code:diretoria") || 
+          sessionStorage.getItem("access-code:gerencia") || 
+          sessionStorage.getItem("access-code:compras") || 
+          "";
+      }
+    }
+
+    const matricula = (accessCode.startsWith("admin") || accessCode.startsWith("compras"))
+      ? accessCode 
+      : (accessCode.replace(/\D/g, "") || "desconhecido");
+
+    // Upsert to ensure FK constraint is satisfied without overwriting existing names
+    await supabase.from("funcionarios").upsert([{
+      matricula,
+      nome: `Usuário ${matricula}`
+    }], { onConflict: 'matricula', ignoreDuplicates: true });
+
+    await supabase.from("logs_atividades").insert([{
+      matricula,
+      acao,
+      tabela_afetada: tabelaAfetada,
+      registro_id: registroId,
+      detalhes: typeof detalhes === 'object' ? JSON.stringify(detalhes) : detalhes
+    }]);
+  } catch (error) {
+    console.error("Falha ao registrar log de atividade:", error);
+  }
+}
+
+export async function registrarLogAtividadeBulk(
+  acao: string,
+  tabelaAfetada: string,
+  registrosIds: string[],
+  detalhes?: any
+) {
+  if (registrosIds.length === 0) return;
+  try {
+    let accessCode = "";
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (path.startsWith("/admin")) {
+        accessCode = sessionStorage.getItem("access-code:admin") || "";
+      } else if (path.includes("/gerencia/")) {
+        accessCode = sessionStorage.getItem("access-code:gerencia") || "";
+      } else if (path.startsWith("/diretoria")) {
+        accessCode = sessionStorage.getItem("access-code:diretoria") || "";
+      } else if (path.startsWith("/compras")) {
+        accessCode = sessionStorage.getItem("access-code:compras") || "";
+      } else {
+        accessCode = 
+          sessionStorage.getItem("access-code:admin") || 
+          sessionStorage.getItem("access-code:diretoria") || 
+          sessionStorage.getItem("access-code:gerencia") || 
+          sessionStorage.getItem("access-code:compras") || 
+          "";
+      }
+    }
+    const matricula = (accessCode.startsWith("admin") || accessCode.startsWith("compras"))
+      ? accessCode 
+      : (accessCode.replace(/\D/g, "") || "desconhecido");
+
+    // Upsert to ensure FK constraint is satisfied without overwriting existing names
+    await supabase.from("funcionarios").upsert([{
+      matricula,
+      nome: `Usuário ${matricula}`
+    }], { onConflict: 'matricula', ignoreDuplicates: true });
+
+    const payload = registrosIds.map(id => ({
+      matricula,
+      acao,
+      tabela_afetada: tabelaAfetada,
+      registro_id: id,
+      detalhes: typeof detalhes === 'object' ? JSON.stringify(detalhes) : detalhes
+    }));
+
+    await supabase.from("logs_atividades").insert(payload);
+  } catch (error) {
+    console.error("Falha ao registrar logs de atividades em lote:", error);
+  }
+}
 const DIRETORIAS_CACHE_KEY = "pac2027:diretorias";
 const DIRETORIAS_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -243,6 +345,11 @@ export async function createPeriodo(periodo: {
     .select();
 
   if (error) throw error;
+
+  if (data && data[0]) {
+    await registrarLogAtividade("CRIAR", "periodos", data[0].id, { periodo: periodo });
+  }
+
   return data?.[0] || {};
 }
 
@@ -270,6 +377,8 @@ export async function updatePeriodo(
       "Atualizacao bloqueada. Verifique RLS/policies na tabela periodos.";
     throw new Error(msg);
   }
+
+  await registrarLogAtividade("EDITAR", "periodos", periodoId, { updates });
 
   return data[0];
 }
@@ -336,6 +445,9 @@ export async function deleteSolicitacao(itemId: string): Promise<boolean> {
     console.error("Erro ao deletar solicitacao:", error);
     throw error;
   }
+  
+  await registrarLogAtividade("EXCLUIR", "solicitacoes", itemId);
+  
   return true;
 }
 
@@ -398,6 +510,23 @@ export async function getSolicitacoesByPeriodo({
   return data;
 }
 
+export async function getServicosByPeriodo({
+  periodoId,
+}: {
+  periodoId: string;
+}): Promise<any[]> {
+  const data = await fetchAllPages<any>((from, to) =>
+    supabase
+      .from("servicos")
+      .select("*")
+      .eq("periodo_id", periodoId)
+      .order("item")
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
+  );
+
+  return data;
+}
+
 export async function getSolicitacoesCompras(
   periodoId: string
 ): Promise<unknown[]> {
@@ -406,7 +535,7 @@ export async function getSolicitacoesCompras(
       .from("solicitacoes")
       .select("*, diretorias!fk_solicitacoes_diretoria(sigla), gerencias!fk_solicitacoes_gerencia(sigla)")
       .eq("periodo_id", periodoId)
-      .in("status", ["em_compra", "concluido"])
+      .in("status", ["aprovado", "em_compra", "concluido"])
       .order("codigo")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
@@ -418,7 +547,7 @@ export async function getServicosCompras(periodoId: string): Promise<unknown[]> 
       .from("servicos")
       .select("*, diretorias!fk_servicos_diretoria(sigla), gerencias!fk_servicos_gerencia(sigla)")
       .eq("periodo_id", periodoId)
-      .in("status", ["em_compra", "concluido"])
+      .in("status", ["aprovado", "em_compra", "concluido"])
       .order("item")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
@@ -455,6 +584,9 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
     .single();
 
   if (error) throw error;
+  
+  await registrarLogAtividade("CRIAR", "solicitacoes", data.id, payload);
+
   return data as PlanItem;
 }
 
@@ -487,6 +619,9 @@ export async function updateSolicitacao(
     .single();
 
   if (error) throw error;
+  
+  await registrarLogAtividade("EDITAR", "solicitacoes", id, dbUpdates);
+  
   return data as PlanItem;
 }
 
@@ -516,7 +651,19 @@ export async function updateSolicitacaoStatus(
 
   if (data) {
     await logHistorico(id, status, justificativa);
+
+    const valorTotal = (data.qtd_estimada || 0) * (data.valor_unitario || 0);
+    if (status === "enviado") {
+      await registrarLogOrcamentario(id, data.diretoria_id, 'reservar', valorTotal);
+    } else if (status === "aprovado") {
+      await registrarLogOrcamentario(id, data.diretoria_id, 'estornar_reserva', valorTotal);
+      await registrarLogOrcamentario(id, data.diretoria_id, 'executar', valorTotal);
+    } else if (status === "rejeitado") {
+      await registrarLogOrcamentario(id, data.diretoria_id, 'estornar_reserva', valorTotal);
+    }
   }
+
+  await registrarLogAtividade("EDITAR", "solicitacoes", id, { acao: "updateSolicitacaoStatus", status_novo: status, justificativa });
 
   return data as PlanItem;
 }
@@ -536,12 +683,44 @@ export async function updateSolicitacaoStatusBulk(
     updates.justificativa_rejeicao = justificativa;
   }
 
+  // Pega dados originais para o log orçamentário
+  const { data: originais } = await supabase
+    .from("solicitacoes")
+    .select("id, diretoria_id, qtd_estimada, valor_unitario")
+    .in("id", ids);
+
   const { error } = await supabase
     .from("solicitacoes")
     .update(updates)
     .in("id", ids);
 
   if (error) throw error;
+
+  // Registrar histórico e logs orçamentários em lote
+  if (originais) {
+    const logsToInsert: {
+      solicitacaoId: string;
+      diretoriaId: string;
+      acao: 'reservar' | 'estornar_reserva' | 'executar' | 'estornar_execucao';
+      valor: number;
+    }[] = [];
+
+    for (const item of originais) {
+      const valorTotal = (item.qtd_estimada || 0) * (item.valor_unitario || 0);
+      if (status === "enviado") {
+        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'reservar', valor: valorTotal });
+      } else if (status === "aprovado") {
+        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'estornar_reserva', valor: valorTotal });
+        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'executar', valor: valorTotal });
+      } else if (status === "rejeitado") {
+        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'estornar_reserva', valor: valorTotal });
+      }
+    }
+
+    if (logsToInsert.length > 0) {
+      await registrarLogsOrcamentariosBulk(logsToInsert);
+    }
+  }
 
   const historicoRecords = ids.map((id) => ({
     solicitacao_id: id,
@@ -556,6 +735,8 @@ export async function updateSolicitacaoStatusBulk(
     .insert(historicoRecords);
 
   if (histError) console.error("Erro ao registrar histórico em lote:", histError);
+
+  await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
 }
 
 export async function updateServicoStatusBulk(
@@ -575,6 +756,8 @@ export async function updateServicoStatusBulk(
     .in("id", ids);
 
   if (error) throw error;
+
+  await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicoStatusBulk", status_novo: status, justificativa });
 }
 
 // ============ HISTÓRICO ============
@@ -842,6 +1025,9 @@ export async function saveAdminMiniErpConfigDb(config: {
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
+  
+  await registrarLogAtividade("EDITAR", "configuracoes", "admin-mini-erp-config", { acao: "saveAdminMiniErpConfigDb" });
+
   return data;
 }
 
@@ -955,6 +1141,9 @@ export async function updateServicoCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
+  
+  await registrarLogAtividade("CRIAR", "servicos_catalogo", data?.id || "novo", { acao: "createServicoCatalogoAndDistribuir" });
+
   return data;
 }
 
@@ -979,6 +1168,9 @@ export async function deleteServicoCatalogoAdmin(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+
+  
+  await registrarLogAtividade("EDITAR", "servicos_catalogo", "bulk_update", { acao: "updateServicoCatalogoAdmin" });
 
   return data;
 }
@@ -1012,6 +1204,9 @@ export async function saveCategoryBudgetOwnerRules(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+
+  
+  await registrarLogAtividade("EXCLUIR", "servicos_catalogo", "bulk_delete", { acao: "deleteServicoCatalogoAdmin" });
 
   return data;
 }
@@ -1232,6 +1427,9 @@ export async function updateServico(
     .single();
 
   if (error) throw error;
+  
+  await registrarLogAtividade("EDITAR", "servicos", servicoId, dbUpdates);
+  
   return data ? mapDbToServicoItem(data) : undefined;
 }
 
@@ -1246,6 +1444,9 @@ export async function createServico(
     .single();
 
   if (error) throw error;
+  
+  await registrarLogAtividade("CRIAR", "servicos", data.id, dbRow);
+  
   return data ? mapDbToServicoItem(data) : undefined;
 }
 
@@ -1253,6 +1454,9 @@ export const deleteServico = async (id: string): Promise<boolean> => {
   const { error } = await supabase.from("servicos").delete().eq("id", id);
 
   if (error) throw error;
+  
+  await registrarLogAtividade("EXCLUIR", "servicos", id);
+  
   return true;
 };
 
@@ -1266,6 +1470,9 @@ export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
     console.error("Erro ao deletar servicos em massa:", error);
     throw error;
   }
+  
+  await registrarLogAtividade("EXCLUIR", "servicos", "BULK", { ids: itemIds });
+  
   return true;
 }
 
@@ -1291,6 +1498,8 @@ export async function updateSolicitacoesBulkData(
     .in("id", ids);
 
   if (error) throw error;
+
+  await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacoesBulkData", updates: dbUpdates });
 }
 
 export async function updateServicosBulkData(
@@ -1309,6 +1518,8 @@ export async function updateServicosBulkData(
     .in("id", ids);
 
   if (error) throw error;
+
+  await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicosBulkData", updates: dbUpdates });
 }
 
 // ============ ADMIN SERVIÇOS ============
@@ -1418,6 +1629,9 @@ export async function updateItemCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
+  
+  await registrarLogAtividade("EDITAR", "configuracoes", "category_budget_owner_rules", { acao: "saveCategoryBudgetOwnerRules" });
+
   return data;
 }
 
@@ -1443,6 +1657,9 @@ export async function deleteItemCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
+  
+  await registrarLogAtividade("CRIAR", "itens_catalogo", data?.id || "novo", { acao: "createItemCatalogoAndDistribuir" });
+
   return data;
 }
 
@@ -1467,6 +1684,9 @@ export async function criarOrcamento(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+  
+  await registrarLogAtividade("EDITAR", "itens_catalogo", "bulk_update", { acao: "updateItemCatalogoAdmin" });
+
   return data;
 }
 
@@ -1491,6 +1711,9 @@ export async function enviarOrcamento(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+  
+  await registrarLogAtividade("EXCLUIR", "itens_catalogo", "bulk_delete", { acao: "deleteItemCatalogoAdmin" });
+
   return data;
 }
 
@@ -1513,6 +1736,9 @@ export async function deletarOrcamento(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+  
+  await registrarLogAtividade("CRIAR", "orcamento_global", "novo_orcamento", { acao: "criarOrcamento" });
+
   return data;
 }
 
@@ -1546,4 +1772,248 @@ export async function getDadosExcel2026() {
   const orcamentoData = workbook.Sheets['orcamento'] ? XLSX.utils.sheet_to_json(workbook.Sheets['orcamento']) : [];
   
   return { previstoData, realizadoData, orcamentoData };
+}
+
+export async function getLogsAtividades() {
+  const { data, error } = await supabase
+    .from("logs_atividades")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getFuncionariosNomes() {
+  const { data, error } = await supabase
+    .from("funcionarios")
+    .select("matricula, nome, diretoria_id, gerencia_id");
+
+  if (error) {
+    console.error("Erro ao buscar funcionários:", error);
+    return [];
+  }
+  return data || [];
+}
+
+export async function registrarLogOrcamentario(
+  solicitacaoId: string,
+  diretoriaId: string,
+  acao: 'reservar' | 'estornar_reserva' | 'executar' | 'estornar_execucao',
+  valor: number
+) {
+  try {
+    // 1. Achar o centro_custo da diretoria
+    const { data: centros, error: centroError } = await supabase
+      .from("centro_custo")
+      .select("id")
+      .eq("diretoria_id", diretoriaId)
+      .eq("ativo", true)
+      .limit(1);
+
+    if (centroError) throw centroError;
+    if (!centros || centros.length === 0) {
+      console.warn(`Nenhum centro de custo ativo encontrado para a diretoria ${diretoriaId}`);
+      return;
+    }
+
+    const centroCustoId = centros[0].id;
+    const anoAtual = new Date().getFullYear();
+
+    // 2. Inserir no log_orcamentario
+    const { error: logError } = await supabase
+      .from("log_orcamentario")
+      .insert([{
+        ano: 2026, // Forçando 2026 para os testes de PAC 2027 que ocorrem em 2026
+        centro_custo_id: centroCustoId,
+        referencia_tipo: 'solicitacao_compra',
+        referencia_id: solicitacaoId,
+        acao,
+        valor
+      }]);
+
+    if (logError) throw logError;
+    
+    console.log(`Log orçamentário registrado: ${acao} de R$ ${valor} na solicitação ${solicitacaoId}`);
+  } catch (err) {
+    console.error("Falha ao registrar log orçamentário:", err);
+  }
+}
+
+export async function registrarLogsOrcamentariosBulk(
+  logs: {
+    solicitacaoId: string;
+    diretoriaId: string;
+    acao: 'reservar' | 'estornar_reserva' | 'executar' | 'estornar_execucao';
+    valor: number;
+  }[]
+) {
+  if (logs.length === 0) return;
+
+  try {
+    const uniqueDiretoriaIds = Array.from(new Set(logs.map(log => log.diretoriaId)));
+
+    const { data: centros, error: centroError } = await supabase
+      .from("centro_custo")
+      .select("id, diretoria_id")
+      .in("diretoria_id", uniqueDiretoriaIds)
+      .eq("ativo", true);
+
+    if (centroError) throw centroError;
+
+    const centroMap = new Map<string, string>();
+    if (centros) {
+      for (const c of centros) {
+        centroMap.set(c.diretoria_id, c.id);
+      }
+    }
+
+    const recordsToInsert = [];
+    for (const log of logs) {
+      const centroCustoId = centroMap.get(log.diretoriaId);
+      if (!centroCustoId) {
+        console.warn(`Nenhum centro de custo ativo encontrado para a diretoria ${log.diretoriaId} (Item: ${log.solicitacaoId})`);
+        continue;
+      }
+
+      recordsToInsert.push({
+        ano: 2026, // Forçando 2026 para os testes de PAC 2027 que ocorrem em 2026
+        centro_custo_id: centroCustoId,
+        referencia_tipo: 'solicitacao_compra',
+        referencia_id: log.solicitacaoId,
+        acao: log.acao,
+        valor: log.valor
+      });
+    }
+
+    if (recordsToInsert.length > 0) {
+      const { error: logError } = await supabase
+        .from("log_orcamentario")
+        .insert(recordsToInsert);
+
+      if (logError) throw logError;
+      console.log(`${recordsToInsert.length} logs orçamentários registrados em lote com sucesso.`);
+    }
+  } catch (err) {
+    console.error("Falha ao registrar logs orçamentários em lote:", err);
+  }
+}
+
+export async function deleteLogAtividade(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao deletar log:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function deleteLogsAtividadeBulk(ids: string[]) {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .delete()
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao excluir logs em massa:", error);
+    throw error;
+  }
+}
+
+export async function getRecordDetails(tableName: string, id: string) {
+  if (!tableName || !id) return null;
+  const { data, error } = await supabase
+    .from(tableName)
+    .select("*")
+    .eq("id", id)
+    .single();
+    
+  if (error) {
+    console.error(`Erro ao buscar detalhes de ${tableName} com ID ${id}:`, error);
+    return null;
+  }
+  return data;
+}
+
+export async function updateLogAtividade(id: string, updates: any): Promise<boolean> {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .update(updates)
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao atualizar log:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function updateLogsAtividadeBulk(ids: string[], updates: any): Promise<boolean> {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .update(updates)
+    .in("id", ids);
+  if (error) {
+    console.error("Erro ao atualizar logs em massa:", error);
+    throw error;
+  }
+  return true;
+}
+
+// --------------------------------------------------------------------------------
+// LOGS ORÇAMENTÁRIOS (Admin CRUD)
+// --------------------------------------------------------------------------------
+
+export async function getLogsOrcamentarios(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("log_orcamentario")
+    .select(`
+      *,
+      centro_custo:centro_custo_id(codigo, nome, diretoria_id)
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao buscar logs orçamentários:", error);
+    throw error;
+  }
+  return data || [];
+}
+
+export async function deleteLogOrcamentario(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao deletar log orçamentário:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function deleteLogsOrcamentarioBulk(ids: string[]): Promise<boolean> {
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .delete()
+    .in("id", ids);
+  if (error) {
+    console.error("Erro ao deletar logs orçamentários em massa:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function updateLogOrcamentario(id: string, updates: any): Promise<boolean> {
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .update(updates)
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao atualizar log orçamentário:", error);
+    throw error;
+  }
+  return true;
 }

@@ -219,6 +219,15 @@ serve(async (req: Request) => {
       console.warn("No active period found, skipping distribution");
     }
 
+    const matricula = accessCode.replace(/\\D/g, "") || "desconhecido";
+    await supabase.from("logs_atividades").insert([{
+      matricula,
+      acao: "CRIAR",
+      tabela_afetada: "servicos_catalogo",
+      registro_id: servicoCatalogo.id,
+      detalhes: { item: proximoItem, objeto: servicoCatalogo.objeto }
+    }]);
+
     return new Response(JSON.stringify({ 
       success: true, 
       servico: servicoCatalogo,

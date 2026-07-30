@@ -19,6 +19,8 @@ import { AccessCodeScreen } from "../components/ui/AccessCodeScreen.tsx";
 import { AdminBudgetControl } from "../components/features/admin/AdminBudgetControl.tsx";
 import { AdminCatalogItemControl } from "../components/features/admin/AdminCatalogItemControl.tsx";
 import { AdminServicosControl } from "../components/features/admin/AdminServicosControl.tsx";
+import { AdminLogsAtividades } from "../components/features/admin/AdminLogsAtividades.tsx";
+import { AdminLogsOrcamentarios } from "../components/features/admin/AdminLogsOrcamentarios.tsx";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -219,6 +221,8 @@ const AdminPanel = () => {
               <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
               <TabsTrigger value="catalogo">Aquisição</TabsTrigger>
               <TabsTrigger value="servicos">Serviços</TabsTrigger>
+              <TabsTrigger value="logs">Logs de Atividades</TabsTrigger>
+              <TabsTrigger value="logs-orcamentarios">Trilha Financeira</TabsTrigger>
             </TabsList>
 
             <TabsContent value="periodos" className="space-y-6">
@@ -477,6 +481,14 @@ const AdminPanel = () => {
 
             <TabsContent value="servicos">
               <AdminServicosControl />
+            </TabsContent>
+
+            <TabsContent value="logs">
+              <AdminLogsAtividades />
+            </TabsContent>
+
+            <TabsContent value="logs-orcamentarios">
+              <AdminLogsOrcamentarios />
             </TabsContent>
           </Tabs>
         </div>

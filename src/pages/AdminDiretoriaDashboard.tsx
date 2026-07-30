@@ -29,13 +29,13 @@ import {
   Line
 } from "recharts";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils.ts";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { 
   getPeriodosAtivos, 
   getDiretorias, 
   getTodasGerencias, 
-  getSolicitacoesByDiretoria, 
-  getServicosByDiretoria,
+  getSolicitacoesByPeriodo, 
+  getServicosByPeriodo,
   getAdminMiniErpConfigDb,
   getDadosExcel2026
 } from "@/lib/services.ts";
@@ -66,51 +66,76 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
   const periodoAtivoId = periodosAtivos?.[0]?.id as string | undefined;
 
   const { data: diretorias, isLoading: isLoadingDir } = useQuery({ queryKey: ["diretorias"], queryFn: getDiretorias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
-  const diretoria = (diretorias || []).find((d: any) => d.sigla.toUpperCase() === filtroDiretoria.toUpperCase());
+  
+  const diretoria = useMemo(() => {
+    return (diretorias || []).find((d: any) => d.sigla.toUpperCase() === filtroDiretoria.toUpperCase());
+  }, [diretorias, filtroDiretoria]);
 
   const { data: todasGerencias, isLoading: isLoadingGer } = useQuery({ queryKey: ["todas-gerencias"], queryFn: getTodasGerencias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
-  const gerenciasAtuaisDb = (todasGerencias || []).filter((g: any) => g.diretoria_id === diretoria?.id);
   
-  const gerenciasAtuais = gerenciasAtuaisDb.length > 0 
-    ? gerenciasAtuaisDb.map((g: any) => `${g.sigla}${g.nome ? ` - ${g.nome}` : ''}`) 
-    : (DIRETORIA_GERENCIAS[filtroDiretoria.toUpperCase()] || []);
+  const gerenciasAtuaisDb = useMemo(() => {
+    return (todasGerencias || []).filter((g: any) => g.diretoria_id === diretoria?.id);
+  }, [todasGerencias, diretoria?.id]);
+  
+  const gerenciasAtuais = useMemo(() => {
+    return gerenciasAtuaisDb.length > 0 
+      ? gerenciasAtuaisDb.map((g: any) => `${g.sigla}${g.nome ? ` - ${g.nome}` : ''}`) 
+      : (DIRETORIA_GERENCIAS[filtroDiretoria.toUpperCase()] || []);
+  }, [gerenciasAtuaisDb, filtroDiretoria]);
 
-  const { data: solicitacoes = [], isLoading: isLoadingSol } = useQuery({
-    queryKey: ["solicitacoes-diretoria", diretoria?.id, periodoAtivoId],
-    queryFn: () => getSolicitacoesByDiretoria(diretoria!.id, periodoAtivoId!),
-    enabled: !!diretoria?.id && !!periodoAtivoId,
-    staleTime: 0,
-    gcTime: 10 * 60 * 1000,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+  const { data: todasSolicitacoes = [], isLoading: isLoadingSol } = useQuery({
+    queryKey: ["solicitacoes-todas", periodoAtivoId],
+    queryFn: () => getSolicitacoesByPeriodo({ periodoId: periodoAtivoId! }),
+    enabled: !!periodoAtivoId,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
-  const { data: servicos = [], isLoading: isLoadingSer } = useQuery({
-    queryKey: ["servicos-diretoria", diretoria?.id, periodoAtivoId],
-    queryFn: () => getServicosByDiretoria(diretoria!.id, periodoAtivoId!),
-    enabled: !!diretoria?.id && !!periodoAtivoId,
-    staleTime: 0,
-    gcTime: 10 * 60 * 1000,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+  const { data: todosServicos = [], isLoading: isLoadingSer } = useQuery({
+    queryKey: ["servicos-todos", periodoAtivoId],
+    queryFn: () => getServicosByPeriodo({ periodoId: periodoAtivoId! }),
+    enabled: !!periodoAtivoId,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
+
+  const solicitacoes = useMemo(() => {
+    if (!diretoria?.id) return [];
+    return todasSolicitacoes.filter((s: any) => s.diretoria_id === diretoria.id);
+  }, [todasSolicitacoes, diretoria?.id]);
+
+  const servicos = useMemo(() => {
+    if (!diretoria?.id) return [];
+    return todosServicos.filter((s: any) => s.diretoria_id === diretoria.id);
+  }, [todosServicos, diretoria?.id]);
 
   const { data: adminMiniConfigFromDb, isLoading: isLoadingConfig } = useQuery({
     queryKey: ["admin-mini-erp-config-db"],
     queryFn: getAdminMiniErpConfigDb,
-    staleTime: 0,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   const { data: excelData, isLoading: isLoadingExcel } = useQuery({
     queryKey: ["excel-2026"],
     queryFn: getDadosExcel2026,
     enabled: filtroAno === "2026",
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
-  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || isLoadingSol || isLoadingSer || isLoadingConfig || (filtroAno === "2026" && isLoadingExcel);
+  const isLoading = 
+    (!periodosAtivos && isLoadingPer) || 
+    (!diretorias?.length && isLoadingDir) || 
+    (!todasGerencias?.length && isLoadingGer) || 
+    (!todasSolicitacoes.length && isLoadingSol) || 
+    (!todosServicos.length && isLoadingSer) || 
+    (!adminMiniConfigFromDb && isLoadingConfig) || 
+    (filtroAno === "2026" && !excelData && isLoadingExcel);
 
   const orcamentoConfig = useMemo(() => {
     const localConfig = loadAdminBudgetConfig();
@@ -125,12 +150,17 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
 
   const limiteAquisicao = useMemo(() => {
     if (!diretoria) return 0;
-    if (filtroAno === "2026" && excelData?.orcamentoData) {
+    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
       let orcAquisicao = 0;
+      const firstRow = excelData.orcamentoData[0];
+      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
+      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_AQUISICAO');
+      const targetDir = diretoria.sigla.toUpperCase();
+      
       excelData.orcamentoData.forEach((row: any) => {
-        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
-        if (d === diretoria.sigla.toUpperCase()) {
-           orcAquisicao += Number(row.ORCAMENTO_AQUISICAO || row.orcamento_aquisicao || 0);
+        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
+        if (d === targetDir) {
+           orcAquisicao += Number((orcKey ? row[orcKey] : row.ORCAMENTO_AQUISICAO || row.orcamento_aquisicao) || 0);
         }
       });
       return orcAquisicao;
@@ -150,12 +180,17 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
   }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno]);
 
   const limiteServicosExistentes = useMemo(() => {
-    if (filtroAno === "2026" && excelData?.orcamentoData) {
+    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
       let orcServico = 0;
+      const firstRow = excelData.orcamentoData[0];
+      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
+      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_SERVICO');
+      const targetDir = diretoria?.sigla.toUpperCase();
+
       excelData.orcamentoData.forEach((row: any) => {
-        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
-        if (d === diretoria?.sigla.toUpperCase()) {
-           orcServico += Number(row.orcamento_servico || 0);
+        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
+        if (d === targetDir) {
+           orcServico += Number((orcKey ? row[orcKey] : row.orcamento_servico) || 0);
         }
       });
       return orcServico;
@@ -167,12 +202,17 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
   }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno, excelData]);
 
   const limiteTotal = useMemo(() => {
-    if (filtroAno === "2026" && excelData?.orcamentoData) {
+    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
       let orcAprovado = 0;
+      const firstRow = excelData.orcamentoData[0];
+      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
+      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_APROVADO');
+      const targetDir = diretoria?.sigla.toUpperCase();
+
       excelData.orcamentoData.forEach((row: any) => {
-        const d = String(row.DIRETORIA || row.diretoria || "").trim().toUpperCase();
-        if (d === diretoria?.sigla.toUpperCase()) {
-           orcAprovado += Number(row.orcamento_aprovado || 0);
+        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
+        if (d === targetDir) {
+           orcAprovado += Number((orcKey ? row[orcKey] : row.orcamento_aprovado) || 0);
         }
       });
       return orcAprovado;
@@ -205,40 +245,60 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
 
     const matrixData: any[] = [];
 
-    if (filtroAno === "2026" && excelData?.realizadoData) {
-       excelData.realizadoData.forEach((r: any) => {
-           const row: any = {};
-           for (const key in r) {
-               row[key.trim().toUpperCase()] = r[key];
-           }
+    if (filtroAno === "2026" && excelData?.realizadoData && excelData.realizadoData.length > 0) {
+       const firstRow = excelData.realizadoData[0];
+       const keys = Object.keys(firstRow);
+       const keyMap = {
+           diretoria: keys.find(k => k.trim().toUpperCase() === 'DIRETORIA') || 'DIRETORIA',
+           tipo: keys.find(k => k.trim().toUpperCase() === 'TIPO') || 'TIPO',
+           data: keys.find(k => k.trim().toUpperCase() === 'DATA') || 'DATA',
+           mes_nome: keys.find(k => k.trim().toUpperCase() === 'MES_NOME') || 'MES_NOME',
+           gerencia: keys.find(k => k.trim().toUpperCase() === 'GERENCIA') || 'GERENCIA',
+           valor_oc: keys.find(k => k.trim().toUpperCase() === 'VALOR_OC') || 'VALOR_OC',
+           valor_nf: keys.find(k => k.trim().toUpperCase() === 'VALOR_NF') || 'VALOR_NF',
+           oc: keys.find(k => k.trim().toUpperCase() === 'OC') || 'OC',
+           nf: keys.find(k => k.trim().toUpperCase() === 'NF') || 'NF',
+           classificacao: keys.find(k => k.trim().toUpperCase() === 'CLASSIFICACAO') || 'CLASSIFICACAO',
+           descricao: keys.find(k => k.trim().toUpperCase() === 'DESCRICAO') || 'DESCRICAO',
+           fornecedor: keys.find(k => k.trim().toUpperCase() === 'FORNECEDOR') || 'FORNECEDOR',
+           previsto: keys.find(k => k.trim().toUpperCase() === 'PREVISTO') || 'PREVISTO'
+       };
+
+       const targetDir = diretoria?.sigla?.toUpperCase();
+       const gerenciasMap = gerenciasAtuais.map((g: string) => ({
+           full: g,
+           sigla: g.split(" - ")[0].trim().toUpperCase()
+       }));
+
+       excelData.realizadoData.forEach((row: any) => {
+           const dirVal = String(row[keyMap.diretoria] || "").trim().toUpperCase();
+           if (dirVal !== targetDir) return;
            
-           if (row.DIRETORIA?.toUpperCase() !== diretoria?.sigla?.toUpperCase()) return;
-           
-           const tipoVal = String(row.TIPO || "").trim().toUpperCase();
+           const tipoVal = String(row[keyMap.tipo] || "").trim().toUpperCase();
            const isAquisicao = tipoVal === "AQUISICAO";
            
            let mesStr = "Jan";
-           if (row.DATA) {
+           if (row[keyMap.data]) {
                let date: Date;
-               if (typeof row.DATA === 'number') {
-                   date = new Date(Math.round((row.DATA - 25569)*86400*1000));
+               if (typeof row[keyMap.data] === 'number') {
+                   date = new Date(Math.round((row[keyMap.data] - 25569)*86400*1000));
                } else {
-                   date = new Date(row.DATA);
+                   date = new Date(row[keyMap.data]);
                }
                if (!isNaN(date.getTime())) {
                    mesStr = MOCK_MESES[date.getMonth()] || "Jan";
                }
-           } else if (row.MES_NOME) {
-               mesStr = row.MES_NOME;
+           } else if (row[keyMap.mes_nome]) {
+               mesStr = row[keyMap.mes_nome];
            }
            
-           const gerenciaSigla = String(row.GERENCIA || "Indefinido").trim().toUpperCase();
-           const gerenciaFull = gerenciasAtuais.find((g: any) => {
-               const gSigla = g.split(" - ")[0].trim().toUpperCase();
-               return gerenciaSigla === gSigla || gerenciaSigla.startsWith(gSigla) || gSigla.startsWith(gerenciaSigla);
-           }) || row.GERENCIA || "Indefinido";
-            const valOC = Number(row.VALOR_OC) || 0;
-            const valNF = Number(row.VALOR_NF) || 0;
+           const gerenciaSigla = String(row[keyMap.gerencia] || "Indefinido").trim().toUpperCase();
+           const gerenciaFull = gerenciasMap.find(g => {
+               return gerenciaSigla === g.sigla || gerenciaSigla.startsWith(g.sigla) || g.sigla.startsWith(gerenciaSigla);
+           })?.full || row[keyMap.gerencia] || "Indefinido";
+
+            const valOC = Number(row[keyMap.valor_oc]) || 0;
+            const valNF = Number(row[keyMap.valor_nf]) || 0;
             
             let prog = 0;
             let currentStatus = "Não Iniciado";
@@ -254,16 +314,15 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
                      currentStatus = "Não Iniciado";
                  }
             } else if (valNF > 0) {
-                 // Gasto efetuado, mas sem OC/Orçamento atrelado
                  prog = 0;
                  currentStatus = "Não Previsto";
             }
 
             matrixData.push({
-                id: `EXC-${row.OC || row.NF || Math.floor(Math.random()*10000)}`,
+                id: `EXC-${row[keyMap.oc] || row[keyMap.nf] || Math.floor(Math.random()*10000)}`,
                 gerencia: gerenciaFull,
                 tipo: isAquisicao ? "Aquisição" : "Serviço Existente", 
-                subcategoria: row.CLASSIFICACAO || row.DESCRICAO || "Geral",
+                subcategoria: row[keyMap.classificacao] || row[keyMap.descricao] || "Geral",
                 status: currentStatus,
                 orcamentoPlanejado: valOC,
                 orcamentoExecutado: valNF,
@@ -275,9 +334,9 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
                 semana: "Semana 1",
                 progresso: prog,
                 tendencia: (valOC - valNF) >= 0 ? "down" : "up",
-                oc: String(row.OC || ""),
-                fornecedor: String(row.FORNECEDOR || ""),
-                previsto: String(row.PREVISTO || "")
+                oc: String(row[keyMap.oc] || ""),
+                fornecedor: String(row[keyMap.fornecedor] || ""),
+                previsto: String(row[keyMap.previsto] || "")
             });
        });
     }

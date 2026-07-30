@@ -299,10 +299,10 @@ const GerenciaPanel = () => {
   );
   const summary = useMemo(
     () => ({
-      totalItens: items.length,
-      valorTotal: gastoAquisicaoGerencia,
+      totalItens: filteredItems.length,
+      valorTotal: filteredItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
     }),
-    [items.length, gastoAquisicaoGerencia],
+    [filteredItems],
   );
     const resumoOrcamentoPorDiretoria = useMemo(() => {
       const grupos = new Map<string, { sigla: string; total: number; itens: number }>();
@@ -324,7 +324,7 @@ const GerenciaPanel = () => {
       const grupos = new Map<string, { sigla: string; total: number; itens: number }>();
 
       items
-        .filter((item) => item.qtdEstimada > 0 && item.status === "rascunho")
+        .filter((item) => item.id && selectedAquisicaoIds.has(item.id))
         .forEach((item) => {
           const siglaDestino = diretoria?.sigla || "N/D";
           const atual = grupos.get(siglaDestino) || { sigla: siglaDestino, total: 0, itens: 0 };
@@ -334,7 +334,7 @@ const GerenciaPanel = () => {
         });
 
       return Array.from(grupos.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
-    }, [items, diretoria?.sigla]);
+    }, [items, diretoria?.sigla, selectedAquisicaoIds]);
 
   const gastoServicosGerencia = useMemo(
     () =>
@@ -2295,7 +2295,7 @@ const GerenciaPanel = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="bg-muted/50 rounded-lg p-4 text-sm">
-            <p><strong>{items.filter(i => i.qtdEstimada > 0 && i.status === "rascunho").length}</strong> itens serão enviados para análise orçamentária.</p>
+            <p><strong>{selectedAquisicaoIds.size}</strong> itens serão enviados para análise orçamentária.</p>
             <div className="mt-3 space-y-2">
               {resumoEnvioPorDiretoria.map((grupo) => (
                 <div key={grupo.sigla} className="flex items-center justify-between rounded border bg-background px-3 py-2">
@@ -2306,9 +2306,9 @@ const GerenciaPanel = () => {
                 </div>
               ))}
             </div>
-            {items.filter(i => i.qtdEstimada === 0 || i.status !== "rascunho").length > 0 && (
+            {items.filter(i => (i.qtdEstimada === 0 || i.status !== "rascunho") && i.id && selectedAquisicaoIds.has(i.id)).length > 0 && (
               <p className="text-muted-foreground mt-2 text-xs">
-                ({items.filter(i => i.qtdEstimada === 0 || i.status !== "rascunho").length} itens não serão enviados)
+                ({items.filter(i => (i.qtdEstimada === 0 || i.status !== "rascunho") && i.id && selectedAquisicaoIds.has(i.id)).length} itens selecionados não podem ser enviados)
               </p>
             )}
           </div>

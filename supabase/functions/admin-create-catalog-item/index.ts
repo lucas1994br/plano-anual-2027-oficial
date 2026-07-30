@@ -152,6 +152,15 @@ serve(async (req: Request) => {
       }
     }
 
+    const matricula = accessCode.replace(/\\D/g, "") || "desconhecido";
+    await supabase.from("logs_atividades").insert([{
+      matricula,
+      acao: "CRIAR",
+      tabela_afetada: "itens_catalogo",
+      registro_id: itemCatalogo.id,
+      detalhes: { codigo: itemCatalogo.codigo, descricao: itemCatalogo.descricao }
+    }]);
+
     return new Response(JSON.stringify({ success: true, item: itemCatalogo }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
