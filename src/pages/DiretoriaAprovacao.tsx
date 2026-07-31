@@ -581,8 +581,15 @@ const DiretoriaAprovacao = () => {
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoDiretoria = useMemo(
-    () => [...filteredOwnItems, ...recebidosTableItems].reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [filteredOwnItems, recebidosTableItems],
+    () => [...filteredOwnItems, ...recebidosTableItems].reduce((acc, item) => {
+      const isSelected = item.id ? (selectedItems.has(item.id) || selectedOwnItems.has(item.id)) : (item.codigo ? selectedOwnItems.has(item.codigo) : false);
+      const isApproved = item.status === "aprovado";
+      if (isSelected || isApproved) {
+        return acc + item.qtdEstimada * item.valorUnitario;
+      }
+      return acc;
+    }, 0),
+    [filteredOwnItems, recebidosTableItems, selectedItems, selectedOwnItems],
   );
   const gastoServicosDiretoria = useMemo(() => {
     let list = servicosData.filter((s: ServicoItem) => s.status !== "rascunho");
@@ -592,11 +599,17 @@ const DiretoriaAprovacao = () => {
       list = list.filter(s => servicosCatalogoSet.has(s.item));
     }
     return list.reduce(
-      (acc: number, servico: ServicoItem) =>
-        acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
+      (acc: number, servico: ServicoItem) => {
+        const isSelected = servico.id ? selectedServicos.has(servico.id) : false;
+        const isApproved = servico.status === "aprovado";
+        if (isSelected || isApproved) {
+          return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0);
+        }
+        return acc;
+      },
       0
     );
-  }, [servicosData, selectedOption]);
+  }, [servicosData, selectedOption, servicosCatalogoSet, selectedServicos]);
 
   // Serviços da própria diretoria (apenas rascunhos)
   const servicosProprios: ServicoItem[] = useMemo(() => {

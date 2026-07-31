@@ -294,8 +294,15 @@ const GerenciaPanel = () => {
     () =>
       items
         .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id)
-        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [items, diretoria?.id],
+        .reduce((acc, item) => {
+          const isSelected = item.id ? selectedAquisicaoIds.has(item.id) : false;
+          const isApproved = item.status === "aprovado";
+          if (isSelected || isApproved) {
+            return acc + item.qtdEstimada * item.valorUnitario;
+          }
+          return acc;
+        }, 0),
+    [items, diretoria?.id, selectedAquisicaoIds],
   );
   const summary = useMemo(
     () => ({
@@ -1557,8 +1564,14 @@ const GerenciaPanel = () => {
             titulo={`Orçamento da Diretoria ${diretoria?.sigla} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
             gasto={displayedServicos.reduce(
-              (acc, servico) =>
-                acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
+              (acc, servico) => {
+                const isSelected = selectedServicos.has(servico.item);
+                const isApproved = servico.status === "aprovado";
+                if (isSelected || isApproved) {
+                  return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0);
+                }
+                return acc;
+              },
               0,
             )}
           />
