@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2, ArrowUp, ArrowDown, ArrowUpDown, Search, Lock } from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import { Button } from "@/components/ui/button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
@@ -127,6 +128,11 @@ const DiretoriaAprovacao = () => {
   }>({ open: false, action: null });
   const [confirmComprasOpen, setConfirmComprasOpen] = useState(false);
 
+  const [actionOwnDialog, setActionOwnDialog] = useState<{
+    open: boolean;
+    action: "aprovar" | "rejeitar" | "devolver" | "analisar" | null;
+  }>({ open: false, action: null });
+
   // Estado do dialog de novo serviço da diretoria
   const [novoServicoOpen, setNovoServicoOpen] = useState(false);
   const [novoServicoLoading, setNovoServicoLoading] = useState(false);
@@ -224,6 +230,13 @@ const DiretoriaAprovacao = () => {
   });
 
   const periodAtivo = periodos[0];
+
+  const isPeriodExpired = useMemo(() => {
+    if (!periodAtivo?.fim) return false;
+    const dataFim = new Date(periodAtivo.fim);
+    dataFim.setHours(23, 59, 59, 999);
+    return new Date() > dataFim;
+  }, [periodAtivo]);
 
   const solicitacoesQueryKey = ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id];
   const servicosQueryKey = ["servicos-diretoria", diretoria?.id, periodAtivo?.id];
@@ -338,6 +351,7 @@ const DiretoriaAprovacao = () => {
           diretoriaOrcamentariaId,
           diretoriaOrcamentariaSigla: diretoriaOrcamentaria?.sigla || diretoriaSolicitante?.sigla,
           isOrcamentoCompartilhado: diretoriaSolicitante?.id !== diretoriaOrcamentariaId,
+          gerencia_id: s.gerencia_id,
         };
       })
       // Não filtramos por diretoriaOrcamentariaId aqui — todos os itens da diretoria
@@ -374,6 +388,7 @@ const DiretoriaAprovacao = () => {
         observacao: s.observacao || "",
         status: s.status as SolicitacaoStatus,
         justificativaRejeicao: "",
+        gerencia_id: s.gerencia_id,
       });
     });
 
@@ -483,14 +498,16 @@ const DiretoriaAprovacao = () => {
   }, [catalogItems]);
 
   const itensPropriosMap = useMemo(() => {
-    return new Map(itensProprios.map((item) => [item.codigo, item]));
-  }, [itensProprios]);
+    const targetGerenciaId = ownGerenciaId === "diretoria" ? diretoria?.id : ownGerenciaId;
+    const allItems = [...items, ...itensProprios].filter(i => i.gerencia_id === targetGerenciaId);
+    return new Map(allItems.map((item) => [item.codigo, item]));
+  }, [items, itensProprios, ownGerenciaId, diretoria]);
 
   const filteredOwnItems = useMemo(() => {
     const term = debouncedOwnSearchTerm.trim().toLowerCase();
     
     // Otimização extrema de performance: se a UI vai esconder a tabela, nem processe os 4000 itens
-    if (term === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados) {
+    if (term === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados && !ownShowOnlyAprovados) {
       return [];
     }
 
@@ -534,7 +551,11 @@ const DiretoriaAprovacao = () => {
       if (ownShowOnlyComQuantidade && planItem.qtdEstimada <= 0) continue;
 
       // Filtro de itens aprovados
-      if (ownShowOnlyAprovados && planItem.status !== "aprovado") continue;
+      if (ownShowOnlyAprovados) {
+        if (planItem.status !== "aprovado") continue;
+      } else {
+        if (planItem.status === "aprovado") continue;
+      }
 
       results.push(planItem);
     }
@@ -595,7 +616,7 @@ const DiretoriaAprovacao = () => {
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoDiretoria = useMemo(
-    () => [...filteredOwnItems, ...recebidosTableItems].reduce((acc, item) => {
+    () => [...items, ...itensProprios].reduce((acc, item) => {
       const isSelected = item.id ? (selectedItems.has(item.id) || selectedOwnItems.has(item.id)) : (item.codigo ? selectedOwnItems.has(item.codigo) : false);
       const isApproved = item.status === "aprovado";
       if (isSelected || isApproved) {
@@ -603,21 +624,37 @@ const DiretoriaAprovacao = () => {
       }
       return acc;
     }, 0),
-    [filteredOwnItems, recebidosTableItems, selectedItems, selectedOwnItems],
+    [items, itensProprios, selectedItems, selectedOwnItems],
   );
   const gastoServicosDiretoria = useMemo(() => {
-    let list = servicosData.filter((s: ServicoItem) => s.status !== "rascunho");
+    const catalogSelected = Array.from(selectedServicos)
+      .filter(id => !String(id).includes("-"))
+      .map(itemCode => {
+        const catItem = (servicosCatalogoData as any[]).find(c => String(c.item) === String(itemCode));
+        if (!catItem) return null;
+        return {
+          id: undefined,
+          item: catItem.item,
+          estimativaValor: catItem.estimativa_valor || 0,
+          dotacaoOrcamentaria: catItem.dotacao_orcamentaria || 0,
+          status: "rascunho"
+        } as unknown as ServicoItem;
+      })
+      .filter(Boolean) as ServicoItem[];
+
+    let list = [...servicosData, ...catalogSelected];
+    
     if (selectedOption === "servicos_novos") {
-      list = list.filter(s => !servicosCatalogoSet.has(s.item));
+      list = list.filter((s: ServicoItem) => !servicosCatalogoSet.has(s.item));
     } else if (selectedOption === "servicos_existentes") {
-      list = list.filter(s => servicosCatalogoSet.has(s.item));
+      list = list.filter((s: ServicoItem) => servicosCatalogoSet.has(s.item));
     }
     return list.reduce(
       (acc: number, servico: ServicoItem) => {
-        const isSelected = servico.id ? selectedServicos.has(servico.id) : false;
+        const isSelected = servico.id ? selectedServicos.has(servico.id) : selectedServicos.has(String(servico.item));
         const isApproved = servico.status === "aprovado";
         if (isSelected || isApproved) {
-          return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0);
+          return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || (servico as any).estimativa_valor || 0);
         }
         return acc;
       },
@@ -669,6 +706,8 @@ const DiretoriaAprovacao = () => {
     }
     if (ownServicosShowOnlyAprovados) {
       list = list.filter(s => s.status === "aprovado");
+    } else {
+      list = list.filter(s => s.status !== "aprovado");
     }
     if (ownServicosShowOnlyZerados) {
       list = list.filter(s => !(s as any).estimativa_valor && !s.estimativaValor || (s as any).estimativa_valor === 0 || s.estimativaValor === 0);
@@ -854,7 +893,7 @@ const DiretoriaAprovacao = () => {
   };
 
   const ensureSolicitacaoDiretoria = async (codigo: number, updates: Partial<PlanItem>) => {
-    const itemExistente = itensProprios.find((item) => Number(item.codigo) === codigo);
+    const itemExistente = itensPropriosMap.get(codigo);
 
     if (itemExistente?.id) {
       queryClient.setQueryData(solicitacoesQueryKey, (current: any) => {
@@ -867,6 +906,7 @@ const DiretoriaAprovacao = () => {
                 observacao: updates.observacao ?? row.observacao,
                 prioridade: updates.prioridade ?? row.prioridade,
                 unidade: updates.unidade ?? row.unidade,
+                status: updates.status ?? row.status,
               }
             : row,
         );
@@ -900,7 +940,7 @@ const DiretoriaAprovacao = () => {
       unidade: updates.unidade ?? itemCatalogo.unidade,
       valor_unitario: updates.valorUnitario ?? itemCatalogo.valorUnitario,
       observacao: updates.observacao || "",
-      status: "rascunho",
+      status: updates.status || "rascunho",
       diretoria_id: diretoria.id,
       periodo_id: periodAtivo.id,
     };
@@ -922,7 +962,7 @@ const DiretoriaAprovacao = () => {
       qtdEstimada: updates.qtdEstimada ?? 0,
       prioridade: updates.prioridade ?? itemCatalogo.prioridade,
       observacao: updates.observacao || undefined,
-      status: "rascunho",
+      status: updates.status || "rascunho",
     });
 
     queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
@@ -940,48 +980,83 @@ const DiretoriaAprovacao = () => {
     await ensureSolicitacaoDiretoria(codigo, { prioridade });
   };
 
-  const handleDeleteSolicitacao = async (itemId: string) => {
-    if (!confirm("Deseja realmente devolver este item para rascunho?")) return;
-    try {
-      const itemToUpdate = [...items, ...itensProprios].find(i => i.id === itemId);
-      
-      // Atualização otimista
-      queryClient.setQueryData(solicitacoesQueryKey, (oldData: any) => {
-        if (!oldData) return oldData;
-        return oldData.map((s: any) => {
-          if (s.id === itemId) {
-            if (itemToUpdate && itemToUpdate.status === "rascunho") {
-              return { ...s, qtd_estimada: 0 };
-            }
-            return { ...s, status: "rascunho" };
-          }
-          return s;
-        });
-      });
+  const handleActionOwnSubmit = async () => {
+    if (!actionOwnDialog.action) return;
 
-      if (itemToUpdate && itemToUpdate.status === "rascunho") {
-        await updateSolicitacao(itemId, { qtdEstimada: 0 });
-      } else {
-        await updateSolicitacao(itemId, { status: "rascunho" });
+    const actionMap = {
+      aprovar: "aprovado" as SolicitacaoStatus,
+      rejeitar: "rejeitado" as SolicitacaoStatus,
+      devolver: "rascunho" as SolicitacaoStatus,
+      analisar: "em_analise" as SolicitacaoStatus,
+    };
+
+    const newStatus = actionMap[actionOwnDialog.action];
+    const itemsToUpdate = Array.from(selectedOwnItems);
+    
+    if (itemsToUpdate.length === 0) {
+      setActionOwnDialog({ open: false, action: null });
+      return;
+    }
+
+    setActionOwnDialog({ open: false, action: null });
+    setJustificativa("");
+    
+    try {
+      const idsToApprove = itemsToUpdate.filter(id => typeof id === 'string') as string[];
+      const catalogCodesToApprove = itemsToUpdate.filter(id => typeof id === 'number') as number[];
+      
+      // Update local codes (itensProprios logic)
+      if (catalogCodesToApprove.length > 0) {
+        for (const codigo of catalogCodesToApprove) {
+          await ensureSolicitacaoDiretoria(codigo, { status: newStatus });
+        }
       }
       
-      setSelectedOwnItems(prev => {
-        const next = new Set(prev);
-        next.delete(itemId);
-        return next;
-      });
-      setSelectedItems(prev => {
-        const next = new Set(prev);
-        next.delete(itemId);
-        return next;
-      });
+      // Update actual UUIDs
+      if (idsToApprove.length > 0) {
+        // Atualização otimista
+        queryClient.setQueryData(solicitacoesQueryKey, (oldData: any) => {
+          if (!Array.isArray(oldData)) return oldData;
+          return oldData.map((s: any) => 
+            idsToApprove.includes(s.id) ? { ...s, status: newStatus } : s
+          );
+        });
 
-      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id] });
-      toast({ title: "Item devolvido", description: "Solicitação devolvida para rascunho com sucesso." });
-    } catch (error) {
-      console.error("Erro ao devolver solicitação:", error);
-      toast({ title: "Erro ao devolver", description: "Não foi possível devolver a solicitação.", variant: "destructive" });
+        await updateSolicitacaoStatusBulk(idsToApprove, newStatus, justificativa || undefined);
+      }
+      
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      
+      let actionText = "processado(s)";
+      if (actionOwnDialog.action === "aprovar") actionText = "aprovado(s)";
+      else if (actionOwnDialog.action === "rejeitar") actionText = "rejeitado(s)";
+      else if (actionOwnDialog.action === "devolver") actionText = "devolvido(s) ao rascunho";
+      else if (actionOwnDialog.action === "analisar") actionText = "retornado(s) para análise";
+
+      toast({
+        title: "Ação executada",
+        description: `${itemsToUpdate.length} item(ns) ${actionText} com sucesso.`,
+      });
+      setSelectedOwnItems(new Set());
+    } catch (error: any) {
+      console.error("Erro ao executar ação (Seus Itens):", error);
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível executar a ação.",
+        variant: "destructive",
+      });
     }
+  };
+
+  const handleDeleteSolicitacao = async (itemId: string) => {
+    setSelectedItems(new Set([itemId]));
+    setActionDialog({ open: true, action: "devolver", isBulk: false });
+  };
+
+  const handleOwnDevolverIndividual = (itemId: string | number) => {
+    setSelectedOwnItems(new Set([itemId]));
+    setActionOwnDialog({ open: true, action: "devolver" });
   };
 
   const openSolicitacaoEditor = (item: PlanItem) => {
@@ -1016,6 +1091,11 @@ const DiretoriaAprovacao = () => {
   const openServicoEditor = (servico: ServicoItem) => {
     setServicoEdicao(servico);
     setServicoEditOpen(true);
+  };
+
+  const handleDevolverServicoDiretoria = async (servicoId: string) => {
+    setSelectedServicos(new Set([servicoId]));
+    setActionServicosDialog({ open: true, action: "devolver" });
   };
 
   const handleDeleteServicoDiretoria = async (servicoId: string) => {
@@ -1401,7 +1481,7 @@ const DiretoriaAprovacao = () => {
       if (validIds.length > 0) {
         // Atualização otimista
         queryClient.setQueryData(solicitacoesQueryKey, (oldData: any) => {
-          if (!oldData) return oldData;
+          if (!Array.isArray(oldData)) return oldData;
           return oldData.map((s: any) => 
             validIds.includes(s.id) ? { ...s, status: newStatus } : s
           );
@@ -1421,12 +1501,12 @@ const DiretoriaAprovacao = () => {
         title: "Ação executada",
         description: `${itemsToUpdate.length} item(ns) ${actionText} com sucesso.`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao executar ação:", error);
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast({
         title: "Erro",
-        description: "Não foi possível executar a ação.",
+        description: error?.message || "Não foi possível executar a ação.",
         variant: "destructive",
       });
     }
@@ -1728,6 +1808,21 @@ const DiretoriaAprovacao = () => {
     );
   }
 
+  if (isPeriodExpired) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
+        <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
+          <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
+            <Lock className="h-10 w-10 text-destructive" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-3">Período Encerrado</h2>
+          <p className="text-slate-600 mb-8 leading-relaxed">O prazo para o preenchimento e aprovação do Plano Anual de Contratações foi encerrado. Não é mais possível acessar ou modificar as solicitações.</p>
+          <Button onClick={() => navigate("/")} className="w-full text-base h-12" size="lg">Voltar para a Página Inicial</Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!authenticated) {
     return (
       <AccessCodeScreen
@@ -1758,19 +1853,13 @@ const DiretoriaAprovacao = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />
-                Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">Diretoria {diretoria.sigla}</Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => navigate("/")}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: diretoria.sigla },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-8">
@@ -1852,19 +1941,14 @@ const DiretoriaAprovacao = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />
-                Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">Diretoria {diretoria?.sigla}</Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => setSelectedOption(null)}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: diretoria?.sigla || "" },
+              { label: "Serviços", isActive: true },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-8">
@@ -2122,6 +2206,15 @@ const DiretoriaAprovacao = () => {
                           <Button
                             variant="ghost"
                             size="icon"
+                            className="h-7 w-7 text-orange-600 hover:text-orange-700"
+                            title="Devolver para Rascunho"
+                            onClick={() => handleDevolverServicoDiretoria(servico.id!)}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="h-7 w-7 text-destructive"
                             title="Excluir"
                             onClick={() => handleDeleteServicoDiretoria(servico.id!)}
@@ -2155,20 +2248,15 @@ const DiretoriaAprovacao = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />
-                Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">{siglaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-blue-50">Serviços - Aprovação</Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => setSelectedOption("servicos")}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: siglaUpper },
+              { label: "Serviços", onClick: () => setSelectedOption("servicos") },
+              { label: selectedOption === "servicos_novos" ? "Novos Serviços" : "Serviços Existentes", isActive: true },
+            ]}
+          />
 
           <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-6">
             <div className="max-w-7xl mx-auto">
@@ -2267,26 +2355,20 @@ const DiretoriaAprovacao = () => {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="gap-2 text-destructive hover:bg-destructive/10"
-                          onClick={async () => {
-                            if (confirm(`Deseja realmente excluir ${selectedServicos.size} serviço(s) selecionado(s)?`)) {
-                              try {
-                                const ids = Array.from(selectedServicos);
-                                const realIds = ids.filter(id => typeof id === "string" && id.includes('-'));
-                                if (realIds.length > 0) {
-                                  await deleteServicosBulk(realIds);
-                                }
-                                setSelectedServicos(new Set());
-                                toast({ title: "Excluídos", description: "Serviços excluídos com sucesso." });
-                                queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
-                              } catch (e) {
-                                toast({ title: "Erro", description: "Erro ao excluir.", variant: "destructive" });
-                              }
-                            }
-                          }}
+                          className="gap-2 text-muted-foreground"
+                          onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
                         >
-                          <Trash2 className="h-4 w-4" />
-                          Excluir ({selectedServicos.size})
+                          <Undo2 className="h-4 w-4" />
+                          Devolver para Rascunho ({selectedServicos.size})
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setActionServicosDialog({ open: true, action: "rejeitar" })}
+                        >
+                          <XCircle className="h-4 w-4" />
+                          Rejeitar ({selectedServicos.size})
                         </Button>
                         {selectedOption !== "servicos_novos" && (
                           <Button
@@ -2303,33 +2385,11 @@ const DiretoriaAprovacao = () => {
                           variant="default" 
                           size="sm" 
                           className="gap-2 bg-success hover:bg-success/90 text-white"
-                          onClick={async () => {
-                            if (confirm(`Deseja realmente aprovar ${selectedServicos.size} serviço(s) selecionado(s)?`)) {
-                              try {
-                                const ids = Array.from(selectedServicos);
-                                const realIds: string[] = [];
-                                for (const idOrCode of ids) {
-                                if (idOrCode.includes('-')) {
-                                  realIds.push(idOrCode);
-                                } else {
-                                  await ensureServicoDiretoria(Number(idOrCode), { status: "aprovado" });
-                                }
-                              }
-                              if (realIds.length > 0) {
-                                await updateSolicitacaoStatusBulk(realIds, "aprovado");
-                              }
-                              setSelectedServicos(new Set());
-                              toast({ title: "Aprovados", description: "Serviços aprovados com sucesso." });
-                              queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
-                            } catch (e) {
-                              toast({ title: "Erro", description: "Erro ao aprovar.", variant: "destructive" });
-                            }
-                          }
-                        }}
-                      >
-                        <Send className="h-4 w-4" />
-                        Aprovar ({selectedServicos.size})
-                      </Button>
+                          onClick={() => setActionServicosDialog({ open: true, action: "aprovar" })}
+                        >
+                          <Send className="h-4 w-4" />
+                          Aprovar ({selectedServicos.size})
+                        </Button>
                       </>
                     )}
                   </div>
@@ -2863,28 +2923,6 @@ const DiretoriaAprovacao = () => {
       );
     }
 
-  const isPeriodExpired = useMemo(() => {
-    if (!periodAtivo?.fim) return false;
-    const dataFim = new Date(periodAtivo.fim);
-    dataFim.setHours(23, 59, 59, 999);
-    return new Date() > dataFim;
-  }, [periodAtivo]);
-
-  if (isPeriodExpired) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
-        <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
-          <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
-            <Lock className="h-10 w-10 text-destructive" />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-3">Período Encerrado</h2>
-          <p className="text-slate-600 mb-8 leading-relaxed">O prazo para o preenchimento e aprovação do Plano Anual de Contratações foi encerrado. Não é mais possível acessar ou modificar as solicitações.</p>
-          <Button onClick={() => navigate("/")} className="w-full text-base h-12" size="lg">Voltar para a Página Inicial</Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
       <div
@@ -2899,17 +2937,15 @@ const DiretoriaAprovacao = () => {
       </div>
       <div className="relative z-10">
       {/* Top Bar */}
-      <div className="px-6 py-3 bg-card border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Button>
-          <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}><Home className="h-4 w-4" />Página inicial</Button>
-          <Badge variant="outline" className="text-xs">Painel da Diretoria</Badge>
-          
-          {/* Tabs: Aquisição e Serviços */}
-          <div className="ml-auto flex gap-2">
+      <PageBreadcrumb
+        onBack={() => setSelectedOption(null)}
+        onHome={() => navigate("/")}
+        crumbs={[
+          { label: diretoria?.sigla || "" },
+          { label: "Aquisição", isActive: true },
+        ]}
+        rightContent={
+          <div className="flex gap-2">
             <Button
               variant={approvalTab === "aquisicao" ? "default" : "outline"}
               size="sm"
@@ -2931,9 +2967,8 @@ const DiretoriaAprovacao = () => {
               Serviços
             </Button>
           </div>
-        </div>
-      </div>
-
+        }
+      />
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-6">
         <div className="max-w-7xl mx-auto">
@@ -3023,6 +3058,49 @@ const DiretoriaAprovacao = () => {
               >
                 {ownShowOnlyAprovados ? "Mostrando apenas itens aprovados" : "Filtrar aprovados"}
               </Button>
+              {selectedOwnItems.size > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 text-muted-foreground"
+                    onClick={() => setActionOwnDialog({ open: true, action: "devolver" })}
+                  >
+                    <Undo2 className="h-4 w-4" />
+                    Devolver para Rascunho ({selectedOwnItems.size})
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setActionOwnDialog({ open: true, action: "rejeitar" })}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    Rejeitar ({selectedOwnItems.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => {
+                      setEditingBulkOwn(true);
+                      setBulkEditAquisicaoOpen(true);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar ({selectedOwnItems.size})
+                  </Button>
+                  <Button 
+                    variant="default" 
+                    size="sm" 
+                    className="gap-2 bg-success hover:bg-success/90 text-white"
+                    onClick={() => setActionOwnDialog({ open: true, action: "aprovar" })}
+                  >
+                    <Send className="h-4 w-4" />
+                    Aprovar ({selectedOwnItems.size})
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -3037,7 +3115,7 @@ const DiretoriaAprovacao = () => {
           categorias={categoriasItensProprios}
         />
 
-        {ownSearchTerm.trim() === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados ? (
+        {ownSearchTerm.trim() === "" && !ownShowOnlyComQuantidade && !ownShowOnlyZerados && !ownShowOnlyAprovados ? (
           <div className="text-center py-8 bg-card rounded-lg border border-dashed">
             <p className="text-sm text-muted-foreground">🔍 Digite o código ou descrição para buscar itens do catálogo.</p>
           </div>
@@ -3047,71 +3125,14 @@ const DiretoriaAprovacao = () => {
           </div>
         ) : (
           <>
-            {selectedOwnItems.size > 0 && (
-              <div className="mb-4 flex items-center gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
-                  onClick={async () => {
-                    if (confirm(`Deseja realmente devolver para rascunho ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
-                      for (const id of selectedOwnItems) {
-                        if (typeof id === 'string') {
-                          await handleDeleteSolicitacao(id);
-                        }
-                      }
-                      setSelectedOwnItems(new Set());
-                    }
-                  }}
-                >
-                  <Undo2 className="h-4 w-4" />
-                  Devolver para Rascunho ({selectedOwnItems.size})
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="gap-2 text-primary border-primary hover:bg-primary/10"
-                  onClick={() => {
-                    setEditingBulkOwn(true);
-                    setBulkEditAquisicaoOpen(true);
-                  }}
-                >
-                  <Pencil className="h-4 w-4" />
-                  Editar Selecionados
-                </Button>
-                <Button 
-                  variant="default" 
-                  size="sm" 
-                  className="gap-2 bg-success hover:bg-success/90 text-white"
-                  onClick={async () => {
-                    if (confirm(`Deseja realmente aprovar ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
-                      const idsToApprove = Array.from(selectedOwnItems).filter(id => typeof id === 'string') as string[];
-                      if (idsToApprove.length > 0) {
-                        try {
-                          await updateSolicitacaoStatusBulk(idsToApprove, "aprovado");
-                          setSelectedOwnItems(new Set());
-                          toast({ title: "Itens aprovados", description: "Os itens selecionados foram aprovados com sucesso." });
-                          queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
-                        } catch (e) {
-                          toast({ title: "Erro", description: "Erro ao aprovar itens.", variant: "destructive" });
-                        }
-                      }
-                    }
-                  }}
-                >
-                  <Send className="h-4 w-4" />
-                  Aprovar ({selectedOwnItems.size})
-                </Button>
-              </div>
-            )}
             <PlanTable
               items={ownPaginationData.paginatedItems}
               onUpdateQtdEstimada={handleUpdateQtdEstimadaDiretoria}
               onUpdateUnidade={handleUpdateUnidadeDiretoria}
               onUpdateObservacao={handleUpdateObservacaoDiretoria}
               onUpdatePrioridade={handleUpdatePrioridadeDiretoria}
-              onDeleteItem={handleDeleteSolicitacao}
-              valorTotal={itensProprios.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
+              onDeleteItem={handleOwnDevolverIndividual}
+              valorTotal={Array.from(itensPropriosMap.values()).reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
               selectedItems={selectedOwnItems}
               onToggleSelect={(id) => {
                 const newSet = new Set(selectedOwnItems);
@@ -3789,6 +3810,57 @@ const DiretoriaAprovacao = () => {
             <Button 
               onClick={handleAction}
               disabled={(actionDialog.action === "rejeitar" || actionDialog.action === "devolver") && !justificativa.trim()}
+            >
+              Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Ação para Seus Itens (Aquisição) */}
+      <Dialog open={actionOwnDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setActionOwnDialog({ open: false, action: null });
+          setJustificativa("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {actionOwnDialog.action === "aprovar" && "Aprovar Itens"}
+              {actionOwnDialog.action === "rejeitar" && "Rejeitar Itens"}
+              {actionOwnDialog.action === "devolver" && "Devolver Itens para Rascunho"}
+              {actionOwnDialog.action === "analisar" && "Voltar Itens para Análise"}
+            </DialogTitle>
+            <DialogDescription>
+              {actionOwnDialog.action === "aprovar" && `Tem certeza que deseja aprovar os ${selectedOwnItems.size} item(ns) selecionado(s)?`}
+              {actionOwnDialog.action === "rejeitar" && `Por favor, forneça uma justificativa para a rejeição dos ${selectedOwnItems.size} item(ns) (opcional):`}
+              {actionOwnDialog.action === "devolver" && `Tem certeza que deseja devolver os ${selectedOwnItems.size} item(ns) para Rascunho? Por favor, forneça uma justificativa:`}
+              {actionOwnDialog.action === "analisar" && `Tem certeza que deseja retornar os ${selectedOwnItems.size} item(ns) para análise?`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {(actionOwnDialog.action === "rejeitar" || actionOwnDialog.action === "devolver") && (
+            <div className="py-4">
+              <Textarea
+                placeholder="Motivo da devolução/rejeição..."
+                value={justificativa}
+                onChange={(e) => setJustificativa(e.target.value)}
+                rows={4}
+              />
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setActionOwnDialog({ open: false, action: null });
+              setJustificativa("");
+            }}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleActionOwnSubmit}
+              disabled={(actionOwnDialog.action === "rejeitar" || actionOwnDialog.action === "devolver") && !justificativa.trim()}
             >
               Confirmar
             </Button>

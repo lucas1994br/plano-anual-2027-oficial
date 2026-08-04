@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Users, Shield, Home } from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -168,12 +169,13 @@ const DiretoriaPlano = () => {
           />
         </div>
         <div className="relative z-10">
-        <div className="px-6 py-3 bg-card border-b">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}><ArrowLeft className="h-4 w-4" />Voltar</Button>
-            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}><Home className="h-4 w-4" />Página inicial</Button>
-          </div>
-        </div>
+        <PageBreadcrumb
+          onBack={() => navigate("/")}
+          onHome={() => navigate("/")}
+          crumbs={[
+            { label: diretoria.sigla },
+          ]}
+        />
         <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
           <div className="max-w-3xl mx-auto text-center">
             <div className="flex items-center justify-center gap-3 mb-3">
@@ -276,14 +278,14 @@ const DiretoriaPlano = () => {
         />
       </div>
       <div className="relative z-10">
-      <div className="px-6 py-3 bg-card border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}><Home className="h-4 w-4" />Página inicial</Button>
-          <Badge variant="outline" className="text-xs">
-            {tipoPlano === "aquisicao" ? "Aquisição" : "Serviços"}
-          </Badge>
-        </div>
-      </div>
+      <PageBreadcrumb
+        onBack={() => navigate("/")}
+        onHome={() => navigate("/")}
+        crumbs={[
+          { label: diretoria.sigla },
+          { label: tipoPlano === "aquisicao" ? "Aquisição" : "Serviços", isActive: true },
+        ]}
+      />
       <PlanHeader title="Plano Anual de Contratações" diretoria={`${diretoria.sigla} - ${diretoria.nome}`} ano={2026} prazo={prazo} />
       <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
       <PlanFilters searchTerm={searchTerm} onSearchChange={setSearchTerm} categoria={categoria} onCategoriaChange={setCategoria} gerencia={gerencia} onGerenciaChange={setGerencia} prioridade={prioridade} onPrioridadeChange={setPrioridade} categorias={categorias} gerencias={(gerenciasData as any[]).map((g: any) => g.sigla)} />

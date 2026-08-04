@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, FileText, BarChart3, TrendingUp, PieChart as PieChartIcon, Table as TableIcon, Filter, CalendarDays, Activity, Target } from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -696,13 +697,18 @@ const AdminDiretoriaDashboard = () => {
         </div>
       )}
 
+      <PageBreadcrumb
+        onBack={() => navigate("/admin")}
+        onHome={() => navigate("/")}
+        crumbs={[
+          { label: "Admin", onClick: () => navigate("/admin") },
+          { label: `Dashboard ${currentDirUpper}`, isActive: true },
+        ]}
+      />
+
       {/* HEADER GRADIENTE */}
       <div className="bg-gradient-to-r from-blue-900 to-indigo-900 px-6 py-8 text-white shadow-lg">
         <div className="max-w-7xl mx-auto">
-          <Button variant="ghost" className="text-white/80 hover:text-white hover:bg-white/10 mb-4 px-0" onClick={() => navigate("/admin")}>
-            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar para o Painel Principal
-          </Button>
-          
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
               <div className="flex items-center gap-3 mb-2">

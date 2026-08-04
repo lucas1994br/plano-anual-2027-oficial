@@ -339,54 +339,24 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                     <Badge variant="outline" className="text-xs">{item.unidade}</Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    {editingCodigo === item.codigo || item.qtdEstimada === 0 ? (
-                      <Input
-                        ref={editingCodigo === item.codigo ? editInputRef : undefined}
-                        type="number"
-                        min="0"
-                        value={editingCodigo === item.codigo ? editValue : undefined}
-                        defaultValue={editingCodigo === item.codigo ? undefined : ""}
-                        onChange={(e) => {
-                          if (editingCodigo === item.codigo) {
-                            const raw = e.target.value;
-                            const normalized = raw.replace(/^0+(?=\d)/, "");
-                            setEditValue(normalized);
-                          }
-                        }}
-                        onBlur={(e) => {
-                          if (editingCodigo === item.codigo) {
-                            if (skipBlurSaveRef.current) {
-                              skipBlurSaveRef.current = false;
-                              return;
-                            }
-                            handleConfirmEdit(editInputRef.current?.value);
-                          } else {
-                            const val = parseInt(e.target.value) || 0;
-                            if (val !== item.qtdEstimada && onUpdateQtdEstimada) {
-                              onUpdateQtdEstimada(item.codigo, val);
-                            }
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            if (editingCodigo === item.codigo) {
-                              handleConfirmEdit((e.currentTarget as HTMLInputElement).value);
-                            } else {
-                              e.currentTarget.blur();
-                            }
-                          }
-                          if (e.key === "Escape" && editingCodigo === item.codigo) {
-                            e.preventDefault();
-                            handleCancelEdit();
-                          }
-                        }}
-                        className="w-20 h-8 text-center"
-                        autoFocus={editingCodigo === item.codigo}
-                      />
-                    ) : (
-                      item.qtdEstimada
-                    )}
+                    <Input
+                      type="number"
+                      min="0"
+                      defaultValue={item.qtdEstimada || ""}
+                      onBlur={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        if (val !== item.qtdEstimada && onUpdateQtdEstimada) {
+                          onUpdateQtdEstimada(item.codigo, val);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      className="w-20 h-8 text-center"
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     {formatCurrency(item.valorUnitario)}
@@ -418,82 +388,48 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-center gap-1">
-                      {editingCodigo === item.codigo ? (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-success"
-                            title="Salvar"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              skipBlurSaveRef.current = true;
-                            }}
-                            onClick={() => handleConfirmEdit(editInputRef.current?.value)}
-                          >
-                            <Check className="h-4 w-4" />
+                      <Popover
+                        open={observacaoOpen === item.codigo}
+                        onOpenChange={(open) => {
+                          if (open) handleOpenObservacao(item);
+                          else setObservacaoOpen(null);
+                        }}
+                      >
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MessageSquare className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive"
-                            onMouseDown={() => {
-                              skipBlurSaveRef.current = true;
-                            }}
-                            onClick={handleCancelEdit}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleStartEdit(item)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Popover
-                            open={observacaoOpen === item.codigo}
-                            onOpenChange={(open) => {
-                              if (open) handleOpenObservacao(item);
-                              else setObservacaoOpen(null);
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MessageSquare className="h-4 w-4" />
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80" align="end">
+                          <div className="space-y-3">
+                            <h4 className="font-medium text-sm">Observação</h4>
+                            <Textarea
+                              value={observacaoText}
+                              onChange={(e) => setObservacaoText(e.target.value)}
+                              placeholder="Digite a observação..."
+                              rows={3}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button variant="outline" size="sm" onClick={() => setObservacaoOpen(null)}>
+                                Cancelar
                               </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80" align="end">
-                              <div className="space-y-3">
-                                <h4 className="font-medium text-sm">Observação</h4>
-                                <Textarea
-                                  value={observacaoText}
-                                  onChange={(e) => setObservacaoText(e.target.value)}
-                                  placeholder="Digite a observação..."
-                                  rows={3}
-                                />
-                                <div className="flex justify-end gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => setObservacaoOpen(null)}>
-                                    Cancelar
-                                  </Button>
-                                  <Button size="sm" onClick={handleSaveObservacao}>
-                                    Salvar
-                                  </Button>
-                                </div>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                          {item.status === "rascunho" && onDeleteItem && item.id && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                              title="Devolver para Rascunho"
-                              onClick={() => onDeleteItem(item.id!)}
-                            >
-                              <Undo2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </>
+                              <Button size="sm" onClick={handleSaveObservacao}>
+                                Salvar
+                              </Button>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      {onDeleteItem && item.id && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                          title="Devolver para Rascunho"
+                          onClick={() => onDeleteItem(item.id!)}
+                        >
+                          <Undo2 className="h-4 w-4" />
+                        </Button>
                       )}
                     </div>
                   </TableCell>

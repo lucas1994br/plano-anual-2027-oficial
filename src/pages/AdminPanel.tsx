@@ -9,6 +9,7 @@ const DIRETORIA_GERENCIAS: Record<string, string[]> = {
   "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
 };
 import { ArrowLeft, Calendar, Save, Shield, Users, Clock, RefreshCw, Plus } from "lucide-react";
+import { PageBreadcrumb } from "../components/layout/PageBreadcrumb";
 import { Button } from "../components/ui/button.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
@@ -190,17 +191,13 @@ const AdminPanel = () => {
         />
       </div>
       <div className="relative z-10">
-        <div className="px-6 py-3 bg-card border-b">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-              <ArrowLeft className="h-4 w-4" />
-              Voltar
-            </Button>
-            <Badge variant="outline" className="text-xs gap-1">
-              <Shield className="h-3 w-3" /> Administrador
-            </Badge>
-          </div>
-        </div>
+        <PageBreadcrumb
+          onBack={() => navigate("/")}
+          onHome={() => navigate("/")}
+          crumbs={[
+            { label: "Administrador" },
+          ]}
+        />
 
         <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
           <div className="max-w-5xl mx-auto flex items-center gap-4">

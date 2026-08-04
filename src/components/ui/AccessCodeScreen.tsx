@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { validateAccessCode } from "@/lib/services.ts";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 
 interface AccessCodeScreenProps {
   title: string;
@@ -57,12 +58,12 @@ export function AccessCodeScreen({
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="px-6 py-3 bg-card border-b">
-        <Button variant="ghost" size="sm" className="gap-2" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Button>
-      </div>
+      <PageBreadcrumb
+        onBack={onBack}
+        crumbs={[
+          { label: title },
+        ]}
+      />
 
       <div className={`bg-gradient-to-r ${gradientClass} px-6 py-8`}>
         <div className="max-w-md mx-auto text-center">

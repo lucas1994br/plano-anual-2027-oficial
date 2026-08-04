@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet, Search, Pencil, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, ShoppingBag, TrendingUp, FileDown, FileSpreadsheet, Search, Pencil, Trash2, Undo2, Home } from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -567,14 +568,13 @@ const ComprasPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => navigate("/")}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: "Compras" },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-8">
@@ -646,14 +646,14 @@ const ComprasPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => setSelectedOption(null)}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: "Compras", onClick: () => setSelectedOption(null) },
+              { label: "Serviços", isActive: true },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-8">
@@ -748,17 +748,15 @@ const ComprasPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption("servicos")}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Badge variant="outline" className="text-xs">
-                {isNovos ? "Novos Serviços" : "Serviços Existentes"}
-              </Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => setSelectedOption("servicos")}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: "Compras", onClick: () => setSelectedOption(null) },
+              { label: "Serviços", onClick: () => setSelectedOption("servicos") },
+              { label: isNovos ? "Novos Serviços" : "Serviços Existentes", isActive: true },
+            ]}
+          />
 
           {/* Header */}
           <div className={`bg-gradient-to-r ${isNovos ? "from-emerald-600 to-emerald-800" : "from-blue-600 to-blue-800"} px-6 py-6`}>
@@ -1052,16 +1050,15 @@ const ComprasPanel = () => {
         />
       </div>
       <div className="relative z-10">
-      <div className="px-6 py-3 bg-card border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Button>
-          <Badge variant="outline" className="text-xs">Painel de Compras</Badge>
-          <Badge variant="outline" className="text-xs bg-blue-50">Aquisição</Badge>
-        </div>
-      </div>
+        {/* Top Bar */}
+        <PageBreadcrumb
+          onBack={() => setSelectedOption(null)}
+          onHome={() => navigate("/")}
+          crumbs={[
+            { label: "Compras", onClick: () => setSelectedOption(null) },
+            { label: "Aquisição", isActive: true },
+          ]}
+        />
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-6">

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2, Lock } from "lucide-react";
+import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,15 @@ const GerenciaPanel = () => {
     orcamentoConfig,
     categoryBudgetOwnersFromDb,
   } = useGerenciaData(siglaUpper, gerenciaUpper);
+
+  const isPeriodExpired = useMemo(() => {
+    if (!periodAtivo?.fim) return false;
+    const dataFim = new Date(periodAtivo.fim);
+    dataFim.setHours(23, 59, 59, 999);
+    return new Date() > dataFim;
+  }, [periodAtivo]);
+
+
 
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
@@ -851,19 +861,13 @@ const GerenciaPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate(`/diretoria/${sigla}`)}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />
-                Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => navigate(`/diretoria/${sigla}`)}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: gerenciaUpper },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
@@ -938,20 +942,14 @@ const GerenciaPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />
-                Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">Serviços</Badge>
-            </div>
-          </div>
+          <PageBreadcrumb
+            onBack={() => setSelectedOption(null)}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: gerenciaUpper },
+              { label: "Serviços", isActive: true },
+            ]}
+          />
 
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
@@ -1435,49 +1433,40 @@ const GerenciaPanel = () => {
         </div>
         <div className="relative z-10">
           {/* Top Bar */}
-          <div className="px-6 py-3 bg-card border-b flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption("servicos")}>
-                <ArrowLeft className="h-4 w-4" />Voltar
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}>
-                <Home className="h-4 w-4" />Página inicial
-              </Button>
-              <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-              <Badge variant="outline" className="text-xs bg-green-50 text-green-700">
-                {selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços"}
+          <PageBreadcrumb
+            onBack={() => setSelectedOption("servicos")}
+            onHome={() => navigate("/")}
+            crumbs={[
+              { label: gerenciaUpper },
+              { label: "Serviços", onClick: () => setSelectedOption("servicos") },
+              { label: selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", isActive: true },
+            ]}
+            rightContent={isAllSent ? (
+              <Badge className="bg-info text-info-foreground text-sm gap-1 py-2 px-4">
+                <Eye className="h-4 w-4" /> Somente leitura
               </Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              {isAllSent && (
-                <Badge className="bg-info text-info-foreground text-sm gap-1 py-2 px-4">
-                  <Eye className="h-4 w-4" /> Somente leitura
-                </Badge>
-              )}
-              {canSendServicos && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
-                    onClick={handleBulkDeleteServicos}
-                    disabled={selectedServicos.size === 0}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Excluir Selecionados
-                  </Button>
-
-                  <Button
-                    className="gap-2"
-                    onClick={() => setConfirmSendServicosOpen(true)}
-                    disabled={selectedServicos.size === 0}
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar para Diretoria ({selectedServicos.size})
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
+            ) : canSendServicos ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                  onClick={handleBulkDeleteServicos}
+                  disabled={selectedServicos.size === 0}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir Selecionados
+                </Button>
+                <Button
+                  className="gap-2"
+                  onClick={() => setConfirmSendServicosOpen(true)}
+                  disabled={selectedServicos.size === 0}
+                >
+                  <Send className="h-4 w-4" />
+                  Enviar para Diretoria ({selectedServicos.size})
+                </Button>
+              </div>
+            ) : undefined}
+          />
 
           <PlanHeader
             title={`Painel da Gerência - ${selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços"}`}
@@ -1813,14 +1802,6 @@ const GerenciaPanel = () => {
       </div>
     );
   }
-
-  const isPeriodExpired = useMemo(() => {
-    if (!periodAtivo?.fim) return false;
-    const dataFim = new Date(periodAtivo.fim);
-    dataFim.setHours(23, 59, 59, 999);
-    return new Date() > dataFim;
-  }, [periodAtivo]);
-
   if (isPeriodExpired) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
@@ -1836,6 +1817,7 @@ const GerenciaPanel = () => {
     );
   }
 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
       <div
@@ -1849,32 +1831,28 @@ const GerenciaPanel = () => {
         />
       </div>
       <div className="relative z-10">
-      <div className="px-6 py-3 bg-card border-b">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSelectedOption(null)}>
-              <ArrowLeft className="h-4 w-4" />
-              Voltar
-            </Button>
-            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/")}><Home className="h-4 w-4" />Página inicial</Button>
-            <Badge variant="outline" className="text-xs">{gerenciaUpper}</Badge>
-            <Badge variant="outline" className="text-xs bg-blue-50">Aquisição</Badge>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+      <PageBreadcrumb
+        onBack={() => setSelectedOption(null)}
+        onHome={() => navigate("/")}
+        crumbs={[
+          { label: gerenciaUpper },
+          { label: "Aquisição", isActive: true },
+        ]}
+        rightContent={
+          <>
             {hasRascunhoItems && !hasApprovedItems && (
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
-                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10 flex-1 sm:flex-none"
+                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
                   onClick={handleBulkDeleteAquisicao}
                   disabled={selectedAquisicaoIds.size === 0}
                 >
                   <Trash2 className="h-4 w-4" />
                   Excluir
                 </Button>
-
                 <Button
-                  className="gap-2 flex-1 sm:flex-none"
+                  className="gap-2"
                   disabled={!canSend || selectedAquisicaoIds.size === 0}
                   onClick={() => setConfirmSendOpen(true)}
                 >
@@ -1893,9 +1871,9 @@ const GerenciaPanel = () => {
                 <Eye className="h-3 w-3" /> Somente leitura
               </Badge>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <PlanHeader
         title="Painel da Gerência"
