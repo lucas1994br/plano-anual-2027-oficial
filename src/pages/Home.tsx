@@ -166,11 +166,15 @@ const Home = () => {
                   <div className="flex flex-col">
                     <span className="text-sm font-bold">
                       {prazo
-                        ? `Prazo: ${format(prazo, "dd/MM/yyyy", { locale: ptBR })} — ${diasRestantes} dias restantes`
+                        ? (diasRestantes !== null && diasRestantes < 0) 
+                            ? `Prazo: ${format(prazo, "dd/MM/yyyy", { locale: ptBR })} — Encerrado` 
+                            : `Prazo: ${format(prazo, "dd/MM/yyyy", { locale: ptBR })} — ${diasRestantes} dias restantes`
                         : "Prazo: carregando..."}
                     </span>
                     <span className="text-[13.5px] opacity-90 leading-tight">
-                      Após a finalização do prazo, o link de acesso será bloqueado. Fique atento ao prazo!
+                      {diasRestantes !== null && diasRestantes < 0 
+                        ? "O prazo finalizou e o sistema está bloqueado para novas solicitações." 
+                        : "Após a finalização do prazo, o link de acesso será bloqueado. Fique atento ao prazo!"}
                     </span>
                   </div>
                 </div>
@@ -198,7 +202,13 @@ const Home = () => {
               <Card
                 key={dir.sigla}
                 className="p-0 overflow-hidden card-shadow cursor-pointer hover:shadow-lg transition-all hover:-translate-y-1 group"
-                onClick={() => navigate(`/diretoria/${dir.sigla.toLowerCase()}`)}
+                onClick={() => {
+                  if (diasRestantes !== null && diasRestantes < 0) {
+                    alert("O prazo para o Plano Anual de Contratações foi encerrado. Não é mais possível acessar.");
+                    return;
+                  }
+                  navigate(`/diretoria/${dir.sigla.toLowerCase()}`)
+                }}
               >
                 <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-4">
                   <div className="flex items-center justify-between">

@@ -32,7 +32,7 @@ import {
   saveAdminBudgetConfig,
 } from "@/lib/adminBudgetConfig.ts";
 import { CATEGORIAS_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata.ts";
-import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode.ts";
+import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils.ts";
@@ -59,6 +59,7 @@ const toNumber = (raw: string | number) => {
 };
 
 export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo[] }) {
+  const { descriptions: materialDescriptions } = useMaterialDescriptions();
   const queryClient = useQueryClient();
   const [diretoriaBudgetsAquisicao, setDiretoriaBudgetsAquisicao] = useState<Record<string, number>>({});
   const [diretoriaBudgetsServicos, setDiretoriaBudgetsServicos] = useState<Record<string, number>>({});
@@ -168,9 +169,9 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
     }, {});
     setRoutingRules(defaultRules);
 
-    const categoriasOrcamentarias = Array.from(new Set([
+    const categoriasOrcamentarias = Array.from(new Set<string>([
         ...CATEGORIAS_ITEM_PREDEFINIDAS,
-        ...Object.values(MATERIAL_DESCRIPTION_BY_CODE),
+        ...Object.values(materialDescriptions),
         ...Object.keys(categoryOwnersFromDb || {})
     ])).filter(Boolean);
 

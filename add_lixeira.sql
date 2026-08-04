@@ -1,0 +1,1 @@
+ALTER TABLE logs_atividades ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;

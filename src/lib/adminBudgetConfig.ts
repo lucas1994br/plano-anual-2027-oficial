@@ -121,3 +121,31 @@ export function getGerenciaBudget(
   const geralBudget = config.gerenciaBudgetsOrcamentoGeral?.[gerenciaId] ?? 0;
   return baseBudget + geralBudget;
 }
+
+export function getTotalDiretoriaBudget(
+  config: AdminBudgetConfig | null,
+  diretoriaId: string
+) {
+  if (!config) return 0;
+  
+  const aquisicao = config.diretoriaBudgetsAquisicao?.[diretoriaId] ?? config.diretoriaBudgets?.[diretoriaId] ?? 0;
+  const servicosNovos = config.diretoriaBudgetsServicosNovos?.[diretoriaId] ?? 0;
+  const servicosExistentes = config.diretoriaBudgetsServicosExistentes?.[diretoriaId] ?? 0;
+  const geral = config.diretoriaBudgetsOrcamentoGeral?.[diretoriaId] ?? 0;
+
+  return aquisicao + servicosNovos + servicosExistentes + geral;
+}
+
+export function getTotalGerenciaBudget(
+  config: AdminBudgetConfig | null,
+  gerenciaId: string
+) {
+  if (!config) return 0;
+  
+  const aquisicao = config.gerenciaBudgetsAquisicao?.[gerenciaId] ?? config.gerenciaBudgets?.[gerenciaId] ?? 0;
+  const servicosNovos = config.gerenciaBudgetsServicosNovos?.[gerenciaId] ?? 0;
+  const servicosExistentes = config.gerenciaBudgetsServicosExistentes?.[gerenciaId] ?? 0;
+  const geral = config.gerenciaBudgetsOrcamentoGeral?.[gerenciaId] ?? 0;
+
+  return aquisicao + servicosNovos + servicosExistentes + geral;
+}

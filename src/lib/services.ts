@@ -1778,6 +1778,18 @@ export async function getLogsAtividades() {
   const { data, error } = await supabase
     .from("logs_atividades")
     .select("*")
+    .is("is_deleted", false)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getLixeiraLogsAtividades() {
+  const { data, error } = await supabase
+    .from("logs_atividades")
+    .select("*")
+    .eq("is_deleted", true)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -1902,10 +1914,10 @@ export async function registrarLogsOrcamentariosBulk(
 export async function deleteLogAtividade(id: string): Promise<boolean> {
   const { error } = await supabase
     .from("logs_atividades")
-    .delete()
+    .update({ is_deleted: true })
     .eq("id", id);
   if (error) {
-    console.error("Erro ao deletar log:", error);
+    console.error("Erro ao enviar log para lixeira:", error);
     throw error;
   }
   return true;
@@ -1914,11 +1926,59 @@ export async function deleteLogAtividade(id: string): Promise<boolean> {
 export async function deleteLogsAtividadeBulk(ids: string[]) {
   const { error } = await supabase
     .from("logs_atividades")
+    .update({ is_deleted: true })
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao enviar logs para lixeira em massa:", error);
+    throw error;
+  }
+}
+
+export async function restoreLogAtividade(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .update({ is_deleted: false })
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao restaurar log:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function restoreLogsAtividadeBulk(ids: string[]) {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .update({ is_deleted: false })
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao restaurar logs em massa:", error);
+    throw error;
+  }
+}
+
+export async function hardDeleteLogAtividade(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("logs_atividades")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao deletar log permanentemente:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function hardDeleteLogsAtividadeBulk(ids: string[]) {
+  const { error } = await supabase
+    .from("logs_atividades")
     .delete()
     .in("id", ids);
 
   if (error) {
-    console.error("Erro ao excluir logs em massa:", error);
+    console.error("Erro ao excluir logs permanentemente em massa:", error);
     throw error;
   }
 }

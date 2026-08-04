@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2, ArrowUp, ArrowDown, ArrowUpDown, Search, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
-import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode";
+import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
 import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -51,6 +51,7 @@ const getIconPath = (sigla: string) => {
 };
 
 const DiretoriaAprovacao = () => {
+  const { descriptions: materialDescriptions, isLoading: isLoadingDescriptions } = useMaterialDescriptions();
   const { sigla } = useParams<{ sigla: string }>();
   const navigate = useNavigate();
   const siglaUpper = (sigla || "").toUpperCase();
@@ -67,6 +68,15 @@ const DiretoriaAprovacao = () => {
   const [ownGerenciaId, setOwnGerenciaId] = useState<string>("diretoria");
   const [ownShowOnlyComQuantidade, setOwnShowOnlyComQuantidade] = useState(false);
   const [ownShowOnlyZerados, setOwnShowOnlyZerados] = useState(false);
+  const [ownShowOnlyAprovados, setOwnShowOnlyAprovados] = useState(false);
+  const [ownServicosShowOnlyAprovados, setOwnServicosShowOnlyAprovados] = useState(false);
+  const [ownServicosShowOnlyZerados, setOwnServicosShowOnlyZerados] = useState(false);
+  const [ownServicosShowOnlyComValor, setOwnServicosShowOnlyComValor] = useState(false);
+  const [ownServicosGerenciaId, setOwnServicosGerenciaId] = useState<string>("diretoria");
+  const [servicosSortOrder, setServicosSortOrder] = useState<"asc" | "desc" | null>(null);
+  const [ownServicosSearchTerm, setOwnServicosSearchTerm] = useState("");
+  const debouncedOwnServicosSearchTerm = useDebounce(ownServicosSearchTerm, 300);
+  const [ownServicosCurrentPage, setOwnServicosCurrentPage] = useState(1);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [showOnlyZerados, setShowOnlyZerados] = useState(false);
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
@@ -282,6 +292,7 @@ const DiretoriaAprovacao = () => {
 
   // Converter solicitações para o formato de PlanItem (apenas itens enviados para fluxo de aprovação)
   const items: PlanItem[] = useMemo(() => {
+    if (isLoadingDescriptions) return [];
     if (!diretoria) return [];
 
     return solicitacoes
@@ -290,7 +301,7 @@ const DiretoriaAprovacao = () => {
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
       .map((s: any) => {
-        const mappedCategory = MATERIAL_DESCRIPTION_BY_CODE[String(s.codigo)];
+        const mappedCategory = materialDescriptions[String(s.codigo)];
         const categoriaItem = mappedCategory
           ? mappedCategory
           : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
@@ -522,11 +533,14 @@ const DiretoriaAprovacao = () => {
       // Filtro de itens com quantidade
       if (ownShowOnlyComQuantidade && planItem.qtdEstimada <= 0) continue;
 
+      // Filtro de itens aprovados
+      if (ownShowOnlyAprovados && planItem.status !== "aprovado") continue;
+
       results.push(planItem);
     }
 
     return results;
-  }, [catalogItems, itensPropriosMap, ownGerenciaId, debouncedOwnSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade, ownShowOnlyZerados]);
+  }, [catalogItems, itensPropriosMap, ownGerenciaId, debouncedOwnSearchTerm, ownCategoria, ownPrioridade, gerenciaMap, siglaUpper, ownShowOnlyComQuantidade, ownShowOnlyZerados, ownShowOnlyAprovados]);
 
 
 
@@ -611,13 +625,82 @@ const DiretoriaAprovacao = () => {
     );
   }, [servicosData, selectedOption, servicosCatalogoSet, selectedServicos]);
 
-  // Serviços da própria diretoria (apenas rascunhos)
-  const servicosProprios: ServicoItem[] = useMemo(() => {
+  // Serviços da própria diretoria
+  const servicosPropriosBase: ServicoItem[] = useMemo(() => {
     if (!diretoria) return [];
-    return servicosData.filter((s: ServicoItem) => 
-      s.status === "rascunho" && s.unidadeDemandante === siglaUpper
-    );
-  }, [servicosData, diretoria, siglaUpper]);
+    const servicosDaDiretoria = servicosData.filter((s: ServicoItem) => s.unidadeDemandante === siglaUpper);
+    
+    if (selectedOption === "servicos_existentes") {
+      return (servicosCatalogoData as any[]).map((catalogoItem) => {
+        const servicoDb = servicosDaDiretoria.find(s => s.item === catalogoItem.item);
+        if (servicoDb) {
+          return servicoDb;
+        }
+        return {
+          id: undefined,
+          item: catalogoItem.item,
+          tipoContratacao: catalogoItem.tipo_contratacao || "Serviço",
+          unidadeDemandante: siglaUpper,
+          objeto: catalogoItem.objeto || "",
+          justificativa: "",
+          previsaoInicio: catalogoItem.previsao_inicio || undefined,
+          estimativaValor: catalogoItem.estimativa_valor || 0,
+          dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
+          grauPrioridade: catalogoItem.grau_prioridade || "Baixo",
+          vinculacao: catalogoItem.vinculacao || "Não",
+          dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
+          status: "rascunho",
+          observacao: catalogoItem.observacao || "",
+          gerencia: siglaUpper,
+          diretoriaSigla: siglaUpper,
+        } as unknown as ServicoItem;
+      });
+    } else if (selectedOption === "servicos_novos") {
+      return servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(s.item));
+    }
+    return [];
+  }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet]);
+
+  const servicosProprios = useMemo(() => {
+    let list = servicosPropriosBase;
+    
+    if (ownServicosGerenciaId !== "diretoria") {
+      list = list.filter(s => (s as any).gerencia_id === ownServicosGerenciaId || s.gerencia === (gerenciaMap[ownServicosGerenciaId] || "N/A"));
+    }
+    if (ownServicosShowOnlyAprovados) {
+      list = list.filter(s => s.status === "aprovado");
+    }
+    if (ownServicosShowOnlyZerados) {
+      list = list.filter(s => !(s as any).estimativa_valor && !s.estimativaValor || (s as any).estimativa_valor === 0 || s.estimativaValor === 0);
+    }
+    if (ownServicosShowOnlyComValor) {
+      list = list.filter(s => ((s as any).estimativa_valor && (s as any).estimativa_valor > 0) || (s.estimativaValor && s.estimativaValor > 0));
+    }
+    
+    if (debouncedOwnServicosSearchTerm) {
+      const term = debouncedOwnServicosSearchTerm.toLowerCase();
+      list = list.filter(s => 
+        (s.objeto || "").toLowerCase().includes(term) ||
+        (s.justificativa || "").toLowerCase().includes(term) ||
+        String(s.item).toLowerCase().includes(term)
+      );
+    }
+    
+    return list;
+  }, [servicosPropriosBase, ownServicosShowOnlyAprovados, ownServicosGerenciaId, ownServicosShowOnlyZerados, ownServicosShowOnlyComValor, gerenciaMap, debouncedOwnServicosSearchTerm]);
+
+  const ownServicosPaginationData = useMemo(() => {
+    const totalItems = servicosProprios.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    const startIndex = (ownServicosCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedItems = servicosProprios.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    
+    return {
+      paginatedItems,
+      totalPages,
+      totalItems
+    };
+  }, [servicosProprios, ownServicosCurrentPage]);
 
   // Mostrar serviços de gerências (não rascunho)
   const servicosRecebidosBase = useMemo(() => {
@@ -1405,19 +1488,65 @@ const DiretoriaAprovacao = () => {
     }
   };
 
+  const ensureServicoDiretoria = async (itemCode: number, updates: any) => {
+    if (!diretoria || !periodAtivo) return;
+    try {
+      const servicoDb = servicosData.find((s: any) => s.item === itemCode && s.unidadeDemandante === siglaUpper);
+      if (servicoDb && servicoDb.id) {
+        await updateServico(servicoDb.id, updates);
+        queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+        return servicoDb.id;
+      }
+      
+      const catalogoItem: any = servicosCatalogoData.find((c: any) => c.item === itemCode);
+      if (!catalogoItem) return;
+
+      const gerenciaIdAlvo = gerenciasData[0]?.id ?? ""; 
+
+      await createServico({
+        periodo_id: periodAtivo.id,
+        diretoria_id: diretoria.id,
+        gerencia_id: gerenciaIdAlvo,
+        item: catalogoItem.item,
+        tipo_contratacao: catalogoItem.tipo_contratacao || "",
+        unidade_demandante: siglaUpper,
+        objeto: catalogoItem.objeto || "",
+        justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
+        previsao_inicio: null,
+        estimativa_valor: updates.estimativa_valor !== undefined ? updates.estimativa_valor : (catalogoItem.estimativa_valor || 0),
+        dotacao_orcamentaria: updates.dotacao_orcamentaria !== undefined ? updates.dotacao_orcamentaria : 0,
+        grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Baixo"),
+        vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
+        dependencia_descricao: null,
+        status: updates.status || "rascunho",
+      });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const isServicoReadOnly = (servico: ServicoItem) =>
     servico.status === "rejeitado" || servico.status === "em_compra" || servico.status === "concluido";
 
   const handleUpdateServicoGrauPrioridade = async (servico: ServicoItem, grauPrioridade: GrauPrioridade) => {
-    if (!servico.id || isServicoReadOnly(servico)) return;
-    await updateServico(servico.id, { grau_prioridade: grauPrioridade });
-    queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+    if (isServicoReadOnly(servico)) return;
+    if (!servico.id) {
+      await ensureServicoDiretoria(servico.item, { grau_prioridade: grauPrioridade });
+    } else {
+      await updateServico(servico.id, { grau_prioridade: grauPrioridade });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+    }
   };
 
   const handleUpdateServicoEstimativa = async (servico: ServicoItem, estimativaValor: number) => {
-    if (!servico.id || isServicoReadOnly(servico)) return;
-    await updateServico(servico.id, { estimativa_valor: estimativaValor });
-    queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+    if (isServicoReadOnly(servico)) return;
+    if (!servico.id) {
+      await ensureServicoDiretoria(servico.item, { estimativa_valor: estimativaValor });
+    } else {
+      await updateServico(servico.id, { estimativa_valor: estimativaValor });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+    }
   };
 
   const handleCriarServicoDiretoria = async () => {
@@ -1819,7 +1948,7 @@ const DiretoriaAprovacao = () => {
 
 
     const toggleSelectAllServicosLista = (lista: ServicoItem[]) => {
-      const ids = lista.filter((s) => s.id).map((s) => s.id as string);
+      const ids = lista.map((s) => s.id || String(s.item));
       const allSelected = ids.length > 0 && ids.every((id) => selectedServicos.has(id));
       const newSelection = new Set(selectedServicos);
 
@@ -1832,8 +1961,17 @@ const DiretoriaAprovacao = () => {
       setSelectedServicos(newSelection);
     };
 
-    const renderServicosTable = (titulo: string, lista: ServicoItem[]) => {
-      const ids = lista.filter((s) => s.id).map((s) => s.id as string);
+    const renderServicosTable = (titulo: string, listaBase: ServicoItem[]) => {
+      const lista = [...listaBase].sort((a, b) => {
+        if (!servicosSortOrder) return 0;
+        const valA = a.estimativaValor || (a as any).estimativa_valor || 0;
+        const valB = b.estimativaValor || (b as any).estimativa_valor || 0;
+        if (servicosSortOrder === "asc") return valA - valB;
+        if (servicosSortOrder === "desc") return valB - valA;
+        return 0;
+      });
+      
+      const ids = lista.map((s) => s.id || String(s.item));
       const allSelected = ids.length > 0 && ids.every((id) => selectedServicos.has(id));
 
       return (
@@ -1855,7 +1993,17 @@ const DiretoriaAprovacao = () => {
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Objeto / Justificativa</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Gerência</th>
-                <th className="px-4 py-3 text-center text-sm font-semibold">Estimativa Valor</th>
+                <th className="px-4 py-3 text-center text-sm font-semibold">
+                  <div 
+                    className="flex items-center justify-center gap-2 cursor-pointer select-none" 
+                    onClick={() => setServicosSortOrder(s => s === "asc" ? "desc" : s === "desc" ? null : "asc")}
+                  >
+                    Estimativa Valor
+                    <span className="text-gray-400">
+                      {servicosSortOrder === "asc" ? <ArrowUp className="h-4 w-4 text-primary" /> : servicosSortOrder === "desc" ? <ArrowDown className="h-4 w-4 text-primary" /> : <ArrowUpDown className="h-4 w-4" />}
+                    </span>
+                  </div>
+                </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Prioridade</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold">Vinculação</th>
@@ -1868,9 +2016,17 @@ const DiretoriaAprovacao = () => {
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={selectedServicos.has(servico.id || "")}
-                      onChange={() => toggleSelectServico(servico.id || "")}
-                      disabled={isServicoReadOnly(servico) || !servico.id}
+                      checked={selectedServicos.has(servico.id || String(servico.item))}
+                      onChange={() => {
+                        const id = servico.id || String(servico.item);
+                        const newSelection = new Set(selectedServicos);
+                        if (newSelection.has(id)) {
+                          newSelection.delete(id);
+                        } else {
+                          newSelection.add(id);
+                        }
+                        setSelectedServicos(newSelection);
+                      }}
                       className="rounded"
                     />
                   </td>
@@ -2036,30 +2192,206 @@ const DiretoriaAprovacao = () => {
 
             {/* Seus Serviços - adicionados diretamente pela diretoria */}
             <div className="px-6 py-4 mt-6 bg-card rounded-lg border">
-              <div className="mb-3">
-                <h3 className="text-sm font-semibold text-foreground">Seus Serviços</h3>
-                <p className="text-xs text-muted-foreground">Serviços adicionados pela diretoria (Rascunhos)</p>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Seus Serviços</h3>
+                  <p className="text-xs text-muted-foreground">Serviços adicionados pela diretoria</p>
+                </div>
+              </div>
+              
+              <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center mb-4">
+                <div className="relative flex-1 max-w-md w-full">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar serviço..."
+                    value={ownServicosSearchTerm}
+                    onChange={(e) => {
+                      setOwnServicosSearchTerm(e.target.value);
+                      setOwnServicosCurrentPage(1);
+                    }}
+                    className="pl-9 h-10 w-full border-blue-600 focus:ring-blue-600 transition-all rounded-xl"
+                  />
+                </div>
+                <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center ml-auto">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Gerência responsável:</span>
+                    <Select value={ownServicosGerenciaId} onValueChange={(v) => { setOwnServicosGerenciaId(v); setOwnCurrentPage(1); }}>
+                      <SelectTrigger className="w-[240px] bg-card text-sm h-9">
+                        <SelectValue placeholder="Selecione a gerência" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {!gerenciasData.some((g: any) => g.sigla === siglaUpper) && (
+                          <SelectItem value="diretoria">Diretoria ({siglaUpper})</SelectItem>
+                        )}
+                        {gerenciasData.map((g: any) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.sigla} - {g.nome}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant={ownServicosShowOnlyZerados ? "default" : "outline"}
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => {
+                        setOwnServicosShowOnlyZerados(!ownServicosShowOnlyZerados);
+                        if (!ownServicosShowOnlyZerados) setOwnServicosShowOnlyComValor(false);
+                      }}
+                    >
+                      Filtrar serviços zerados
+                    </Button>
+                    <Button
+                      variant={ownServicosShowOnlyComValor ? "default" : "outline"}
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => {
+                        setOwnServicosShowOnlyComValor(!ownServicosShowOnlyComValor);
+                        if (!ownServicosShowOnlyComValor) setOwnServicosShowOnlyZerados(false);
+                      }}
+                    >
+                      Filtrar serviços com valor
+                    </Button>
+                    <Button
+                      variant={ownServicosShowOnlyAprovados ? "default" : "outline"}
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => setOwnServicosShowOnlyAprovados(!ownServicosShowOnlyAprovados)}
+                    >
+                      {ownServicosShowOnlyAprovados ? "Mostrando apenas aprovados" : "Filtrar aprovados"}
+                    </Button>
+                    {selectedServicos.size > 0 && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 text-destructive hover:bg-destructive/10"
+                          onClick={async () => {
+                            if (confirm(`Deseja realmente excluir ${selectedServicos.size} serviço(s) selecionado(s)?`)) {
+                              try {
+                                const ids = Array.from(selectedServicos);
+                                const realIds = ids.filter(id => typeof id === "string" && id.includes('-'));
+                                if (realIds.length > 0) {
+                                  await deleteServicosBulk(realIds);
+                                }
+                                setSelectedServicos(new Set());
+                                toast({ title: "Excluídos", description: "Serviços excluídos com sucesso." });
+                                queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+                              } catch (e) {
+                                toast({ title: "Erro", description: "Erro ao excluir.", variant: "destructive" });
+                              }
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Excluir ({selectedServicos.size})
+                        </Button>
+                        {selectedOption !== "servicos_novos" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => setBulkEditServicosOpen(true)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Editar ({selectedServicos.size})
+                          </Button>
+                        )}
+                        <Button 
+                          variant="default" 
+                          size="sm" 
+                          className="gap-2 bg-success hover:bg-success/90 text-white"
+                          onClick={async () => {
+                            if (confirm(`Deseja realmente aprovar ${selectedServicos.size} serviço(s) selecionado(s)?`)) {
+                              try {
+                                const ids = Array.from(selectedServicos);
+                                const realIds: string[] = [];
+                                for (const idOrCode of ids) {
+                                if (idOrCode.includes('-')) {
+                                  realIds.push(idOrCode);
+                                } else {
+                                  await ensureServicoDiretoria(Number(idOrCode), { status: "aprovado" });
+                                }
+                              }
+                              if (realIds.length > 0) {
+                                await updateSolicitacaoStatusBulk(realIds, "aprovado");
+                              }
+                              setSelectedServicos(new Set());
+                              toast({ title: "Aprovados", description: "Serviços aprovados com sucesso." });
+                              queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+                            } catch (e) {
+                              toast({ title: "Erro", description: "Erro ao aprovar.", variant: "destructive" });
+                            }
+                          }
+                        }}
+                      >
+                        <Send className="h-4 w-4" />
+                        Aprovar ({selectedServicos.size})
+                      </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {servicosProprios.length === 0 ? (
                 <div className="text-center py-8 bg-background rounded-lg border border-dashed">
-                  <p className="text-sm text-muted-foreground">Nenhum serviço em rascunho adicionado pela diretoria.</p>
+                  <p className="text-sm text-muted-foreground">Nenhum serviço {ownServicosShowOnlyAprovados ? "aprovado" : "encontrado"} adicionado pela diretoria.</p>
                 </div>
               ) : (
-                renderServicosTable("Rascunhos", servicosProprios)
+                <>
+                  {renderServicosTable(selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", ownServicosPaginationData.paginatedItems)}
+                  {ownServicosPaginationData.totalPages > 1 && (
+                    <div className="mt-4">
+                      <Pagination>
+                        <PaginationContent>
+                          <PaginationItem>
+                            <PaginationPrevious 
+                              onClick={() => setOwnServicosCurrentPage(Math.max(1, ownServicosCurrentPage - 1))}
+                              className={ownServicosCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                            />
+                          </PaginationItem>
+                          
+                          {Array.from({ length: ownServicosPaginationData.totalPages }, (_, i) => i + 1).map((page) => (
+                            <PaginationItem key={`own-svc-${page}`}>
+                              <PaginationLink 
+                                onClick={() => setOwnServicosCurrentPage(page)}
+                                isActive={ownServicosCurrentPage === page}
+                                className="cursor-pointer"
+                              >
+                                {page}
+                              </PaginationLink>
+                            </PaginationItem>
+                          ))}
+                          
+                          <PaginationItem>
+                            <PaginationNext 
+                              onClick={() => setOwnServicosCurrentPage(Math.min(ownServicosPaginationData.totalPages, ownServicosCurrentPage + 1))}
+                              className={ownServicosCurrentPage === ownServicosPaginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                            />
+                          </PaginationItem>
+                        </PaginationContent>
+                      </Pagination>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Botão Adicionar Novo Serviço da Diretoria */}
-              <div className="mt-4 flex justify-center">
-                <Button
-                  variant="outline"
-                  className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
-                  onClick={() => setNovoServicoOpen(true)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Adicionar Novo Serviço da Diretoria
-                </Button>
-              </div>
+              {selectedOption === "servicos_novos" && (
+                <div className="mt-4 flex justify-center">
+                  <Button
+                    variant="outline"
+                    className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
+                    onClick={() => setNovoServicoOpen(true)}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar Novo Serviço da Diretoria
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Recebidos das Gerências */}
@@ -2531,6 +2863,28 @@ const DiretoriaAprovacao = () => {
       );
     }
 
+  const isPeriodExpired = useMemo(() => {
+    if (!periodAtivo?.fim) return false;
+    const dataFim = new Date(periodAtivo.fim);
+    dataFim.setHours(23, 59, 59, 999);
+    return new Date() > dataFim;
+  }, [periodAtivo]);
+
+  if (isPeriodExpired) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
+        <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
+          <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
+            <Lock className="h-10 w-10 text-destructive" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-3">Período Encerrado</h2>
+          <p className="text-slate-600 mb-8 leading-relaxed">O prazo para o preenchimento e aprovação do Plano Anual de Contratações foi encerrado. Não é mais possível acessar ou modificar as solicitações.</p>
+          <Button onClick={() => navigate("/")} className="w-full text-base h-12" size="lg">Voltar para a Página Inicial</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
       <div
@@ -2657,6 +3011,18 @@ const DiretoriaAprovacao = () => {
               >
                 {ownShowOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
               </Button>
+              <Button
+                variant={ownShowOnlyAprovados ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const next = !ownShowOnlyAprovados;
+                  setOwnShowOnlyAprovados(next);
+                  setOwnCurrentPage(1);
+                }}
+              >
+                {ownShowOnlyAprovados ? "Mostrando apenas itens aprovados" : "Filtrar aprovados"}
+              </Button>
             </div>
           </div>
         </div>
@@ -2712,6 +3078,29 @@ const DiretoriaAprovacao = () => {
                 >
                   <Pencil className="h-4 w-4" />
                   Editar Selecionados
+                </Button>
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  className="gap-2 bg-success hover:bg-success/90 text-white"
+                  onClick={async () => {
+                    if (confirm(`Deseja realmente aprovar ${selectedOwnItems.size} item(ns) selecionado(s)?`)) {
+                      const idsToApprove = Array.from(selectedOwnItems).filter(id => typeof id === 'string') as string[];
+                      if (idsToApprove.length > 0) {
+                        try {
+                          await updateSolicitacaoStatusBulk(idsToApprove, "aprovado");
+                          setSelectedOwnItems(new Set());
+                          toast({ title: "Itens aprovados", description: "Os itens selecionados foram aprovados com sucesso." });
+                          queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+                        } catch (e) {
+                          toast({ title: "Erro", description: "Erro ao aprovar itens.", variant: "destructive" });
+                        }
+                      }
+                    }
+                  }}
+                >
+                  <Send className="h-4 w-4" />
+                  Aprovar ({selectedOwnItems.size})
                 </Button>
               </div>
             )}
@@ -3140,7 +3529,7 @@ const DiretoriaAprovacao = () => {
                             <Input
                               type="number"
                               min={0}
-                              defaultValue={item.qtdEstimada}
+                              defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
                               onBlur={(e) => handleUpdateQtdEstimada(item.id!, Number(e.target.value))}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {

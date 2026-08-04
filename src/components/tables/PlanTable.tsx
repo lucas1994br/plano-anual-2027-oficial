@@ -339,36 +339,50 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                     <Badge variant="outline" className="text-xs">{item.unidade}</Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    {editingCodigo === item.codigo ? (
+                    {editingCodigo === item.codigo || item.qtdEstimada === 0 ? (
                       <Input
-                        ref={editInputRef}
+                        ref={editingCodigo === item.codigo ? editInputRef : undefined}
                         type="number"
                         min="0"
-                        value={editValue}
+                        value={editingCodigo === item.codigo ? editValue : undefined}
+                        defaultValue={editingCodigo === item.codigo ? undefined : ""}
                         onChange={(e) => {
-                          const raw = e.target.value;
-                          const normalized = raw.replace(/^0+(?=\d)/, "");
-                          setEditValue(normalized);
-                        }}
-                        onBlur={() => {
-                          if (skipBlurSaveRef.current) {
-                            skipBlurSaveRef.current = false;
-                            return;
+                          if (editingCodigo === item.codigo) {
+                            const raw = e.target.value;
+                            const normalized = raw.replace(/^0+(?=\d)/, "");
+                            setEditValue(normalized);
                           }
-                          handleConfirmEdit(editInputRef.current?.value);
+                        }}
+                        onBlur={(e) => {
+                          if (editingCodigo === item.codigo) {
+                            if (skipBlurSaveRef.current) {
+                              skipBlurSaveRef.current = false;
+                              return;
+                            }
+                            handleConfirmEdit(editInputRef.current?.value);
+                          } else {
+                            const val = parseInt(e.target.value) || 0;
+                            if (val !== item.qtdEstimada && onUpdateQtdEstimada) {
+                              onUpdateQtdEstimada(item.codigo, val);
+                            }
+                          }
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
-                            handleConfirmEdit((e.currentTarget as HTMLInputElement).value);
+                            if (editingCodigo === item.codigo) {
+                              handleConfirmEdit((e.currentTarget as HTMLInputElement).value);
+                            } else {
+                              e.currentTarget.blur();
+                            }
                           }
-                          if (e.key === "Escape") {
+                          if (e.key === "Escape" && editingCodigo === item.codigo) {
                             e.preventDefault();
                             handleCancelEdit();
                           }
                         }}
                         className="w-20 h-8 text-center"
-                        autoFocus
+                        autoFocus={editingCodigo === item.codigo}
                       />
                     ) : (
                       item.qtdEstimada

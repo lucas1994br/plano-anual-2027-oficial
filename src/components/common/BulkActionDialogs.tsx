@@ -96,6 +96,8 @@ export function BulkEditServicosDialog({ open, onOpenChange, selectedCount, onCo
     if (field === "grauPrioridade") updates.grauPrioridade = value;
     if (field === "justificativa") updates.justificativa = value;
     if (field === "estimativaValor") updates.estimativaValor = Number(value);
+    if (field === "tipoContratacao") updates.tipoContratacao = value;
+    if (field === "unidadeDemandante") updates.unidadeDemandante = value;
     
     await onConfirm(updates);
     setField("");
@@ -118,6 +120,8 @@ export function BulkEditServicosDialog({ open, onOpenChange, selectedCount, onCo
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="grauPrioridade">Grau de Prioridade</SelectItem>
+                <SelectItem value="tipoContratacao">Tipo de Contratação (Categoria)</SelectItem>
+                <SelectItem value="unidadeDemandante">Unidade Demandante</SelectItem>
                 <SelectItem value="justificativa">Justificativa</SelectItem>
                 <SelectItem value="estimativaValor">Estimativa de Valor</SelectItem>
               </SelectContent>
@@ -130,9 +134,9 @@ export function BulkEditServicosDialog({ open, onOpenChange, selectedCount, onCo
                 <Select value={value} onValueChange={setValue}>
                   <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Baixa">Baixa</SelectItem>
+                    <SelectItem value="Baixo">Baixo</SelectItem>
                     <SelectItem value="Médio">Médio</SelectItem>
-                    <SelectItem value="Alta">Alta</SelectItem>
+                    <SelectItem value="Alto">Alto</SelectItem>
                   </SelectContent>
                 </Select>
               ) : field === "estimativaValor" ? (

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Eye, Download, FileSpreadsheet, Trash2, Edit, MoreHorizontal, CheckSquare, FileDown } from "lucide-react";
+import { Search, Eye, Download, FileSpreadsheet, Trash2, Edit, MoreHorizontal, CheckSquare, FileDown, ArchiveRestore } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -36,7 +36,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { toast } from "sonner";
-import { getLogsAtividades, getFuncionariosNomes, deleteLogAtividade, deleteLogsAtividadeBulk, updateLogAtividade, getRecordDetails } from "@/lib/services.ts";
+import { getLogsAtividades, getLixeiraLogsAtividades, getFuncionariosNomes, deleteLogAtividade, deleteLogsAtividadeBulk, restoreLogAtividade, restoreLogsAtividadeBulk, hardDeleteLogAtividade, hardDeleteLogsAtividadeBulk, updateLogAtividade, getRecordDetails } from "@/lib/services.ts";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.tsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
@@ -71,7 +72,9 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: { log: any, funcion
       const statusFriendly = s === 'aprovado' ? 'Aprovado' : s === 'enviado' ? 'Enviado para Aprovação' : s === 'reprovado' ? 'Reprovado' : s;
       statusText = statusFriendly;
     }
-  } catch (e) {}
+  } catch (e) {
+    // ignore
+  }
   
   const cargo = (() => {
     const mat = log.matricula;
@@ -132,9 +135,16 @@ export function AdminLogsAtividades() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState("ativos");
+
   const { data: logs = [], isLoading: isLoadingLogs } = useQuery({
     queryKey: ["logs-atividades"],
     queryFn: getLogsAtividades,
+  });
+
+  const { data: lixeiraLogs = [], isLoading: isLoadingLixeira } = useQuery({
+    queryKey: ["lixeira-logs-atividades"],
+    queryFn: getLixeiraLogsAtividades,
   });
 
   const { data: funcionarios = [], isLoading: isLoadingFunc } = useQuery({
@@ -234,7 +244,10 @@ export function AdminLogsAtividades() {
     return typeof value === 'object' ? JSON.stringify(value) : String(value);
   };
 
-  const filteredLogs = logs.filter((log: any) => {
+  const currentLogs = activeTab === "ativos" ? logs : lixeiraLogs;
+  const isLoadingCurrent = activeTab === "ativos" ? isLoadingLogs : isLoadingLixeira;
+
+  const filteredLogs = currentLogs.filter((log: any) => {
     const term = searchTerm.toLowerCase();
     const funcName = getFuncNome(log.matricula)?.toLowerCase() || "";
     return (
@@ -261,23 +274,47 @@ export function AdminLogsAtividades() {
 
   // Funções de CRUD
   const deleteMutation = useMutation({
-    mutationFn: deleteLogAtividade,
+    mutationFn: activeTab === "ativos" ? deleteLogAtividade : hardDeleteLogAtividade,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["logs-atividades"] });
-      toast.success("Log excluído com sucesso");
+      queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
+      toast.success(activeTab === "ativos" ? "Log movido para lixeira" : "Log excluído permanentemente");
       setSelectedIds([]);
     },
     onError: () => toast.error("Erro ao excluir log")
   });
 
   const deleteBulkMutation = useMutation({
-    mutationFn: deleteLogsAtividadeBulk,
+    mutationFn: activeTab === "ativos" ? deleteLogsAtividadeBulk : hardDeleteLogsAtividadeBulk,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["logs-atividades"] });
-      toast.success(`${selectedIds.length} logs excluídos com sucesso`);
+      queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
+      toast.success(`${selectedIds.length} logs ${activeTab === "ativos" ? "movidos para lixeira" : "excluídos permanentemente"}`);
       setSelectedIds([]);
     },
     onError: () => toast.error("Erro ao excluir logs")
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: restoreLogAtividade,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["logs-atividades"] });
+      queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
+      toast.success("Log restaurado com sucesso");
+      setSelectedIds([]);
+    },
+    onError: () => toast.error("Erro ao restaurar log")
+  });
+
+  const restoreBulkMutation = useMutation({
+    mutationFn: restoreLogsAtividadeBulk,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["logs-atividades"] });
+      queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
+      toast.success(`${selectedIds.length} logs restaurados com sucesso`);
+      setSelectedIds([]);
+    },
+    onError: () => toast.error("Erro ao restaurar logs")
   });
 
   // Funções de Exportação
@@ -335,16 +372,21 @@ export function AdminLogsAtividades() {
 
   return (
     <Card className="p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Logs de Atividades</h2>
-          <p className="text-muted-foreground">
-            Acompanhe o registro de todas as alterações feitas no sistema.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="relative w-full md:w-72">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Logs de Atividades</h2>
+            <p className="text-muted-foreground">
+              Acompanhe o registro de todas as alterações feitas no sistema.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <TabsList>
+              <TabsTrigger value="ativos">Ativos</TabsTrigger>
+              <TabsTrigger value="lixeira">Lixeira</TabsTrigger>
+            </TabsList>
+            <div className="relative w-full md:w-72">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               type="search"
               placeholder="Buscar matrícula, nome ou tabela..."
@@ -370,6 +412,18 @@ export function AdminLogsAtividades() {
             {selectedIds.length} item(s) selecionado(s)
           </span>
           <div className="flex items-center gap-2">
+            {activeTab === "lixeira" && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 flex items-center gap-1"
+                onClick={() => restoreBulkMutation.mutate(selectedIds)}
+                disabled={restoreBulkMutation.isPending}
+              >
+                <ArchiveRestore className="h-4 w-4" />
+                Devolver Selecionados
+              </Button>
+            )}
             <Button 
               variant="destructive" 
               size="sm" 
@@ -403,7 +457,7 @@ export function AdminLogsAtividades() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoadingLogs ? (
+            {isLoadingCurrent ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center h-24">
                   Carregando logs...
@@ -482,6 +536,14 @@ export function AdminLogsAtividades() {
                           Ver Detalhes
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
+                        {activeTab === "lixeira" && (
+                          <DropdownMenuItem 
+                            onClick={() => restoreMutation.mutate(log.id)}
+                          >
+                            <ArchiveRestore className="mr-2 h-4 w-4" />
+                            Devolver Log
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem 
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
                           onClick={() => deleteMutation.mutate(log.id)}
@@ -593,6 +655,7 @@ export function AdminLogsAtividades() {
           )}
         </DialogContent>
       </Dialog>
+      </Tabs>
     </Card>
   );
 }

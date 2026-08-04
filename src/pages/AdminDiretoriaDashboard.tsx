@@ -39,7 +39,7 @@ import {
   getAdminMiniErpConfigDb,
   getDadosExcel2026
 } from "@/lib/services.ts";
-import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget, getGerenciaBudget } from "@/lib/adminBudgetConfig.ts";
+import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget, getGerenciaBudget, getTotalDiretoriaBudget, getTotalGerenciaBudget } from "@/lib/adminBudgetConfig.ts";
 
 // ==================== REAL DATA FOR DASHBOARD ====================
 const REAL_DIRETORIAS = ["DG", "DE", "DC", "DO", "PR"];
@@ -217,7 +217,10 @@ const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
       });
       return orcAprovado;
     }
-    return limiteAquisicao + limiteServicosNovos + limiteServicosExistentes;
+    if (!diretoria || !orcamentoConfig) return 0;
+    const retido = getTotalDiretoriaBudget(orcamentoConfig, diretoria.id);
+    const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getTotalGerenciaBudget(orcamentoConfig, g.id), 0);
+    return retido + repassado;
   }, [filtroAno, excelData, diretoria, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes]);
 
   const mappedData = useMemo(() => {
@@ -611,6 +614,7 @@ const AdminDiretoriaDashboard = () => {
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 
   const totalPlanejado = filteredMatrix.reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
+  const totalRealizado = filteredMatrix.filter(item => item.progresso >= 50).reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
   const totalExecutado = filteredMatrix.reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
   const variacaoTotal = totalPlanejado - totalExecutado;
   const variacaoPercGlobal = totalPlanejado ? (variacaoTotal / totalPlanejado) * 100 : 0;

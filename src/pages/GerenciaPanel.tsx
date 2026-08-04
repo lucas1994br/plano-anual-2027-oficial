@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2 } from "lucide-react";
+import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2, Lock } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
 import { resolveGerenciaNome } from "@/data/gerencias";
-import { MATERIAL_DESCRIPTION_BY_CODE } from "@/data/materialDescriptionByCode";
+import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
+import { useGerenciaData } from "@/hooks/useGerenciaData";
 
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string): string | null => {
@@ -125,100 +126,27 @@ const GerenciaPanel = () => {
   const ITEMS_PER_PAGE = 100;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { descriptions: materialDescriptions, isLoading: isLoadingDescriptions } = useMaterialDescriptions();
   const [selectedAquisicaoIds, setSelectedAquisicaoIds] = useState<Set<string>>(new Set());
-  const { data: diretorias = [] } = useQuery<any[]>({
-    queryKey: ["diretorias"],
-    queryFn: getDiretorias,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const diretoria = (diretorias as any[]).find((d: any) => d.sigla === siglaUpper);
-  const diretoriaMap = useMemo(() => {
-    const map: Record<string, any> = {};
-    (diretorias as any[]).forEach((dir: any) => {
-      map[dir.id] = dir;
-    });
-    return map;
-  }, [diretorias]);
-
-  // Buscar gerências
-  const { data: gerenciasData = [] } = useQuery<any[]>({
-    queryKey: ["gerencias", diretoria?.id],
-    queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : Promise.resolve([]),
-    enabled: !!diretoria,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // Buscar períodos ativos
-  const { data: periodos = [] } = useQuery<any[]>({
-    queryKey: ["periodos"],
-    queryFn: getPeriodosAtivos,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: categoryBudgetOwnersFromDb = {} } = useQuery({
-    queryKey: ["category-budget-owners-db"],
-    queryFn: getCategoryBudgetOwnerRules,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: adminMiniConfigFromDb = {} } = useQuery({
-    queryKey: ["admin-mini-erp-config-db"],
-    queryFn: getAdminMiniErpConfigDb,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const periodAtivo = periodos[0];
-  const prazo = periodAtivo ? new Date(periodAtivo.fim) : null;
-
-  const gerenciaAtual = gerenciasData.find((g: Gerencia) => g.sigla === gerenciaUpper) as Gerencia | undefined;
-  const gerenciaNome = resolveGerenciaNome(gerenciaUpper, gerenciaAtual?.nome);
-
-  // Buscar solicitações para esta gerência — pré-carrega sem aguardar seleção de aba
-  const { data: solicitacoes = [] } = useQuery({
-    queryKey: ["solicitacoes", gerenciaAtual?.id, periodAtivo?.id],
-    queryFn: () => (gerenciaAtual && periodAtivo) ? getSolicitacoesByGerencia(gerenciaAtual.id, periodAtivo.id) : [],
-    enabled: !!periodAtivo && !!gerenciaAtual,
-    staleTime: 2 * 60 * 1000,
-  });
-
-  // Buscar serviços para esta gerência
-  const { data: servicosData = [] } = useQuery({
-    queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id],
-    queryFn: () =>
-      (gerenciaAtual && periodAtivo)
-        ? getServicosByGerencia(gerenciaAtual.id, periodAtivo.id)
-        : [],
-    enabled: !!periodAtivo && !!gerenciaAtual,
-    staleTime: 0,
-    refetchOnMount: true,
-  });
-
-  const { data: servicosCatalogoData = [] } = useQuery<any[]>({
-    queryKey: ["servicos-catalogo"],
-    queryFn: () => getServicosCatalogo(),
-  });
-
-  console.log("SERVICOS DATA:", servicosData);
-
-  const orcamentoConfig = useMemo(() => {
-    const localConfig = loadAdminBudgetConfig();
-    const dbConfig = adminMiniConfigFromDb as Partial<AdminBudgetConfig>;
-
-    if (!localConfig && !dbConfig) return null;
-
-    return {
-      ...(localConfig || {}),
-      ...(dbConfig || {}),
-      routingRules: dbConfig?.routingRules || localConfig?.routingRules || {},
-      categoryBudgetOwners: localConfig?.categoryBudgetOwners || {},
-    } as AdminBudgetConfig;
-  }, [adminMiniConfigFromDb]);
+  const {
+    diretoria,
+    diretoriaMap,
+    gerenciaAtual,
+    gerenciaNome,
+    periodAtivo,
+    prazo,
+    solicitacoes,
+    servicosData,
+    servicosCatalogoData,
+    orcamentoConfig,
+    categoryBudgetOwnersFromDb,
+  } = useGerenciaData(siglaUpper, gerenciaUpper);
 
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
+    if (isLoadingDescriptions) return [];
     return solicitacoes.map((s: any) => {
-      const mappedCategory = MATERIAL_DESCRIPTION_BY_CODE[String(s.codigo)];
+      const mappedCategory = materialDescriptions[String(s.codigo)];
       const categoriaItem = mappedCategory
         ? mappedCategory
         : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
@@ -248,7 +176,7 @@ const GerenciaPanel = () => {
         isOrcamentoCompartilhado: !!diretoria && diretoriaOrcamentariaId !== diretoria.id,
       };
     });
-  }, [solicitacoes, gerenciaUpper, diretoria, diretoriaMap, orcamentoConfig, categoryBudgetOwnersFromDb]);
+  }, [solicitacoes, gerenciaUpper, diretoria, diretoriaMap, orcamentoConfig, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -1881,6 +1809,28 @@ const GerenciaPanel = () => {
               </div>
             </DialogContent>
           </Dialog>
+        </div>
+      </div>
+    );
+  }
+
+  const isPeriodExpired = useMemo(() => {
+    if (!periodAtivo?.fim) return false;
+    const dataFim = new Date(periodAtivo.fim);
+    dataFim.setHours(23, 59, 59, 999);
+    return new Date() > dataFim;
+  }, [periodAtivo]);
+
+  if (isPeriodExpired) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
+        <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
+          <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
+            <Lock className="h-10 w-10 text-destructive" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-3">Período Encerrado</h2>
+          <p className="text-slate-600 mb-8 leading-relaxed">O prazo para o preenchimento do Plano Anual de Contratações foi encerrado. Não é mais possível acessar ou modificar as solicitações.</p>
+          <Button onClick={() => navigate("/")} className="w-full text-base h-12" size="lg">Voltar para a Página Inicial</Button>
         </div>
       </div>
     );
