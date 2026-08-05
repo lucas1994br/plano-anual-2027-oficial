@@ -9,6 +9,7 @@ import {
   getSolicitacoesByGerencia,
   getServicosByGerencia,
   getServicosCatalogo,
+  default as getItensCatalogo
 } from "@/lib/services";
 import { loadAdminBudgetConfig, AdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { Gerencia } from "@/types/plan";
@@ -98,6 +99,12 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     } as AdminBudgetConfig;
   }, [adminMiniConfigFromDb]);
 
+  const { data: catalogoData = [] } = useQuery<any[]>({
+    queryKey: ["itens-catalogo"],
+    queryFn: () => getItensCatalogo(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   return {
     diretoria,
     diretoriaMap,
@@ -108,7 +115,9 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     solicitacoes,
     servicosData,
     servicosCatalogoData,
+    catalogoData,
     orcamentoConfig,
     categoryBudgetOwnersFromDb,
   };
 }
+

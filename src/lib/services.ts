@@ -426,6 +426,7 @@ export async function getSolicitacoesByGerencia(
       .eq("gerencia_id", gerenciaId)
       .eq("periodo_id", periodoId)
       .order("codigo")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
@@ -487,6 +488,7 @@ export async function getSolicitacoesByDiretoria(
         "concluido",
       ])
       .order("codigo")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
@@ -504,6 +506,7 @@ export async function getSolicitacoesByPeriodo({
       .select("*")
       .eq("periodo_id", periodoId)
       .order("codigo")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
@@ -521,6 +524,7 @@ export async function getServicosByPeriodo({
       .select("*")
       .eq("periodo_id", periodoId)
       .order("item")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
   );
 
@@ -537,6 +541,7 @@ export async function getSolicitacoesCompras(
       .eq("periodo_id", periodoId)
       .in("status", ["aprovado", "em_compra", "concluido"])
       .order("codigo")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }
@@ -549,6 +554,7 @@ export async function getServicosCompras(periodoId: string): Promise<unknown[]> 
       .eq("periodo_id", periodoId)
       .in("status", ["aprovado", "em_compra", "concluido"])
       .order("item")
+      .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
 }

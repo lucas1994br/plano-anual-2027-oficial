@@ -53,95 +53,97 @@ import {
   updateSolicitacao,
   updateSolicitacaoStatus,
   updateSolicitacaoStatusBulk,
-  updateSolicitacoesBulkData,
-  getServicosByGerencia,
-  updateServico,
-  createServico,
-  deleteServico,
-  deleteServicosBulk,
-  updateServicosBulkData,
-  getServicosCatalogo,
-} from "@/lib/services";
-import { getBudgetOwnerDiretoriaId, getGerenciaBudget, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
-import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/lib/supabaseClient";
-import { resolveGerenciaNome } from "@/data/gerencias";
-import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
-import { useGerenciaData } from "@/hooks/useGerenciaData";
-
-// Mapeamento de ícones por sigla
-const getIconPath = (sigla: string): string | null => {
-  const iconMap: Record<string, string> = {
-    'DC': '/assets/images/dc2.png',
-    'DE': '/assets/images/de2.png',
-    'DG': '/assets/images/gd2.png',
+    updateSolicitacoesBulkData,
+    getServicosByGerencia,
+    updateServico,
+    createServico,
+    deleteServico,
+    deleteServicosBulk,
+    updateServicosBulkData,
+    getServicosCatalogo,
+    createSolicitacao
+  } from "@/lib/services";
+  import { getBudgetOwnerDiretoriaId, getGerenciaBudget, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
+  import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
+  import { useQuery, useQueryClient } from "@tanstack/react-query";
+  import { useToast } from "@/hooks/use-toast";
+  import { supabase } from "@/lib/supabaseClient";
+  import { resolveGerenciaNome } from "@/data/gerencias";
+  import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
+  import { useGerenciaData } from "@/hooks/useGerenciaData";
+  
+  // Mapeamento de ícones por sigla
+  const getIconPath = (sigla: string): string | null => {
+    const iconMap: Record<string, string> = {
+      'DC': '/assets/images/dc2.png',
+      'DE': '/assets/images/de2.png',
+      'DG': '/assets/images/gd2.png',
+    };
+    return iconMap[sigla] || null;
   };
-  return iconMap[sigla] || null;
-};
-
-const GerenciaPanel = () => {
-
-  console.log("TELA DE SERVIÇOS RENDERIZOU");
-
-  const { sigla, gerencia: gerenciaParam } = useParams<{ sigla: string; gerencia: string }>();
-  const navigate = useNavigate();
-  const siglaUpper = (sigla || "").toUpperCase();
-  const gerenciaUpper = (gerenciaParam || "").toUpperCase();
-
-  const [authenticated, setAuthenticated] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_novos" | "servicos_existentes" | null>(null);
-  const [confirmSendOpen, setConfirmSendOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [categoria, setCategoria] = useState("");
-  const [prioridade, setPrioridade] = useState("todas");
-  const [showOnlyZerados, setShowOnlyZerados] = useState(false);
-  const [showOnlySent, setShowOnlySent] = useState(false);
-  const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [selectedServicos, setSelectedServicos] = useState<Set<number>>(new Set());
-  const [confirmSendServicosOpen, setConfirmSendServicosOpen] = useState(false);
-  const [novoServicoOpen, setNovoServicoOpen] = useState(false);
-  const [novoServicoForm, setNovoServicoForm] = useState({
-    objeto: "",
-    justificativa: "",
-    tipoContratacao: "Contínuo",
-    unidadeDemandante: "",
-    previsaoInicio: "",
-    estimativaValor: "",
-    dotacaoOrcamentaria: "",
-    grauPrioridade: "Baixo" as GrauPrioridade,
-    vinculacao: "Não" as "Sim" | "Não",
-    dependenciaDescricao: "",
-  });
-  const [novoServicoLoading, setNovoServicoLoading] = useState(false);
-  const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
-  const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
-  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [currentPageServicos, setCurrentPageServicos] = useState(1);
-  useEffect(() => {
-    setCurrentPageServicos(1);
-  }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
-  const ITEMS_PER_PAGE = 100;
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const { descriptions: materialDescriptions, isLoading: isLoadingDescriptions } = useMaterialDescriptions();
-  const [selectedAquisicaoIds, setSelectedAquisicaoIds] = useState<Set<string>>(new Set());
-  const {
-    diretoria,
-    diretoriaMap,
-    gerenciaAtual,
-    gerenciaNome,
-    periodAtivo,
-    prazo,
-    solicitacoes,
-    servicosData,
-    servicosCatalogoData,
-    orcamentoConfig,
-    categoryBudgetOwnersFromDb,
-  } = useGerenciaData(siglaUpper, gerenciaUpper);
+  
+  const GerenciaPanel = () => {
+  
+    console.log("TELA DE SERVIÇOS RENDERIZOU");
+  
+    const { sigla, gerencia: gerenciaParam } = useParams<{ sigla: string; gerencia: string }>();
+    const navigate = useNavigate();
+    const siglaUpper = (sigla || "").toUpperCase();
+    const gerenciaUpper = (gerenciaParam || "").toUpperCase();
+  
+    const [authenticated, setAuthenticated] = useState(false);
+    const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_novos" | "servicos_existentes" | null>(null);
+    const [confirmSendOpen, setConfirmSendOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [categoria, setCategoria] = useState("");
+    const [prioridade, setPrioridade] = useState("todas");
+    const [showOnlyZerados, setShowOnlyZerados] = useState(false);
+    const [showOnlySent, setShowOnlySent] = useState(false);
+    const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [selectedServicos, setSelectedServicos] = useState<Set<number>>(new Set());
+    const [confirmSendServicosOpen, setConfirmSendServicosOpen] = useState(false);
+    const [novoServicoOpen, setNovoServicoOpen] = useState(false);
+    const [novoServicoForm, setNovoServicoForm] = useState({
+      objeto: "",
+      justificativa: "",
+      tipoContratacao: "Contínuo",
+      unidadeDemandante: "",
+      previsaoInicio: "",
+      estimativaValor: "",
+      dotacaoOrcamentaria: "",
+      grauPrioridade: "Baixo" as GrauPrioridade,
+      vinculacao: "Não" as "Sim" | "Não",
+      dependenciaDescricao: "",
+    });
+    const [novoServicoLoading, setNovoServicoLoading] = useState(false);
+    const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
+    const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
+    const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [currentPageServicos, setCurrentPageServicos] = useState(1);
+    useEffect(() => {
+      setCurrentPageServicos(1);
+    }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
+    const ITEMS_PER_PAGE = 100;
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+    const { descriptions: materialDescriptions, isLoading: isLoadingDescriptions } = useMaterialDescriptions();
+    const [selectedAquisicaoIds, setSelectedAquisicaoIds] = useState<Set<string>>(new Set());
+    const {
+      diretoria,
+      diretoriaMap,
+      gerenciaAtual,
+      gerenciaNome,
+      periodAtivo,
+      prazo,
+      solicitacoes,
+      servicosData,
+      servicosCatalogoData,
+      catalogoData,
+      orcamentoConfig,
+      categoryBudgetOwnersFromDb,
+    } = useGerenciaData(siglaUpper, gerenciaUpper);
 
   const isPeriodExpired = useMemo(() => {
     if (!periodAtivo?.fim) return false;
@@ -155,7 +157,12 @@ const GerenciaPanel = () => {
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
     if (isLoadingDescriptions) return [];
-    return solicitacoes.map((s: any) => {
+    
+    // Mesclar catálogo base com solicitações existentes
+    return catalogoData.map((c: any) => {
+      const existente = solicitacoes.find((s: any) => s.item_id === c.id || s.codigo === c.codigo);
+      const s = existente || { ...c, qtd_estimada: 0, status: "rascunho" };
+
       const mappedCategory = materialDescriptions[String(s.codigo)];
       const categoriaItem = mappedCategory
         ? mappedCategory
@@ -168,15 +175,15 @@ const GerenciaPanel = () => {
       const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
 
       return {
-        id: s.id,
+        id: existente ? s.id : undefined,
         codigo: s.codigo,
         descricao: s.descricao,
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
         prioridade: s.prioridade || "Baixa",
         qtdEstimada: s.qtd_estimada || 0,
-        unidade: s.unidade || "un",
-        valorUnitario: s.valor_unitario || 0,
+        unidade: s.unidade || c.unidade || "un",
+        valorUnitario: s.valor_unitario || c.valor_unitario || 0,
         observacao: s.observacao || "",
         status: (s.status as SolicitacaoStatus) || "rascunho",
         justificativaRejeicao: s.justificativa_rejeicao || "",
@@ -186,7 +193,7 @@ const GerenciaPanel = () => {
         isOrcamentoCompartilhado: !!diretoria && diretoriaOrcamentariaId !== diretoria.id,
       };
     });
-  }, [solicitacoes, gerenciaUpper, diretoria, diretoriaMap, orcamentoConfig, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
+  }, [solicitacoes, catalogoData, gerenciaUpper, diretoria, diretoriaMap, orcamentoConfig, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -307,52 +314,80 @@ const GerenciaPanel = () => {
     [queryClient, solicitacoesQueryKey],
   );
 
-  const handleUpdateQtdEstimada = async (id: string, qtdEstimada: number) => {
-    const item = items.find((i) => i.id === id);
-    // Permite edicao apenas se o item estiver em rascunho
-    if (!item?.id || item.status !== "rascunho") return;
-
-    patchSolicitacaoInCache(item.id, { qtd_estimada: qtdEstimada });
+  const ensureSolicitacao = async (itemCode: number, updates: any) => {
     try {
-      await updateSolicitacao(item.id, { qtdEstimada });
-    } finally {
+      const existente = items.find((i) => i.codigo === itemCode);
+      if (existente?.id) {
+        if (existente.status !== "rascunho") return;
+        await updateSolicitacao(existente.id, updates);
+        queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+        return;
+      }
+
+      const catalogoItem = catalogoData.find((c: any) => c.codigo === itemCode);
+      if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
+
+      await createSolicitacao({
+        periodo_id: periodAtivo.id,
+        diretoria_id: diretoria.id,
+        gerencia_id: gerenciaAtual.id,
+        codigo: catalogoItem.codigo,
+        descricao: catalogoItem.descricao,
+        categoria: catalogoItem.categoria,
+        unidade: updates.unidade !== undefined ? updates.unidade : (catalogoItem.unidade || "un"),
+        qtdEstimada: updates.qtdEstimada !== undefined ? updates.qtdEstimada : 0,
+        valorUnitario: catalogoItem.valor_unitario || 0,
+        prioridade: updates.prioridade !== undefined ? updates.prioridade : "Baixa",
+        observacao: updates.observacao !== undefined ? updates.observacao : null,
+        status: updates.status || "rascunho",
+      });
       queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+    } catch (error) {
+      console.error("Erro no ensureSolicitacao:", error);
     }
   };
 
-  const handleUpdateUnidade = async (id: string, unidade: string) => {
-    const item = items.find((i) => i.id === id);
-    if (!item?.id || item.status !== "rascunho") return;
-
-    patchSolicitacaoInCache(item.id, { unidade });
-    try {
-      await updateSolicitacao(item.id, { unidade });
-    } finally {
-      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+  const handleUpdateQtdEstimada = async (codigo: number, qtdEstimada: number) => {
+    const item = items.find(i => i.codigo === codigo);
+    if (item && item.id) {
+      if (item.status !== "rascunho") return;
+      patchSolicitacaoInCache(item.id, { qtd_estimada: qtdEstimada });
+      await ensureSolicitacao(item.codigo, { qtdEstimada });
+    } else if (item) {
+      await ensureSolicitacao(item.codigo, { qtdEstimada });
     }
   };
 
-  const handleUpdateObservacao = async (id: string, observacao: string) => {
-    const item = items.find((i) => i.id === id);
-    if (!item?.id || item.status !== "rascunho") return;
-
-    patchSolicitacaoInCache(item.id, { observacao });
-    try {
-      await updateSolicitacao(item.id, { observacao });
-    } finally {
-      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+  const handleUpdateUnidade = async (codigo: number, unidade: string) => {
+    const item = items.find(i => i.codigo === codigo);
+    if (item && item.id) {
+      if (item.status !== "rascunho") return;
+      patchSolicitacaoInCache(item.id, { unidade });
+      await ensureSolicitacao(item.codigo, { unidade });
+    } else if (item) {
+      await ensureSolicitacao(item.codigo, { unidade });
     }
   };
 
-  const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
-    const item = items.find((i) => i.id === id);
-    if (!item?.id || item.status !== "rascunho") return;
+  const handleUpdateObservacao = async (codigo: number, observacao: string) => {
+    const item = items.find(i => i.codigo === codigo);
+    if (item && item.id) {
+      if (item.status !== "rascunho") return;
+      patchSolicitacaoInCache(item.id, { observacao });
+      await ensureSolicitacao(item.codigo, { observacao });
+    } else if (item) {
+      await ensureSolicitacao(item.codigo, { observacao });
+    }
+  };
 
-    patchSolicitacaoInCache(item.id, { prioridade });
-    try {
-      await updateSolicitacao(item.id, { prioridade });
-    } finally {
-      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+  const handleUpdatePrioridade = async (codigo: number, prioridade: PlanItem["prioridade"]) => {
+    const item = items.find(i => i.codigo === codigo);
+    if (item && item.id) {
+      if (item.status !== "rascunho") return;
+      patchSolicitacaoInCache(item.id, { prioridade });
+      await ensureSolicitacao(item.codigo, { prioridade });
+    } else if (item) {
+      await ensureSolicitacao(item.codigo, { prioridade });
     }
   };
 
@@ -2089,40 +2124,40 @@ const GerenciaPanel = () => {
                           {readOnly ? (
                             <span className="text-sm">{item.qtdEstimada}</span>
                           ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
-                              onBlur={(e) => {
-                                const val = parseInt(e.target.value) || 0;
-                                if (val !== item.qtdEstimada) {
-                                  handleUpdateQtdEstimada(item.id!, val);
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  e.currentTarget.blur();
-                                }
-                              }}
-                              className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
-                            />
-                          )}
-                        </td>
-                        <td className="p-3 text-right text-sm">
-                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
-                        </td>
-                        <td className="p-3 text-right text-sm font-semibold text-primary">
-                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
-                        </td>
-                        <td className="p-3 text-center">
-                          {readOnly ? (
-                            <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
-                          ) : (
-                            <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.id!, v as PlanItem["prioridade"])}>
-                              <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
-                                <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
-                              </SelectTrigger>
+                              <input
+                                type="number"
+                                min="0"
+                                defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
+                                onBlur={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  if (val !== item.qtdEstimada) {
+                                    handleUpdateQtdEstimada(item.codigo, val);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    e.currentTarget.blur();
+                                  }
+                                }}
+                                className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
+                              />
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-sm">
+                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
+                          </td>
+                          <td className="p-3 text-right text-sm font-semibold text-primary">
+                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
+                          </td>
+                          <td className="p-3 text-center">
+                            {readOnly ? (
+                              <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
+                            ) : (
+                              <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.codigo, v as PlanItem["prioridade"])}>
+                                <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
+                                  <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
+                                </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="Baixa">Baixa</SelectItem>
                                 <SelectItem value="Média">Média</SelectItem>
