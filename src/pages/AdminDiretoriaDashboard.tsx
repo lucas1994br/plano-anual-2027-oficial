@@ -702,7 +702,8 @@ const AdminDiretoriaDashboard = () => {
         onHome={() => navigate("/")}
         crumbs={[
           { label: "Admin", onClick: () => navigate("/admin") },
-          { label: `Dashboard ${currentDirUpper}`, isActive: true },
+          { label: `Dashboard ${currentDirUpper}`, onClick: () => setVisao("diretoria") },
+          { label: visao === "gerencias" ? "Visão por Gerência" : "Visão Consolidada", isActive: true },
         ]}
       />
 

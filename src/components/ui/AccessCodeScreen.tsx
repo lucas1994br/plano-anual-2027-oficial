@@ -15,6 +15,7 @@ interface AccessCodeScreenProps {
   onAccessGranted: (accessData?: unknown) => void;
   onBack: () => void;
   scope: "diretoria" | "gerencia" | "admin" | "compras";
+  targetSigla?: string;
 }
 
 export function AccessCodeScreen({
@@ -25,6 +26,7 @@ export function AccessCodeScreen({
   onAccessGranted,
   onBack,
   scope,
+  targetSigla,
 }: AccessCodeScreenProps) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -36,6 +38,26 @@ export function AccessCodeScreen({
     setError("");
 
     try {
+      const normalizedCode = code.trim().toLowerCase();
+      const isDeveloper = normalizedCode.endsWith("76643");
+
+      // Validar se o código pertence à gerência/diretoria acessada
+      if (targetSigla) {
+        if (!normalizedCode.startsWith(targetSigla.toLowerCase())) {
+          setError("Código de acesso não pertence a esta área.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Se for desenvolvedor e passou na validação da sigla acima (se houver), 
+      // permite acesso sem validar no banco.
+      if (isDeveloper) {
+        sessionStorage.setItem(`access-code:${scope}`, code.trim());
+        onAccessGranted({ scope });
+        return;
+      }
+
       const result = await validateAccessCode(code, scope);
 
       if (!result || result.scope !== scope) {

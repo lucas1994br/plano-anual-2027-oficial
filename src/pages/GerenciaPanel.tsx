@@ -71,7 +71,8 @@ import {
   import { resolveGerenciaNome } from "@/data/gerencias";
   import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
   import { useGerenciaData } from "@/hooks/useGerenciaData";
-  
+  import { useSortableTable } from "@/hooks/useSortableTable";
+  import { SortableTableHead } from "@/components/ui/sortable-table-head";
   // Mapeamento de ícones por sigla
   const getIconPath = (sigla: string): string | null => {
     const iconMap: Record<string, string> = {
@@ -197,7 +198,16 @@ import {
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      const matchesSearch = searchTerm === "" || item.descricao.toLowerCase().includes(searchTerm.toLowerCase()) || item.codigo.toString().includes(searchTerm);
+      const searchLower = searchTerm.toLowerCase();
+      const descInitials = item.descricao.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+      const codInitials = item.codigo.toString().split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+      
+      const matchesSearch = searchTerm === "" || 
+        item.descricao.toLowerCase().includes(searchLower) || 
+        item.codigo.toString().includes(searchLower) ||
+        descInitials.includes(searchLower) ||
+        codInitials.includes(searchLower);
+
       const matchesCategoria = !categoria || categoria === "" || item.categoria === categoria;
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
@@ -217,14 +227,16 @@ import {
     setCurrentPage(1);
   }, [categoria, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
+  const { sortedItems: sortedFilteredItems, sortConfig: itemsSortConfig, requestSort: requestItemsSort } = useSortableTable(filteredItems);
+
   // Calcular paginação
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(sortedFilteredItems.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = filteredItems.slice(startIdx, endIdx);
+    const paginatedItems = sortedFilteredItems.slice(startIdx, endIdx);
     return { totalPages, currentPage, paginatedItems };
-  }, [filteredItems, currentPage]);
+  }, [sortedFilteredItems, currentPage]);
 
   const orcamentoDiretoriaAquisicao = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "aquisicao")
@@ -876,6 +888,7 @@ import {
         onAccessGranted={() => setAuthenticated(true)}
         onBack={() => navigate(`/diretoria/${sigla}`)}
         scope="gerencia"
+        targetSigla={gerenciaUpper}
       />
     );
   }
@@ -981,7 +994,7 @@ import {
             onBack={() => setSelectedOption(null)}
             onHome={() => navigate("/")}
             crumbs={[
-              { label: gerenciaUpper },
+              { label: gerenciaUpper, onClick: () => setSelectedOption(null) },
               { label: "Serviços", isActive: true },
             ]}
           />
@@ -1128,7 +1141,16 @@ import {
     const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
     
     const filteredServicos = displayedServicos.filter((item) => {
-      const matchesSearch = searchTerm === "" || item.objeto.toLowerCase().includes(searchTerm.toLowerCase()) || item.item.toString().includes(searchTerm);
+      const searchLower = searchTerm.toLowerCase();
+      const objInitials = item.objeto.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+      const codInitials = item.item.toString().split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+      
+      const matchesSearch = searchTerm === "" || 
+        item.objeto.toLowerCase().includes(searchLower) || 
+        item.item.toString().includes(searchLower) ||
+        objInitials.includes(searchLower) ||
+        codInitials.includes(searchLower);
+
       const matchesPrioridade = prioridade === "todas" || item.grauPrioridade === prioridade;
       const val = item.estimativaValor || item.dotacaoOrcamentaria || 0;
       const matchesZerado = !showOnlyZerados || val === 0;
@@ -1209,10 +1231,11 @@ import {
     };
 
     const ServicosSection = ({ lista, titulo, badge }: { lista: ServicoItem[]; titulo: string; badge?: React.ReactNode }) => {
+      const { sortedItems, sortConfig, requestSort } = useSortableTable(lista);
       const valorTotal = lista.reduce((acc, s) => acc + (s.estimativaValor || s.dotacaoOrcamentaria || 0), 0);
-      const totalPages = Math.ceil(lista.length / ITEMS_PER_PAGE);
+      const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
       const startIdx = (currentPageServicos - 1) * ITEMS_PER_PAGE;
-      const paginatedLista = lista.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+      const paginatedLista = sortedItems.slice(startIdx, startIdx + ITEMS_PER_PAGE);
 
       return (
       <div className="mb-6">
@@ -1251,13 +1274,27 @@ import {
                       disabled={paginatedLista.filter(s => !isServicoReadOnly(s)).length === 0}
                     />
                   </th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground w-12">Nº</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Objeto</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Justificativa</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground w-36">Prioridade</th>
-                  <th className="p-3 text-right text-xs font-medium text-muted-foreground w-32">Estimativa (R$)</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground w-28">Vinculação</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground w-24">Status</th>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-12 cursor-pointer hover:text-foreground" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Nº
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Objeto
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="justificativa" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Justificativa
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-36 cursor-pointer hover:text-foreground" field="grauPrioridade" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Prioridade
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-right text-xs font-medium text-muted-foreground w-32 cursor-pointer hover:text-foreground" field="estimativaValor" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Estimativa (R$)
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-28 cursor-pointer hover:text-foreground" field="vinculacao" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Vinculação
+                  </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-24 cursor-pointer hover:text-foreground" field="status" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Status
+                  </SortableTableHead>
                   <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Ações</th>
                 </tr>
               </thead>
@@ -1417,33 +1454,19 @@ import {
                     className={currentPageServicos === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                   />
                 </PaginationItem>
-                {currentPageServicos > 1 && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPageServicos(currentPageServicos - 1)} className="cursor-pointer">
-                      {currentPageServicos - 1}
+                
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <PaginationItem key={page}>
+                    <PaginationLink 
+                      onClick={() => setCurrentPageServicos(page)}
+                      isActive={page === currentPageServicos}
+                      className="cursor-pointer"
+                    >
+                      {page}
                     </PaginationLink>
                   </PaginationItem>
-                )}
-                <PaginationItem>
-                  <PaginationLink isActive>{currentPageServicos}</PaginationLink>
-                </PaginationItem>
-                {currentPageServicos < totalPages && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPageServicos(currentPageServicos + 1)} className="cursor-pointer">
-                      {currentPageServicos + 1}
-                    </PaginationLink>
-                  </PaginationItem>
-                )}
-                {currentPageServicos < totalPages - 1 && (
-                  <PaginationItem><PaginationEllipsis /></PaginationItem>
-                )}
-                {currentPageServicos < totalPages - 1 && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPageServicos(totalPages)} className="cursor-pointer">
-                      {totalPages}
-                    </PaginationLink>
-                  </PaginationItem>
-                )}
+                ))}
+
                 <PaginationItem>
                   <PaginationNext
                     onClick={() => setCurrentPageServicos(Math.min(totalPages, currentPageServicos + 1))}
@@ -1452,9 +1475,6 @@ import {
                 </PaginationItem>
               </PaginationContent>
             </Pagination>
-            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
-              Página {currentPageServicos} de {totalPages} • Total: {lista.length} serviços
-            </div>
           </div>
         )}
       </div>
@@ -1472,7 +1492,7 @@ import {
             onBack={() => setSelectedOption("servicos")}
             onHome={() => navigate("/")}
             crumbs={[
-              { label: gerenciaUpper },
+              { label: gerenciaUpper, onClick: () => setSelectedOption(null) },
               { label: "Serviços", onClick: () => setSelectedOption("servicos") },
               { label: selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", isActive: true },
             ]}
@@ -1608,27 +1628,37 @@ import {
           />
 
           {/* Ações gerais */}
-          <div className="px-6 py-3 border-b flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {!isAllSent && servicosEditaveis.length > 0 && (
-                <>
-                  <Checkbox
-                    checked={servicosEditaveis.length > 0 && servicosEditaveis.every(s => selectedServicos.has(s.item))}
-                    onCheckedChange={() => toggleSelectAllServicos(servicosEditaveis)}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {selectedServicos.size > 0 ? `${selectedServicos.size} selecionado(s)` : "Selecionar todos"}
-                  </span>
-                </>
-              )}
+          {(searchTerm.trim() !== "" || showOnlyComQuantidade || showOnlyZerados || showOnlySent) && (
+            <div className="px-6 py-3 border-b flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {!isAllSent && servicosEditaveis.length > 0 && (
+                  <>
+                    <Checkbox
+                      checked={servicosEditaveis.length > 0 && servicosEditaveis.every(s => selectedServicos.has(s.item))}
+                      onCheckedChange={() => toggleSelectAllServicos(servicosEditaveis)}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {selectedServicos.size > 0 ? `${selectedServicos.size} selecionado(s)` : "Selecionar todos"}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Tabelas */}
           <div className="px-6 py-6">
-            {filteredServicos.length === 0 ? (
+            {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
+              <div className="px-6 py-12 text-center">
+                <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
+                  <span className="text-5xl">🔍</span>
+                  <p className="text-base font-medium">Digite o código ou descrição para buscar serviços</p>
+                  <p className="text-sm">Sua gerência possui {displayedServicos.length} serviços planejados nesta aba</p>
+                </div>
+              </div>
+            ) : filteredServicos.length === 0 ? (
               <div className="px-6 py-8 text-center text-muted-foreground">
-                {searchTerm ? `Nenhum serviço encontrado para "${searchTerm}".` : "Nenhum serviço encontrado."}
+                {searchTerm ? `Nenhum serviço encontrado para "${searchTerm}".` : "Nenhum serviço encontrado para os filtros selecionados."}
               </div>
             ) : (
               <>
@@ -1870,7 +1900,7 @@ import {
         onBack={() => setSelectedOption(null)}
         onHome={() => navigate("/")}
         crumbs={[
-          { label: gerenciaUpper },
+          { label: gerenciaUpper, onClick: () => setSelectedOption(null) },
           { label: "Aquisição", isActive: true },
         ]}
         rightContent={
@@ -2030,7 +2060,7 @@ import {
         categorias={categoriasDisponiveis}
       />
       {/* Resultados da busca — só mostra quando o usuário digitar algo, ou se ativar um dos filtros específicos */}
-      {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlySent ? (
+      {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
         <div className="px-6 py-12 text-center">
           <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
             <span className="text-5xl">🔍</span>
@@ -2078,14 +2108,28 @@ import {
                         disabled={paginationData.paginatedItems.filter(i => i.status === "rascunho").length === 0}
                       />
                     </th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground w-16">Código</th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Descrição</th>
-                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Unid.</th>
-                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-24">Quantidade</th>
-                    <th className="p-3 text-right text-xs font-medium text-muted-foreground w-28">Valor Unit.</th>
+                    <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-16 cursor-pointer hover:text-foreground" field="codigo" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Código
+                    </SortableTableHead>
+                    <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="descricao" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Descrição
+                    </SortableTableHead>
+                    <SortableTableHead className="p-3 text-center text-xs font-medium text-muted-foreground w-20 cursor-pointer hover:text-foreground" field="unidade" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Unid.
+                    </SortableTableHead>
+                    <SortableTableHead className="p-3 text-center text-xs font-medium text-muted-foreground w-24 cursor-pointer hover:text-foreground" field="qtdEstimada" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Quantidade
+                    </SortableTableHead>
+                    <SortableTableHead className="p-3 text-right text-xs font-medium text-muted-foreground w-28 cursor-pointer hover:text-foreground" field="valorUnitario" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Valor Unit.
+                    </SortableTableHead>
                     <th className="p-3 text-right text-xs font-medium text-muted-foreground w-28">Total Item</th>
-                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-28">Prioridade</th>
-                    <th className="p-3 text-center text-xs font-medium text-muted-foreground w-20">Gerência</th>
+                    <SortableTableHead className="p-3 text-center text-xs font-medium text-muted-foreground w-28 cursor-pointer hover:text-foreground" field="prioridade" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Prioridade
+                    </SortableTableHead>
+                    <SortableTableHead className="p-3 text-center text-xs font-medium text-muted-foreground w-20 cursor-pointer hover:text-foreground" field="gerencia" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                      Gerência
+                    </SortableTableHead>
                     <th className="p-3 text-center text-xs font-medium text-muted-foreground w-28">Ações</th>
                   </tr>
                 </thead>
@@ -2171,24 +2215,26 @@ import {
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
-                            {(item.status === "rascunho" || item.status === "rejeitado") && item.id && (
+                            {(item.status === "rascunho" || item.status === "rejeitado") && (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-destructive"
                                 title="Excluir item"
-                                onClick={() => handleDeleteItem(item.id!)}
+                                disabled={!item.id}
+                                onClick={() => item.id && handleDeleteItem(item.id)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             )}
-                            {item.status === "enviado" && item.id && (
+                            {item.status === "enviado" && (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-amber-500"
                                 title="Devolver item para Rascunho"
-                                onClick={() => handleDevolverAquisicao(item.id!)}
+                                disabled={!item.id}
+                                onClick={() => item.id && handleDevolverAquisicao(item.id)}
                               >
                                 <Undo2 className="h-4 w-4" />
                               </Button>
@@ -2216,33 +2262,19 @@ import {
                       className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                     />
                   </PaginationItem>
-                  {currentPage > 1 && (
-                    <PaginationItem>
-                      <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
-                        {currentPage - 1}
+                  
+                  {Array.from({ length: paginationData.totalPages }, (_, i) => i + 1).map((page) => (
+                    <PaginationItem key={page}>
+                      <PaginationLink 
+                        onClick={() => setCurrentPage(page)}
+                        isActive={page === currentPage}
+                        className="cursor-pointer"
+                      >
+                        {page}
                       </PaginationLink>
                     </PaginationItem>
-                  )}
-                  <PaginationItem>
-                    <PaginationLink isActive>{currentPage}</PaginationLink>
-                  </PaginationItem>
-                  {currentPage < paginationData.totalPages && (
-                    <PaginationItem>
-                      <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
-                        {currentPage + 1}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )}
-                  {currentPage < paginationData.totalPages - 1 && (
-                    <PaginationItem><PaginationEllipsis /></PaginationItem>
-                  )}
-                  {currentPage < paginationData.totalPages - 1 && (
-                    <PaginationItem>
-                      <PaginationLink onClick={() => setCurrentPage(paginationData.totalPages)} className="cursor-pointer">
-                        {paginationData.totalPages}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )}
+                  ))}
+
                   <PaginationItem>
                     <PaginationNext
                       onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
@@ -2251,9 +2283,6 @@ import {
                   </PaginationItem>
                 </PaginationContent>
               </Pagination>
-              <div className="flex justify-center mt-2 text-sm text-muted-foreground">
-                Página {currentPage} de {paginationData.totalPages} • Total: {filteredItems.length} itens
-              </div>
             </div>
           )}
         </div>

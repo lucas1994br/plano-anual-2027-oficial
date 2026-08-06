@@ -34,6 +34,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { Badge } from "@/components/ui/badge.tsx";
 import { CATEGORIAS_ITEM_PREDEFINIDAS, UNIDADES_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata.ts";
 import { 
@@ -127,13 +129,15 @@ export function AdminCatalogItemControl() {
     );
   }, [itens, searchTerm]);
 
+  const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredItens as ItemCatalogo[]);
+
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(filteredItens.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = (filteredItens as ItemCatalogo[]).slice(startIdx, endIdx);
-    return { totalPages, currentPage, paginatedItems, totalFiltered: filteredItens.length };
-  }, [filteredItens, currentPage]);
+    const paginatedItems = sortedItems.slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems, totalFiltered: sortedItems.length };
+  }, [sortedItems, currentPage]);
 
   const summary = useMemo(() => {
     const totalItens = itens.length;
@@ -306,7 +310,7 @@ export function AdminCatalogItemControl() {
     if (selectedIds.length === paginationData.paginatedItems.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(paginationData.paginatedItems.map(item => item.id));
+      setSelectedIds(paginationData.paginatedItems.map((item: ItemCatalogo) => item.id));
     }
   };
 
@@ -494,16 +498,16 @@ export function AdminCatalogItemControl() {
                       aria-label="Selecionar todos os itens da página"
                     />
                   </TableHead>
-                  <TableHead className="w-24">Código</TableHead>
-                  <TableHead>Descrição</TableHead>
-                  <TableHead className="w-48">Categoria</TableHead>
-                  <TableHead className="w-32">Unidade</TableHead>
-                  <TableHead className="w-32 text-right">Valor Unitário</TableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>Código</SortableTableHead>
+                  <SortableTableHead className="cursor-pointer hover:text-slate-900" field="descricao" sortConfig={sortConfig} onRequestSort={requestSort}>Descrição</SortableTableHead>
+                  <SortableTableHead className="w-48 cursor-pointer hover:text-slate-900" field="categoria" sortConfig={sortConfig} onRequestSort={requestSort}>Categoria</SortableTableHead>
+                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="unidade" sortConfig={sortConfig} onRequestSort={requestSort}>Unidade</SortableTableHead>
+                  <SortableTableHead className="w-32 text-right cursor-pointer hover:text-slate-900" field="valor_unitario" sortConfig={sortConfig} onRequestSort={requestSort}>Valor Unitário</SortableTableHead>
                   <TableHead className="w-20 text-center">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginationData.paginatedItems.map((item) => (
+                {paginationData.paginatedItems.map((item: ItemCatalogo) => (
                   <TableRow key={item.id} className={selectedIds.includes(item.id) ? "bg-muted/50" : ""}>
                     <TableCell className="text-center">
                       <Checkbox 

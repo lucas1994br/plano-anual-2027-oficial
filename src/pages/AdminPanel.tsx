@@ -48,6 +48,16 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState("periodos");
+  const tabLabels: Record<string, string> = {
+    periodos: "Períodos e Diretorias",
+    orcamento: "Orçamentos",
+    catalogo: "Aquisição",
+    servicos: "Serviços",
+    logs: "Logs de Atividades",
+    "logs-orcamentarios": "Trilha Financeira",
+  };
+
   const [expandedDir, setExpandedDir] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
 
@@ -196,6 +206,7 @@ const AdminPanel = () => {
           onHome={() => navigate("/")}
           crumbs={[
             { label: "Administrador" },
+            { label: tabLabels[activeTab], isActive: true }
           ]}
         />
 
@@ -212,7 +223,7 @@ const AdminPanel = () => {
         </div>
 
         <div className="max-w-5xl mx-auto px-6 py-6">
-          <Tabs defaultValue="periodos" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="mb-5">
               <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
               <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>

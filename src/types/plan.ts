@@ -15,6 +15,7 @@ export interface PlanItem {
   unidade: string;
   qtdEstimada: number;
   valorUnitario: number;
+  valorTotal?: number;
   prioridade: "Baixa" | "Média" | "Alta";
   gerencia: string;
   observacao?: string;

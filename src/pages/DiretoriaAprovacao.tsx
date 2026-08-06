@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { SortableWrapper, SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useToast } from "@/hooks/use-toast";
 import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
@@ -1833,6 +1834,7 @@ const DiretoriaAprovacao = () => {
         onAccessGranted={() => setAuthenticated(true)}
         onBack={() => navigate("/")}
         scope="diretoria"
+        targetSigla={diretoria.sigla}
       />
     );
   }
@@ -1945,7 +1947,7 @@ const DiretoriaAprovacao = () => {
             onBack={() => setSelectedOption(null)}
             onHome={() => navigate("/")}
             crumbs={[
-              { label: diretoria?.sigla || "" },
+              { label: diretoria?.sigla || "", onClick: () => setSelectedOption(null) },
               { label: "Serviços", isActive: true },
             ]}
           />
@@ -2046,17 +2048,12 @@ const DiretoriaAprovacao = () => {
     };
 
     const renderServicosTable = (titulo: string, listaBase: ServicoItem[]) => {
-      const lista = [...listaBase].sort((a, b) => {
-        if (!servicosSortOrder) return 0;
-        const valA = a.estimativaValor || (a as any).estimativa_valor || 0;
-        const valB = b.estimativaValor || (b as any).estimativa_valor || 0;
-        if (servicosSortOrder === "asc") return valA - valB;
-        if (servicosSortOrder === "desc") return valB - valA;
-        return 0;
-      });
-      
-      const ids = lista.map((s) => s.id || String(s.item));
-      const allSelected = ids.length > 0 && ids.every((id) => selectedServicos.has(id));
+      return (
+        <SortableWrapper
+          items={listaBase}
+          render={(lista, sortConfig, requestSort) => {
+            const ids = lista.map((s) => s.id || String(s.item));
+            const allSelected = ids.length > 0 && ids.every((id) => selectedServicos.has(id));
 
       return (
         <div className="bg-white rounded-lg border overflow-hidden mb-4">
@@ -2075,22 +2072,24 @@ const DiretoriaAprovacao = () => {
                     className="rounded"
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Objeto / Justificativa</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Gerência</th>
-                <th className="px-4 py-3 text-center text-sm font-semibold">
-                  <div 
-                    className="flex items-center justify-center gap-2 cursor-pointer select-none" 
-                    onClick={() => setServicosSortOrder(s => s === "asc" ? "desc" : s === "desc" ? null : "asc")}
-                  >
-                    Estimativa Valor
-                    <span className="text-gray-400">
-                      {servicosSortOrder === "asc" ? <ArrowUp className="h-4 w-4 text-primary" /> : servicosSortOrder === "desc" ? <ArrowDown className="h-4 w-4 text-primary" /> : <ArrowUpDown className="h-4 w-4" />}
-                    </span>
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Prioridade</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Vinculação</th>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Objeto / Justificativa
+                </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="gerencia" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Gerência
+                </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-center text-sm font-semibold cursor-pointer hover:text-gray-900" field="estimativaValor" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Estimativa Valor
+                </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="grauPrioridade" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Prioridade
+                </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="status" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Status
+                </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="vinculacao" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Vinculação
+                </SortableTableHead>
                 <th className="px-4 py-3 text-center text-sm font-semibold">Ações</th>
               </tr>
             </thead>
@@ -2232,6 +2231,8 @@ const DiretoriaAprovacao = () => {
           </div>
         </div>
       );
+      }} />
+      );
     };
 
     return (
@@ -2252,7 +2253,7 @@ const DiretoriaAprovacao = () => {
             onBack={() => setSelectedOption("servicos")}
             onHome={() => navigate("/")}
             crumbs={[
-              { label: siglaUpper },
+              { label: siglaUpper, onClick: () => setSelectedOption(null) },
               { label: "Serviços", onClick: () => setSelectedOption("servicos") },
               { label: selectedOption === "servicos_novos" ? "Novos Serviços" : "Serviços Existentes", isActive: true },
             ]}
@@ -2941,7 +2942,7 @@ const DiretoriaAprovacao = () => {
         onBack={() => setSelectedOption(null)}
         onHome={() => navigate("/")}
         crumbs={[
-          { label: diretoria?.sigla || "" },
+          { label: diretoria?.sigla || "", onClick: () => setSelectedOption(null) },
           { label: "Aquisição", isActive: true },
         ]}
         rightContent={
@@ -3477,6 +3478,7 @@ const DiretoriaAprovacao = () => {
             </p>
             <div className="bg-card rounded-lg border overflow-hidden">
               <div className="overflow-x-auto">
+                <SortableWrapper items={paginatedItems} render={(sortedPaginatedItems, sortConfig, requestSort) => (
                 <table className="w-full">
                   <thead className="bg-muted/50 border-b">
                     <tr>
@@ -3487,20 +3489,36 @@ const DiretoriaAprovacao = () => {
                           disabled={selectableItems.length === 0}
                         />
                       </th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Cód.</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Descrição</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Gerência</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Status</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Prioridade</th>
-                      <th className="p-3 text-center text-xs font-medium text-muted-foreground">Qtd.</th>
-                      <th className="p-3 text-left text-xs font-medium text-muted-foreground">Unidade</th>
-                      <th className="p-3 text-right text-xs font-medium text-muted-foreground">Valor Unit.</th>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Cód.
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="descricao" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Descrição
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="gerencia" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Gerência
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="status" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Status
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="prioridade" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Prioridade
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-center text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="qtdEstimada" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Qtd.
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="unidade" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Unidade
+                      </SortableTableHead>
+                      <SortableTableHead className="p-3 text-right text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="valorUnitario" sortConfig={sortConfig} onRequestSort={requestSort}>
+                        Valor Unit.
+                      </SortableTableHead>
                       <th className="p-3 text-right text-xs font-medium text-muted-foreground">Total</th>
                       <th className="p-3 text-center text-xs font-medium text-muted-foreground">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedItems.map((item, index) => (
+                    {sortedPaginatedItems.map((item, index) => (
                       <tr 
                         key={item.id ?? `row-${item.codigo}-${item.gerencia}-${index}`}
                         className={`border-b hover:bg-muted/30 ${index % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}
@@ -3570,31 +3588,29 @@ const DiretoriaAprovacao = () => {
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
-                            {item.id && (
-                              <>
-                                {!isItemReadOnly(item) && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7"
-                                    title="Editar"
-                                    onClick={() => openSolicitacaoEditor(item)}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
-                                )}
-                                {(!isItemReadOnly(item) || item.status === "rejeitado") && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-destructive"
-                                    title="Devolver para Rascunho"
-                                    onClick={() => handleDeleteSolicitacao(item.id!)}
-                                  >
-                                    <Undo2 className="h-3.5 w-3.5" />
-                                  </Button>
-                                )}
-                              </>
+                            {!isItemReadOnly(item) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title="Editar"
+                                disabled={!item.id}
+                                onClick={() => item.id && openSolicitacaoEditor(item)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {(!isItemReadOnly(item) || item.status === "rejeitado") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive"
+                                title="Devolver para Rascunho"
+                                disabled={!item.id}
+                                onClick={() => item.id && handleDeleteSolicitacao(item.id)}
+                              >
+                                <Undo2 className="h-3.5 w-3.5" />
+                              </Button>
                             )}
                           </div>
                         </td>
@@ -3602,6 +3618,7 @@ const DiretoriaAprovacao = () => {
                     ))}
                   </tbody>
                 </table>
+                )} />
               </div>
             </div>
 

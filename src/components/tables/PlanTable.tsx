@@ -13,11 +13,6 @@ import { Badge } from "@/components/ui/badge.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover.tsx";
-import {
   Table,
   TableBody,
   TableCell,
@@ -25,6 +20,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover.tsx";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { PlanItem } from "@/types/plan.ts";
 import { UNIDADES } from "@/data/mockData.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
@@ -54,6 +56,8 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
   const skipBlurSaveRef = useRef(false);
   const [observacaoText, setObservacaoText] = useState<string>("");
   const [observacaoOpen, setObservacaoOpen] = useState<number | null>(null);
+
+  const { sortedItems, sortConfig, requestSort } = useSortableTable(items);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -288,19 +292,19 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                     />
                   </TableHead>
                 )}
-                <TableHead className="w-[80px]">Código</TableHead>
-                <TableHead className="min-w-[200px]">Descrição</TableHead>
-                <TableHead className="text-center w-[90px]">Unid.</TableHead>
-                <TableHead className="text-center w-[100px]">Quantidade</TableHead>
-                <TableHead className="text-right w-[100px]">Valor Unit.</TableHead>
+                <SortableTableHead className="w-[80px]" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>Código</SortableTableHead>
+                <SortableTableHead className="min-w-[200px]" field="descricao" sortConfig={sortConfig} onRequestSort={requestSort}>Descrição</SortableTableHead>
+                <SortableTableHead className="text-center w-[90px]" field="unidade" sortConfig={sortConfig} onRequestSort={requestSort}>Unid.</SortableTableHead>
+                <SortableTableHead className="text-center w-[100px]" field="qtdEstimada" sortConfig={sortConfig} onRequestSort={requestSort}>Quantidade</SortableTableHead>
+                <SortableTableHead className="text-right w-[100px]" field="valorUnitario" sortConfig={sortConfig} onRequestSort={requestSort}>Valor Unit.</SortableTableHead>
                 <TableHead className="text-right w-[110px]">Total Item</TableHead>
-                <TableHead className="text-center w-[100px]">Prioridade</TableHead>
-                <TableHead className="text-center w-[80px]">Gerência</TableHead>
+                <SortableTableHead className="text-center w-[100px]" field="prioridade" sortConfig={sortConfig} onRequestSort={requestSort}>Prioridade</SortableTableHead>
+                <SortableTableHead className="text-center w-[80px]" field="gerencia" sortConfig={sortConfig} onRequestSort={requestSort}>Gerência</SortableTableHead>
                 <TableHead className="text-center w-[100px]">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((item) => (
+              {sortedItems.map((item) => (
                 <TableRow key={item.codigo} className="hover:bg-muted/30">
                   {onToggleSelect && (
                     <TableCell className="px-4 text-center">
@@ -420,13 +424,14 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                           </div>
                         </PopoverContent>
                       </Popover>
-                      {onDeleteItem && item.id && (
+                      {onDeleteItem && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                           title="Devolver para Rascunho"
-                          onClick={() => onDeleteItem(item.id!)}
+                          disabled={!item.id}
+                          onClick={() => item.id && onDeleteItem(item.id)}
                         >
                           <Undo2 className="h-4 w-4" />
                         </Button>

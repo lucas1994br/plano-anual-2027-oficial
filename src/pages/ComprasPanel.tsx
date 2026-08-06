@@ -8,6 +8,14 @@ import { Card } from "@/components/ui/card.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination.tsx";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -31,6 +39,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs.tsx";
 import { useToast } from "@/hooks/use-toast.ts";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
 
 const ComprasPanel = () => {
   const navigate = useNavigate();
@@ -95,6 +105,7 @@ const ComprasPanel = () => {
     unidade: s.unidade || "un",
     qtdEstimada: s.qtd_estimada || 0,
     valorUnitario: s.valor_unitario || 0,
+    valorTotal: (s.qtd_estimada || 0) * (s.valor_unitario || 0),
     prioridade: s.prioridade || "Média",
     gerencia: s.gerencias?.sigla || "N/A",
     diretoriaSigla: diretoriasById.get(s.diretoria_id) || s.diretorias?.sigla || "N/A",
@@ -357,15 +368,19 @@ const ComprasPanel = () => {
   const totalItemsPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
   const totalServicosPages = Math.max(1, Math.ceil(filteredServicos.length / servicosPerPage));
 
+  const { sortedItems: sortedFilteredItems, sortConfig: itemsSortConfig, requestSort: requestItemsSort } = useSortableTable(filteredItems);
+
   const paginatedItems = useMemo(() => {
     const start = (itemsPage - 1) * itemsPerPage;
-    return filteredItems.slice(start, start + itemsPerPage);
-  }, [filteredItems, itemsPage, itemsPerPage]);
+    return sortedFilteredItems.slice(start, start + itemsPerPage);
+  }, [sortedFilteredItems, itemsPage, itemsPerPage]);
+
+  const { sortedItems: sortedFilteredServicos, sortConfig: servicosSortConfig, requestSort: requestServicosSort } = useSortableTable(filteredServicos);
 
   const paginatedServicos = useMemo(() => {
     const start = (servicosPage - 1) * servicosPerPage;
-    return filteredServicos.slice(start, start + servicosPerPage);
-  }, [filteredServicos, servicosPage, servicosPerPage]);
+    return sortedFilteredServicos.slice(start, start + servicosPerPage);
+  }, [sortedFilteredServicos, servicosPage, servicosPerPage]);
 
   const toggleSelectItem = (id: string) => {
     const newSelected = new Set(selectedItems);
@@ -899,13 +914,27 @@ const ComprasPanel = () => {
                         className="pointer-events-none"
                       />
                     </TableHead>
-                    <TableHead className="cursor-pointer select-none" onClick={toggleSelectAllServicos}>Objeto</TableHead>
-                    <TableHead>Gerência</TableHead>
-                    <TableHead>Diretoria</TableHead>
-                    <TableHead>Justificativa</TableHead>
-                    <TableHead>Prioridade</TableHead>
-                    <TableHead className="text-center">Status</TableHead>
-                    <TableHead className="text-center">Estimativa Valor</TableHead>
+                    <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="objeto" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Objeto
+                    </SortableTableHead>
+                    <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="gerencia" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Gerência
+                    </SortableTableHead>
+                    <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="diretoriaSigla" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Diretoria
+                    </SortableTableHead>
+                    <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="justificativa" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Justificativa
+                    </SortableTableHead>
+                    <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="grauPrioridade" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Prioridade
+                    </SortableTableHead>
+                    <SortableTableHead className="text-center cursor-pointer select-none hover:text-slate-900" field="status" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Status
+                    </SortableTableHead>
+                    <SortableTableHead className="text-center cursor-pointer select-none hover:text-slate-900" field="estimativaValor" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Estimativa Valor
+                    </SortableTableHead>
                     <TableHead className="text-center w-24">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -998,23 +1027,35 @@ const ComprasPanel = () => {
                   </Select>
                 </div>
                 <div className="flex items-center gap-2 justify-end">
-                  <span className="text-sm text-muted-foreground">Página {servicosPage} de {totalServicosPages}</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={servicosPage <= 1}
-                    onClick={() => setServicosPage((p) => Math.max(1, p - 1))}
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={servicosPage >= totalServicosPages}
-                    onClick={() => setServicosPage((p) => Math.min(totalServicosPages, p + 1))}
-                  >
-                    Próxima
-                  </Button>
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious 
+                          onClick={() => setServicosPage(Math.max(1, servicosPage - 1))}
+                          className={servicosPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+
+                      {Array.from({ length: totalServicosPages }, (_, i) => i + 1).map((page) => (
+                        <PaginationItem key={page}>
+                          <PaginationLink 
+                            onClick={() => setServicosPage(page)}
+                            isActive={page === servicosPage}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+
+                      <PaginationItem>
+                        <PaginationNext 
+                          onClick={() => setServicosPage(Math.min(totalServicosPages, servicosPage + 1))}
+                          className={servicosPage === totalServicosPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
                 </div>
               </div>
             )}
@@ -1242,15 +1283,33 @@ const ComprasPanel = () => {
                       className="pointer-events-none"
                     />
                   </TableHead>
-                  <TableHead className="w-[70px] cursor-pointer select-none" onClick={toggleSelectAll}>Código</TableHead>
-                  <TableHead className="min-w-[200px]">Descrição</TableHead>
-                  <TableHead className="text-center w-[60px]">Dir.</TableHead>
-                  <TableHead className="text-center w-[70px]">Ger.</TableHead>
-                  <TableHead className="text-center w-[60px]">Qtd.</TableHead>
-                  <TableHead className="text-right w-[100px]">Valor Unit.</TableHead>
-                  <TableHead className="text-right w-[100px]">Total</TableHead>
-                  <TableHead className="text-center w-[100px]">Status</TableHead>
-                  <TableHead className="min-w-[180px]">Obs.</TableHead>
+                  <SortableTableHead className="w-[70px] cursor-pointer select-none hover:text-slate-900" field="codigo" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Código
+                  </SortableTableHead>
+                  <SortableTableHead className="min-w-[200px] cursor-pointer select-none hover:text-slate-900" field="descricao" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Descrição
+                  </SortableTableHead>
+                  <SortableTableHead className="text-center w-[60px] cursor-pointer select-none hover:text-slate-900" field="diretoriaSigla" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Dir.
+                  </SortableTableHead>
+                  <SortableTableHead className="text-center w-[70px] cursor-pointer select-none hover:text-slate-900" field="gerencia" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Ger.
+                  </SortableTableHead>
+                  <SortableTableHead className="text-center w-[60px] cursor-pointer select-none hover:text-slate-900" field="qtdEstimada" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Qtd.
+                  </SortableTableHead>
+                  <SortableTableHead className="text-right w-[100px] cursor-pointer select-none hover:text-slate-900" field="valorUnitario" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Valor Unit.
+                  </SortableTableHead>
+                  <SortableTableHead className="text-right w-[100px] cursor-pointer select-none hover:text-slate-900" field="valorTotal" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Total
+                  </SortableTableHead>
+                  <SortableTableHead className="text-center w-[100px] cursor-pointer select-none hover:text-slate-900" field="status" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Status
+                  </SortableTableHead>
+                  <SortableTableHead className="min-w-[180px] cursor-pointer select-none hover:text-slate-900" field="observacao" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
+                    Obs.
+                  </SortableTableHead>
                   <TableHead className="text-center w-24">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1321,23 +1380,35 @@ const ComprasPanel = () => {
               </Select>
             </div>
             <div className="flex items-center gap-2 justify-end">
-              <span className="text-sm text-muted-foreground">Página {itemsPage} de {totalItemsPages}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={itemsPage <= 1}
-                onClick={() => setItemsPage((p) => Math.max(1, p - 1))}
-              >
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={itemsPage >= totalItemsPages}
-                onClick={() => setItemsPage((p) => Math.min(totalItemsPages, p + 1))}
-              >
-                Próxima
-              </Button>
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious 
+                      onClick={() => setItemsPage(Math.max(1, itemsPage - 1))}
+                      className={itemsPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+
+                  {Array.from({ length: totalItemsPages }, (_, i) => i + 1).map((page) => (
+                    <PaginationItem key={page}>
+                      <PaginationLink 
+                        onClick={() => setItemsPage(page)}
+                        isActive={page === itemsPage}
+                        className="cursor-pointer"
+                      >
+                        {page}
+                      </PaginationLink>
+                    </PaginationItem>
+                  ))}
+
+                  <PaginationItem>
+                    <PaginationNext 
+                      onClick={() => setItemsPage(Math.min(totalItemsPages, itemsPage + 1))}
+                      className={itemsPage === totalItemsPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
             </div>
             <div className="flex gap-2 md:ml-auto">
               <Button variant="outline" className="gap-2" onClick={handleExportExcel}>

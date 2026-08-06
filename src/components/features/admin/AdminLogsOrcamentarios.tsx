@@ -11,6 +11,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination.tsx";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +58,8 @@ export function AdminLogsOrcamentarios() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
   const queryClient = useQueryClient();
 
   const { data: logs = [], isLoading: isLoadingLogs } = useQuery({
@@ -98,11 +111,35 @@ export function AdminLogsOrcamentarios() {
     );
   });
 
+  const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredLogs);
+
+  const paginationData = React.useMemo(() => {
+    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedItems = sortedItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    
+    return {
+      paginatedItems,
+      totalPages,
+      totalFiltered: sortedItems.length
+    };
+  }, [sortedItems, currentPage]);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredLogs.length && filteredLogs.length > 0) {
-      setSelectedIds([]);
+    const paginatedIds = paginationData.paginatedItems.map((log: any) => log.id);
+    const allSelected = paginatedIds.length > 0 && paginatedIds.every((id: any) => selectedIds.includes(id));
+    
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !paginatedIds.includes(id)));
     } else {
-      setSelectedIds(filteredLogs.map((log: any) => log.id));
+      setSelectedIds(prev => {
+        const newSet = new Set([...prev, ...paginatedIds]);
+        return Array.from(newSet);
+      });
     }
   };
 
@@ -242,15 +279,15 @@ export function AdminLogsOrcamentarios() {
             <TableRow>
               <TableHead className="w-[50px]">
                 <Checkbox 
-                  checked={selectedIds.length > 0 && selectedIds.length === filteredLogs.length}
+                  checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((log: any) => selectedIds.includes(log.id))}
                   onCheckedChange={toggleSelectAll}
                 />
               </TableHead>
-              <TableHead>Data</TableHead>
-              <TableHead>Centro de Custo</TableHead>
-              <TableHead>Ação</TableHead>
-              <TableHead>Referência</TableHead>
-              <TableHead className="text-right">Valor</TableHead>
+              <SortableTableHead className="cursor-pointer hover:text-slate-900" field="created_at" sortConfig={sortConfig} onRequestSort={requestSort}>Data</SortableTableHead>
+              <SortableTableHead className="cursor-pointer hover:text-slate-900" field="centro_custo" sortConfig={sortConfig} onRequestSort={requestSort}>Centro de Custo</SortableTableHead>
+              <SortableTableHead className="cursor-pointer hover:text-slate-900" field="acao" sortConfig={sortConfig} onRequestSort={requestSort}>Ação</SortableTableHead>
+              <SortableTableHead className="cursor-pointer hover:text-slate-900" field="referencia_tipo" sortConfig={sortConfig} onRequestSort={requestSort}>Referência</SortableTableHead>
+              <SortableTableHead className="text-right cursor-pointer hover:text-slate-900" field="valor" sortConfig={sortConfig} onRequestSort={requestSort}>Valor</SortableTableHead>
               <TableHead className="text-right">Opções</TableHead>
             </TableRow>
           </TableHeader>
@@ -261,14 +298,14 @@ export function AdminLogsOrcamentarios() {
                   Carregando log financeiro...
                 </TableCell>
               </TableRow>
-            ) : filteredLogs.length === 0 ? (
+            ) : paginationData.paginatedItems.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center h-24">
                   Nenhuma movimentação financeira encontrada.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredLogs.map((log: any) => (
+              paginationData.paginatedItems.map((log: any) => (
                 <TableRow key={log.id} data-state={selectedIds.includes(log.id) ? "selected" : undefined}>
                   <TableCell>
                     <Checkbox 
@@ -342,6 +379,47 @@ export function AdminLogsOrcamentarios() {
           </TableBody>
         </Table>
       </div>
+
+      {paginationData.totalPages > 1 && (
+        <div className="py-4 border-t mt-4 flex items-center justify-between">
+          <span className="text-sm text-muted-foreground ml-2">
+            Página {currentPage} de {paginationData.totalPages} • Exibindo {paginationData.totalFiltered} registros
+          </span>
+          <Pagination className="w-auto mx-0">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              {currentPage > 1 && (
+                <PaginationItem>
+                  <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
+                    {currentPage - 1}
+                  </PaginationLink>
+                </PaginationItem>
+              )}
+              <PaginationItem>
+                <PaginationLink isActive>{currentPage}</PaginationLink>
+              </PaginationItem>
+              {currentPage < paginationData.totalPages && (
+                <PaginationItem>
+                  <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
+                    {currentPage + 1}
+                  </PaginationLink>
+                </PaginationItem>
+              )}
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
+                  className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
 
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
         <DialogContent className="max-w-2xl">

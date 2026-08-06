@@ -434,8 +434,12 @@ export async function getSolicitacoesByGerencia(
 }
 
 export async function deleteSolicitacao(itemId: string): Promise<boolean> {
-  // Primeiro remove o histórico para evitar erros de restrição de chave estrangeira
+  if (!itemId) throw new Error("ID inválido para exclusão");
+
+  // Primeiro remove as dependências para evitar erros de restrição de chave estrangeira
   await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", itemId);
+  await supabase.from("aprovacao").delete().eq("solicitacao_id", itemId);
+  await supabase.from("log_orcamentario").delete().eq("referencia_id", itemId);
 
   const { error } = await supabase
     .from("solicitacoes")
@@ -453,8 +457,12 @@ export async function deleteSolicitacao(itemId: string): Promise<boolean> {
 }
 
 export async function deleteSolicitacoesBulk(itemIds: string[]): Promise<boolean> {
-  // Remove histórico em massa
+  if (!itemIds || itemIds.length === 0) return false;
+
+  // Remove dependências em massa
   await supabase.from("solicitacao_historico").delete().in("solicitacao_id", itemIds);
+  await supabase.from("aprovacao").delete().in("solicitacao_id", itemIds);
+  await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
 
   const { error } = await supabase
     .from("solicitacoes")
@@ -1457,6 +1465,12 @@ export async function createServico(
 }
 
 export const deleteServico = async (id: string): Promise<boolean> => {
+  if (!id) throw new Error("ID inválido para exclusão");
+
+  // Remove dependências para evitar erros de restrição de chave estrangeira
+  await supabase.from("log_orcamentario").delete().eq("referencia_id", id);
+  await supabase.from("aprovacao").delete().eq("solicitacao_id", id);
+
   const { error } = await supabase.from("servicos").delete().eq("id", id);
 
   if (error) throw error;
@@ -1467,6 +1481,12 @@ export const deleteServico = async (id: string): Promise<boolean> => {
 };
 
 export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
+  if (!itemIds || itemIds.length === 0) return false;
+
+  // Remove dependências em massa
+  await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
+  await supabase.from("aprovacao").delete().in("solicitacao_id", itemIds);
+
   const { error } = await supabase
     .from("servicos")
     .delete()

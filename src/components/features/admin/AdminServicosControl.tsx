@@ -58,6 +58,8 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination.tsx";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
 
 // ==================== TIPOS ====================
 type ServicoCatalogo = {
@@ -238,13 +240,15 @@ export function AdminServicosControl() {
     );
   }, [servicos, searchTerm]);
 
+  const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredServicos as ServicoCatalogo[]);
+
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(filteredServicos.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = (filteredServicos as ServicoCatalogo[]).slice(startIdx, endIdx);
-    return { totalPages, currentPage, paginatedItems, totalFiltered: filteredServicos.length };
-  }, [filteredServicos, currentPage]);
+    const paginatedItems = sortedItems.slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems, totalFiltered: sortedItems.length };
+  }, [sortedItems, currentPage]);
 
   const summary = useMemo(() => {
     const totalItens = servicos.length;
@@ -464,7 +468,7 @@ export function AdminServicosControl() {
     if (selectedIds.length === paginationData.paginatedItems.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(paginationData.paginatedItems.map(s => s.id));
+      setSelectedIds(paginationData.paginatedItems.map((s: ServicoCatalogo) => s.id));
     }
   };
 
@@ -676,20 +680,20 @@ export function AdminServicosControl() {
                       aria-label="Selecionar todos os serviços da página"
                     />
                   </TableHead>
-                  <TableHead className="w-16">Item</TableHead>
-                  <TableHead>Objeto</TableHead>
-                  <TableHead className="w-32">Tipo</TableHead>
-                  <TableHead className="w-28">Prioridade</TableHead>
-                  <TableHead className="w-32">Estimativa (R$)</TableHead>
-                  <TableHead className="w-24">Vinculação</TableHead>
-                  <TableHead className="w-24">Diretoria</TableHead>
-                  <TableHead className="w-24">Gerência</TableHead>
-                  <TableHead className="w-24">Status</TableHead>
+                  <SortableTableHead className="w-16 cursor-pointer hover:text-slate-900" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>Item</SortableTableHead>
+                  <SortableTableHead className="cursor-pointer hover:text-slate-900" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>Objeto</SortableTableHead>
+                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="tipo_contratacao" sortConfig={sortConfig} onRequestSort={requestSort}>Tipo</SortableTableHead>
+                  <SortableTableHead className="w-28 cursor-pointer hover:text-slate-900" field="grau_prioridade" sortConfig={sortConfig} onRequestSort={requestSort}>Prioridade</SortableTableHead>
+                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="estimativa_valor" sortConfig={sortConfig} onRequestSort={requestSort}>Estimativa (R$)</SortableTableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="vinculacao" sortConfig={sortConfig} onRequestSort={requestSort}>Vinculação</SortableTableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="diretoria_id" sortConfig={sortConfig} onRequestSort={requestSort}>Diretoria</SortableTableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="gerencia_id" sortConfig={sortConfig} onRequestSort={requestSort}>Gerência</SortableTableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="ativo" sortConfig={sortConfig} onRequestSort={requestSort}>Status</SortableTableHead>
                   <TableHead className="w-20">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginationData.paginatedItems.map((servico) => (
+                {paginationData.paginatedItems.map((servico: ServicoCatalogo) => (
                   <TableRow key={servico.id} className={selectedIds.includes(servico.id) ? "bg-muted/50" : ""}>
                     <TableCell className="text-center">
                       <Checkbox 
