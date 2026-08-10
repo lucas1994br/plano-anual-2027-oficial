@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
+import { formatContratoMask } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -873,7 +874,7 @@ export function AdminServicosControl() {
               <Label className="text-sm font-medium">Contrato</Label>
               <Input
                 value={formData.contrato}
-                onChange={(e) => setFormData(prev => ({ ...prev, contrato: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
                 placeholder="Ex: 028/2021"
                 className="mt-1"
               />
@@ -1057,7 +1058,7 @@ export function AdminServicosControl() {
               <Label className="text-sm font-medium">Contrato</Label>
               <Input
                 value={editFormData.contrato}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, contrato: e.target.value }))}
+                onChange={(e) => setEditFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
                 placeholder="Ex: 028/2021"
                 className="mt-1"
               />

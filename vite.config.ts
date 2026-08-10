@@ -4,6 +4,7 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
+process.env.BROWSER = "msedge";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
