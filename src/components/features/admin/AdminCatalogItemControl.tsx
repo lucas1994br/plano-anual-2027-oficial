@@ -4,6 +4,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx-js-style";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -285,7 +286,7 @@ export function AdminCatalogItemControl() {
 
     setIsUpdatingBulk(true);
     try {
-      const updates: any = {};
+      const updates: Partial<ItemCatalogo> = {};
       if (bulkEditField === "categoria") updates.categoria = bulkEditValue;
       if (bulkEditField === "unidade") updates.unidade = bulkEditValue;
       if (bulkEditField === "valorUnitario") updates.valor_unitario = Number(bulkEditValue);
@@ -320,19 +321,16 @@ export function AdminCatalogItemControl() {
     );
   };
 
-  const handleExportExcel = async () => {
-    // @ts-ignore
-    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
-    const XLSX = xlsxModule.default ?? xlsxModule;
+  const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
-    const wsData: any[][] = [];
+    const wsData: (string | number | undefined)[][] = [];
 
     wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Aquisições`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
     wsData.push(["Código", "Descrição", "Categoria", "Unidade", "Valor Unitário"]);
 
-    (filteredItens as any[]).forEach((item) => {
+    (filteredItens as ItemCatalogo[]).forEach((item) => {
       wsData.push([
         item.codigo,
         item.descricao,
@@ -362,13 +360,13 @@ export function AdminCatalogItemControl() {
 
     autoTable(doc, {
       head: [["Cód.", "Descrição", "Categoria", "Unid.", "Valor Unit."]],
-      body: (filteredItens as any[]).map((item) => [
+      body: (filteredItens as ItemCatalogo[]).map((item) => [
         item.codigo,
         item.descricao.length > 60 ? item.descricao.substring(0, 60) + "…" : item.descricao,
         item.categoria,
         item.unidade,
         formatCurrency(item.valor_unitario),
-      ]) as any,
+      ]) as import("jspdf-autotable").RowInput[],
       startY: 30,
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [37, 99, 235], textColor: 255 },

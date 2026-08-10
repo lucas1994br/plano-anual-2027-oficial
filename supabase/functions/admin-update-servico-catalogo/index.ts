@@ -110,6 +110,7 @@ serve(async (req: Request) => {
       "grau_prioridade",
       "estimativa_valor",
       "vinculacao",
+      "contrato",
       "dependencia_descricao",
       "diretoria_id",
       "gerencia_id",

@@ -1065,6 +1065,7 @@ export async function createServicoCatalogoAndDistribuir(servico: {
   estimativa_valor: number;
   vinculacao: "Sim" | "Não";
   dependencia_descricao?: string;
+  contrato?: string | null;
   diretoria_id: string;
   gerencia_id: string;
 }): Promise<unknown> {
@@ -1089,6 +1090,7 @@ export async function createServicoCatalogoAndDistribuir(servico: {
             grau_prioridade: servico.grau_prioridade,
             estimativa_valor: Number(servico.estimativa_valor),
             vinculacao: servico.vinculacao,
+            contrato: servico.contrato || null,
             dependencia_descricao: servico.dependencia_descricao || null,
             diretoria_id: servico.diretoria_id,
             gerencia_id: servico.gerencia_id,
@@ -1130,6 +1132,7 @@ export async function updateServicoCatalogoAdmin(
     grau_prioridade: string;
     estimativa_valor: number;
     vinculacao: "Sim" | "Não";
+    contrato?: string | null;
     dependencia_descricao: string | null;
     diretoria_id: string;
     gerencia_id: string;
@@ -1331,6 +1334,7 @@ function mapDbToServicoItem(row: any): ServicoItem {
     observacao: row.observacao,
     justificativaRejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
     justificativa_rejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
+    contrato: row.contrato,
     created_at: row.created_at,
     updated_at: row.updated_at,
   } as ServicoItem;
@@ -1374,6 +1378,7 @@ function mapServicoItemToDb(item: any): any {
   if (item.periodo_id !== undefined) dbRow.periodo_id = item.periodo_id;
   if (item.status !== undefined) dbRow.status = item.status;
   if (item.observacao !== undefined) dbRow.observacao = item.observacao;
+  if (item.contrato !== undefined) dbRow.contrato = item.contrato;
   
   if (item.created_at !== undefined) dbRow.created_at = item.created_at;
   if (item.updated_at !== undefined) dbRow.updated_at = item.updated_at;

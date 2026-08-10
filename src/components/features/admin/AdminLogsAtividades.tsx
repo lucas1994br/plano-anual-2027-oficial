@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Eye, Download, FileSpreadsheet, Trash2, Edit, MoreHorizontal, CheckSquare, FileDown, ArchiveRestore } from "lucide-react";
+import { Search, Eye, FileSpreadsheet, Trash2, MoreHorizontal, FileDown, ArchiveRestore } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -15,7 +15,6 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
 import {
   Pagination,
   PaginationContent,
-  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -47,8 +46,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { toast } from "sonner";
-import { getLogsAtividades, getLixeiraLogsAtividades, getFuncionariosNomes, deleteLogAtividade, deleteLogsAtividadeBulk, restoreLogAtividade, restoreLogsAtividadeBulk, hardDeleteLogAtividade, hardDeleteLogsAtividadeBulk, updateLogAtividade, getRecordDetails } from "@/lib/services.ts";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.tsx";
+import { getLogsAtividades, getLixeiraLogsAtividades, getFuncionariosNomes, deleteLogAtividade, deleteLogsAtividadeBulk, restoreLogAtividade, restoreLogsAtividadeBulk, hardDeleteLogAtividade, hardDeleteLogsAtividadeBulk, getRecordDetails } from "@/lib/services.ts";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
@@ -62,17 +61,19 @@ const toTitleCase = (str: string) => {
     .join(" ");
 };
 
-function LogNarrative({ log, funcionariosMap, getFuncNome }: { log: any, funcionariosMap: any, getFuncNome: (mat: string) => string }) {
+type FuncionarioInfo = { nome: string; diretoria_id?: string; gerencia_id?: string; [key: string]: unknown };
+
+function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Record<string, unknown>, funcionariosMap: Record<string, FuncionarioInfo>, getFuncNome: (mat: string) => string }>) {
   const { data: record } = useQuery({
     queryKey: ["record-details", log?.tabela_afetada, log?.registro_id],
-    queryFn: () => getRecordDetails(log.tabela_afetada, log.registro_id),
+    queryFn: () => getRecordDetails(log.tabela_afetada as string, log.registro_id as string),
     enabled: !!log?.registro_id && !!log?.tabela_afetada
   });
 
   if (!record || !log) return null;
 
-  const funcName = toTitleCase(getFuncNome(log.matricula) || "Desconhecido");
-  let texto = <></>;
+  const funcName = toTitleCase(getFuncNome(log.matricula as string) || "Desconhecido");
+  let texto: React.ReactNode = null;
 
   // Tenta extrair status novo se houver
   let statusText = "";
@@ -80,15 +81,18 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: { log: any, funcion
     const detalhes = typeof log.detalhes === 'string' ? JSON.parse(log.detalhes) : log.detalhes;
     if (detalhes?.status_novo) {
       const s = detalhes.status_novo;
-      const statusFriendly = s === 'aprovado' ? 'Aprovado' : s === 'enviado' ? 'Enviado para Aprovação' : s === 'reprovado' ? 'Reprovado' : s;
+      let statusFriendly = String(s);
+      if (s === 'aprovado') statusFriendly = 'Aprovado';
+      else if (s === 'enviado') statusFriendly = 'Enviado para Aprovação';
+      else if (s === 'reprovado') statusFriendly = 'Reprovado';
       statusText = statusFriendly;
     }
-  } catch (e) {
-    // ignore
+  } catch (_e) {
+    console.warn("Não foi possível parsear detalhes:", _e);
   }
   
   const cargo = (() => {
-    const mat = log.matricula;
+    const mat = log.matricula as string;
     const firstName = funcName.split(" ")[0].toLowerCase();
     
     let isFeminino = false;
@@ -130,7 +134,7 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: { log: any, funcion
     const itemName = record.objeto || record.descricao || "Aquisição Existente não especificada";
     texto = <>{cargo} {funcName} {actionVerb} a aquisição existente "{itemName}" (Item {record.item || record.id || "N/A"}){statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   } else {
-    texto = <>{cargo} {funcName} realizou uma alteração no registro ID {log.registro_id.substring(0, 8)}{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
+    texto = <>{cargo} {funcName} realizou uma alteração no registro ID {String(log.registro_id).substring(0, 8)}{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   }
 
   return (
@@ -142,7 +146,7 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: { log: any, funcion
 
 export function AdminLogsAtividades() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedLog, setSelectedLog] = useState<any>(null);
+  const [selectedLog, setSelectedLog] = useState<Record<string, unknown> | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 20;
@@ -160,13 +164,13 @@ export function AdminLogsAtividades() {
     queryFn: getLixeiraLogsAtividades,
   });
 
-  const { data: funcionarios = [], isLoading: isLoadingFunc } = useQuery({
+  const { data: funcionarios = [] } = useQuery({
     queryKey: ["funcionarios-nomes"],
     queryFn: getFuncionariosNomes,
   });
 
-  const funcionariosMap = (funcionarios as any[]).reduce((acc: any, func: any) => {
-    acc[func.matricula] = func;
+  const funcionariosMap = (funcionarios as FuncionarioInfo[]).reduce((acc: Record<string, FuncionarioInfo>, func: FuncionarioInfo & { matricula?: string }) => {
+    if (func.matricula) acc[func.matricula] = func;
     return acc;
   }, {});
 
@@ -231,21 +235,21 @@ export function AdminLogsAtividades() {
       "status_novo": "Novo Status",
       "status_anterior": "Status Anterior"
     };
-    return fieldMap[fieldName] || toTitleCase(fieldName.replace(/_/g, " "));
+    return fieldMap[fieldName] || toTitleCase(fieldName.replaceAll(/_/g, " "));
   };
 
-  const getFieldValueFriendly = (key: string, value: any) => {
+  const getFieldValueFriendly = (key: string, value: unknown) => {
     if (key === "acao") {
       const actionMap: Record<string, string> = {
         updateSolicitacaoStatusBulk: "Atualização em Massa de Status",
         updateSolicitacaoStatus: "Atualização de Status",
       };
-      return actionMap[value] || value;
+      return actionMap[value as string] || String(value);
     }
     
     const keyLower = key.toLowerCase();
-    if ((keyLower.includes("valor") || keyLower.includes("dotacao")) && !isNaN(parseFloat(value))) {
-      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value));
+    if ((keyLower.includes("valor") || keyLower.includes("dotacao")) && !Number.isNaN(Number.parseFloat(value as string))) {
+      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value as string | number));
     }
 
     if (typeof value === "string") {
@@ -260,14 +264,17 @@ export function AdminLogsAtividades() {
   const currentLogs = activeTab === "ativos" ? logs : lixeiraLogs;
   const isLoadingCurrent = activeTab === "ativos" ? isLoadingLogs : isLoadingLixeira;
 
-  const filteredLogs = currentLogs.filter((log: any) => {
+  const filteredLogs = currentLogs.filter((log: Record<string, unknown>) => {
     const term = searchTerm.toLowerCase();
-    const funcName = getFuncNome(log.matricula)?.toLowerCase() || "";
+    const mat = (log.matricula as string) || "";
+    const acao = (log.acao as string) || "";
+    const tab = (log.tabela_afetada as string) || "";
+    const funcName = getFuncNome(mat)?.toLowerCase() || "";
     return (
-      log.matricula.toLowerCase().includes(term) ||
+      mat.toLowerCase().includes(term) ||
       funcName.includes(term) ||
-      log.acao.toLowerCase().includes(term) ||
-      log.tabela_afetada.toLowerCase().includes(term)
+      acao.toLowerCase().includes(term) ||
+      tab.toLowerCase().includes(term)
     );
   });
 
@@ -290,8 +297,8 @@ export function AdminLogsAtividades() {
   }, [searchTerm, activeTab]);
 
   const toggleSelectAll = () => {
-    const paginatedIds = paginationData.paginatedItems.map((log: any) => log.id);
-    const allSelected = paginatedIds.length > 0 && paginatedIds.every((id: any) => selectedIds.includes(id));
+    const paginatedIds = paginationData.paginatedItems.map((log: Record<string, unknown>) => log.id as string);
+    const allSelected = paginatedIds.length > 0 && paginatedIds.every((id: string) => selectedIds.includes(id));
     
     if (allSelected) {
       setSelectedIds(prev => prev.filter(id => !paginatedIds.includes(id)));
@@ -357,12 +364,12 @@ export function AdminLogsAtividades() {
   // Funções de Exportação
   const exportToExcel = () => {
     try {
-      const dataToExport = filteredLogs.map((log: any) => ({
-        "Data/Hora": format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
-        "Funcionário": log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador do Sistema" : (toTitleCase(getFuncNome(log.matricula) || "Nome não encontrado")),
+      const dataToExport = filteredLogs.map((log: Record<string, unknown>) => ({
+        "Data/Hora": format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss"),
+        "Funcionário": log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador do Sistema" : (toTitleCase(getFuncNome(log.matricula as string) || "Nome não encontrado")),
         "Matrícula": log.matricula,
-        "Ação": toTitleCase(log.acao),
-        "Tabela Afetada": getTableNameFriendly(log.tabela_afetada),
+        "Ação": toTitleCase(log.acao as string),
+        "Tabela Afetada": getTableNameFriendly(log.tabela_afetada as string),
         "ID Registro": log.registro_id || "",
         "Detalhes Payload": JSON.stringify(log.detalhes || {})
       }));
@@ -372,7 +379,8 @@ export function AdminLogsAtividades() {
       XLSX.utils.book_append_sheet(workbook, worksheet, "Logs de Atividades");
       XLSX.writeFile(workbook, `Logs_Atividades_${format(new Date(), "dd-MM-yyyy")}.xlsx`);
       toast.success("Relatório Excel exportado com sucesso");
-    } catch (e) {
+    } catch (_e) {
+      console.error("Erro ao exportar Excel:", _e);
       toast.error("Erro ao exportar Excel");
     }
   };
@@ -383,14 +391,14 @@ export function AdminLogsAtividades() {
       doc.text("Relatório de Logs de Atividades", 14, 15);
       
       const tableColumn = ["Data/Hora", "Funcionário", "Ação", "Tabela", "ID Registro"];
-      const tableRows = filteredLogs.map((log: any) => {
-        const nome = log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador" : (toTitleCase(getFuncNome(log.matricula) || "Desconhecido"));
+      const tableRows = filteredLogs.map((log: Record<string, unknown>) => {
+        const nome = log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador" : (toTitleCase(getFuncNome(log.matricula as string) || "Desconhecido"));
         return [
-          format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
+          format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss"),
           nome,
-          toTitleCase(log.acao),
-          getTableNameFriendly(log.tabela_afetada),
-          log.registro_id ? log.registro_id.substring(0, 8) + "..." : "-"
+          toTitleCase(log.acao as string),
+          getTableNameFriendly(log.tabela_afetada as string),
+          log.registro_id ? String(log.registro_id).substring(0, 8) + "..." : "-"
         ];
       });
 
@@ -402,7 +410,8 @@ export function AdminLogsAtividades() {
 
       doc.save(`Logs_Atividades_${format(new Date(), "dd-MM-yyyy")}.pdf`);
       toast.success("Relatório PDF exportado com sucesso");
-    } catch (e) {
+    } catch (_e) {
+      console.error("Erro ao exportar PDF:", _e);
       toast.error("Erro ao exportar PDF");
     }
   };
@@ -481,7 +490,7 @@ export function AdminLogsAtividades() {
             <TableRow>
               <TableHead className="w-[50px]">
                 <Checkbox 
-                  checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((log: any) => selectedIds.includes(log.id))}
+                  checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((log: Record<string, unknown>) => selectedIds.includes(log.id as string))}
                   onCheckedChange={toggleSelectAll}
                 />
               </TableHead>
@@ -494,29 +503,37 @@ export function AdminLogsAtividades() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoadingCurrent ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center h-24">
-                  Carregando logs...
-                </TableCell>
-              </TableRow>
-            ) : paginationData.paginatedItems.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center h-24">
-                  Nenhum registro encontrado.
-                </TableCell>
-              </TableRow>
-            ) : (
-              paginationData.paginatedItems.map((log: any) => (
-                <TableRow key={log.id} data-state={selectedIds.includes(log.id) ? "selected" : undefined}>
+            {(() => {
+              if (isLoadingCurrent) {
+                return (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center h-24">
+                      Carregando logs...
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              
+              if (paginationData.paginatedItems.length === 0) {
+                return (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center h-24">
+                      Nenhum registro encontrado.
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              
+              return paginationData.paginatedItems.map((log: Record<string, unknown>) => (
+                <TableRow key={log.id as string} data-state={selectedIds.includes(log.id as string) ? "selected" : undefined}>
                   <TableCell>
                     <Checkbox 
-                      checked={selectedIds.includes(log.id)}
-                      onCheckedChange={() => toggleSelectLog(log.id)}
+                      checked={selectedIds.includes(log.id as string)}
+                      onCheckedChange={() => toggleSelectLog(log.id as string)}
                     />
                   </TableCell>
                   <TableCell className="font-medium whitespace-nowrap">
-                    {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                    {format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
@@ -529,28 +546,28 @@ export function AdminLogsAtividades() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <span className="text-primary flex items-center gap-1 cursor-help">
-                                  {toTitleCase(getFuncNome(log.matricula) || "Nome não encontrado")}
+                                  {toTitleCase(getFuncNome(log.matricula as string) || "Nome não encontrado")}
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>{getHierarquia(log.matricula)}</p>
+                                <p>{getHierarquia(log.matricula as string)}</p>
                               </TooltipContent>
                             </Tooltip>
                           )}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        Mat: {log.matricula}
+                        Mat: {log.matricula as string}
                       </span>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={getActionBadgeColor(log.acao)}>
-                      {toTitleCase(log.acao)}
+                    <Badge variant="outline" className={getActionBadgeColor(log.acao as string)}>
+                      {toTitleCase(log.acao as string)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{getTableNameFriendly(log.tabela_afetada)}</TableCell>
-                  <TableCell className="text-xs max-w-[150px] truncate" title={log.registro_id}>
-                    {log.registro_id || "-"}
+                  <TableCell>{getTableNameFriendly(log.tabela_afetada as string)}</TableCell>
+                  <TableCell className="text-xs max-w-[150px] truncate" title={log.registro_id as string}>
+                    {(log.registro_id as string) || "-"}
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
@@ -563,7 +580,7 @@ export function AdminLogsAtividades() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Ações</DropdownMenuLabel>
                         <DropdownMenuItem 
-                          onSelect={(e) => {
+                          onSelect={(_e) => {
                             // Deixa o menu fechar completamente antes de abrir o modal
                             // Isso evita o bug de travamento de cliques (pointer-events) do Radix UI
                             setTimeout(() => setSelectedLog(log), 150);
@@ -575,7 +592,7 @@ export function AdminLogsAtividades() {
                         <DropdownMenuSeparator />
                         {activeTab === "lixeira" && (
                           <DropdownMenuItem 
-                            onClick={() => restoreMutation.mutate(log.id)}
+                            onClick={() => restoreMutation.mutate(log.id as string)}
                           >
                             <ArchiveRestore className="mr-2 h-4 w-4" />
                             Devolver Log
@@ -583,7 +600,7 @@ export function AdminLogsAtividades() {
                         )}
                         <DropdownMenuItem 
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
-                          onClick={() => deleteMutation.mutate(log.id)}
+                          onClick={() => deleteMutation.mutate(log.id as string)}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Excluir Registro
@@ -592,8 +609,8 @@ export function AdminLogsAtividades() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
+              ));
+            })()}
           </TableBody>
         </Table>
       </div>
@@ -649,14 +666,14 @@ export function AdminLogsAtividades() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-semibold">Ação</p>
-                  <Badge variant="outline" className={getActionBadgeColor(selectedLog.acao)}>
-                    {toTitleCase(selectedLog.acao)}
+                  <Badge variant="outline" className={getActionBadgeColor(selectedLog.acao as string)}>
+                    {toTitleCase(selectedLog.acao as string)}
                   </Badge>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Data</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {format(new Date(selectedLog.created_at), "dd/MM/yyyy HH:mm:ss")}
+                    {format(new Date(selectedLog.created_at as string), "dd/MM/yyyy HH:mm:ss")}
                   </p>
                 </div>
                 <div>
@@ -664,7 +681,7 @@ export function AdminLogsAtividades() {
                   <p className="mt-1 text-primary font-medium text-sm">
                     {selectedLog.matricula === 'admin123' || selectedLog.matricula === 'admin' 
                       ? "Administrador do Sistema" 
-                      : toTitleCase(getFuncNome(selectedLog.matricula) || "Desconhecido")}
+                      : toTitleCase(getFuncNome(selectedLog.matricula as string) || "Desconhecido")}
                   </p>
                 </div>
                 <div>
@@ -672,27 +689,27 @@ export function AdminLogsAtividades() {
                   <p className="mt-1 text-primary font-medium text-sm">
                     {selectedLog.matricula === 'admin123' || selectedLog.matricula === 'admin' 
                       ? "Administração do Sistema"
-                      : getHierarquia(selectedLog.matricula)}
+                      : getHierarquia(selectedLog.matricula as string)}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Matrícula</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {selectedLog.matricula}
+                    {selectedLog.matricula as string}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Tabela Afetada</p>
-                  <p className="mt-1 text-primary font-medium text-sm">{selectedLog.tabela_afetada}</p>
+                  <p className="mt-1 text-primary font-medium text-sm">{selectedLog.tabela_afetada as string}</p>
                 </div>
                 
                 {(() => {
-                  let parsedDetalhes: Record<string, any> = {};
+                  let parsedDetalhes: Record<string, unknown> = {};
                   try {
                     parsedDetalhes = typeof selectedLog.detalhes === 'string' 
                       ? JSON.parse(selectedLog.detalhes) 
                       : selectedLog.detalhes;
-                  } catch (e) {
+                  } catch (_e) {
                     parsedDetalhes = { erro_parse: "Não foi possível exibir detalhes estruturados.", original: selectedLog.detalhes };
                   }
                   

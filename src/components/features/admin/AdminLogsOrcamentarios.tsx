@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Eye, Download, FileSpreadsheet, Trash2, Edit, MoreHorizontal, CheckSquare, FileDown } from "lucide-react";
+import { Search, Eye, FileSpreadsheet, Trash2, MoreHorizontal, FileDown } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -15,7 +15,6 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
 import {
   Pagination,
   PaginationContent,
-  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -42,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { toast } from "sonner";
-import { getLogsOrcamentarios, deleteLogOrcamentario, deleteLogsOrcamentarioBulk, updateLogOrcamentario } from "@/lib/services.ts";
+import { getLogsOrcamentarios, deleteLogOrcamentario, deleteLogsOrcamentarioBulk } from "@/lib/services.ts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
@@ -54,9 +53,24 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+type LogOrcamentario = {
+  id: string;
+  acao: string;
+  valor: number;
+  referencia_tipo: string;
+  referencia_id: string;
+  created_at: string;
+  ano: number;
+  centro_custo?: {
+    codigo: string;
+    nome: string;
+  };
+  [key: string]: unknown;
+};
+
 export function AdminLogsOrcamentarios() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedLog, setSelectedLog] = useState<any>(null);
+  const [selectedLog, setSelectedLog] = useState<LogOrcamentario | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 20;
@@ -100,7 +114,7 @@ export function AdminLogsOrcamentarios() {
     }
   };
 
-  const filteredLogs = logs.filter((log: any) => {
+  const filteredLogs = logs.filter((log: LogOrcamentario) => {
     const term = searchTerm.toLowerCase();
     const ccText = log.centro_custo ? `${log.centro_custo.codigo} - ${log.centro_custo.nome}`.toLowerCase() : "";
     return (
@@ -130,8 +144,8 @@ export function AdminLogsOrcamentarios() {
   }, [searchTerm]);
 
   const toggleSelectAll = () => {
-    const paginatedIds = paginationData.paginatedItems.map((log: any) => log.id);
-    const allSelected = paginatedIds.length > 0 && paginatedIds.every((id: any) => selectedIds.includes(id));
+    const paginatedIds = paginationData.paginatedItems.map((log: LogOrcamentario) => log.id);
+    const allSelected = paginatedIds.length > 0 && paginatedIds.every((id: string) => selectedIds.includes(id));
     
     if (allSelected) {
       setSelectedIds(prev => prev.filter(id => !paginatedIds.includes(id)));
@@ -173,7 +187,7 @@ export function AdminLogsOrcamentarios() {
   // Funções de Exportação
   const exportToExcel = () => {
     try {
-      const dataToExport = filteredLogs.map((log: any) => ({
+      const dataToExport = filteredLogs.map((log: LogOrcamentario) => ({
         "Data/Hora": format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
         "Centro de Custo": log.centro_custo ? `${log.centro_custo.codigo} - ${log.centro_custo.nome}` : "-",
         "Ação": getActionFriendlyName(log.acao),
@@ -188,7 +202,7 @@ export function AdminLogsOrcamentarios() {
       XLSX.utils.book_append_sheet(workbook, worksheet, "Log Orçamentário");
       XLSX.writeFile(workbook, `Trilha_Orcamentaria_${format(new Date(), "dd-MM-yyyy")}.xlsx`);
       toast.success("Relatório Excel exportado com sucesso");
-    } catch (e) {
+    } catch (_e) {
       toast.error("Erro ao exportar Excel");
     }
   };
@@ -199,7 +213,7 @@ export function AdminLogsOrcamentarios() {
       doc.text("Trilha Financeira (Log Orçamentário)", 14, 15);
       
       const tableColumn = ["Data/Hora", "Centro de Custo", "Ação", "Referência", "Valor (R$)"];
-      const tableRows = filteredLogs.map((log: any) => {
+      const tableRows = filteredLogs.map((log: LogOrcamentario) => {
         return [
           format(new Date(log.created_at), "dd/MM/yyyy"),
           log.centro_custo ? log.centro_custo.codigo : "-",
@@ -217,7 +231,7 @@ export function AdminLogsOrcamentarios() {
 
       doc.save(`Trilha_Orcamentaria_${format(new Date(), "dd-MM-yyyy")}.pdf`);
       toast.success("Relatório PDF exportado com sucesso");
-    } catch (e) {
+    } catch (_e) {
       toast.error("Erro ao exportar PDF");
     }
   };
@@ -279,7 +293,7 @@ export function AdminLogsOrcamentarios() {
             <TableRow>
               <TableHead className="w-[50px]">
                 <Checkbox 
-                  checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((log: any) => selectedIds.includes(log.id))}
+                  checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((log: LogOrcamentario) => selectedIds.includes(log.id))}
                   onCheckedChange={toggleSelectAll}
                 />
               </TableHead>
@@ -305,7 +319,7 @@ export function AdminLogsOrcamentarios() {
                 </TableCell>
               </TableRow>
             ) : (
-              paginationData.paginatedItems.map((log: any) => (
+              paginationData.paginatedItems.map((log: LogOrcamentario) => (
                 <TableRow key={log.id} data-state={selectedIds.includes(log.id) ? "selected" : undefined}>
                   <TableCell>
                     <Checkbox 

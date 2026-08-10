@@ -130,6 +130,7 @@ const ComprasPanel = () => {
     diretoriaSigla: diretoriasById.get(s.diretoria_id) || s.diretorias?.sigla || "N/A",
     status: s.status as SolicitacaoStatus,
     observacao: s.observacao,
+    contrato: s.contrato,
   });
 
   const allServicosNovos: ServicoItem[] = useMemo(() => servicosCompras.filter((s: any) => s.tipo_contratacao === "Novo").map(mapServico), [servicosCompras, diretoriasById]);
@@ -914,6 +915,12 @@ const ComprasPanel = () => {
                         className="pointer-events-none"
                       />
                     </TableHead>
+                    <SortableTableHead className="w-16 cursor-pointer select-none hover:text-slate-900" field="item" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Nº
+                    </SortableTableHead>
+                    <SortableTableHead className="w-24 cursor-pointer select-none hover:text-slate-900" field="contrato" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Contrato
+                    </SortableTableHead>
                     <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="objeto" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
                       Objeto
                     </SortableTableHead>
@@ -941,7 +948,7 @@ const ComprasPanel = () => {
                 <TableBody>
                   {filteredServicos.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12 text-slate-500">
+                      <TableCell colSpan={10} className="text-center py-12 text-slate-500">
                         <div className="flex flex-col items-center">
                           <Search className="h-10 w-10 text-slate-300 mb-3" />
                           <p className="text-lg">Nenhum serviço encontrado com a configuração atual.</p>
@@ -957,6 +964,12 @@ const ComprasPanel = () => {
                             onCheckedChange={() => servico.id && !isServicoReadOnly(servico) && toggleSelectServico(servico.id)}
                             disabled={isServicoReadOnly(servico)}
                           />
+                        </TableCell>
+                        <TableCell className="font-mono text-sm text-slate-500">
+                          {servico.item}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium text-slate-600 whitespace-nowrap">
+                          {servico.contrato || "-"}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col">

@@ -1,12 +1,11 @@
  
 import { useRef, useState } from "react";
-import { Pencil, MessageSquare, FileDown, FileSpreadsheet, Check, X, Undo2 } from "lucide-react";
+import { MessageSquare, FileDown, FileSpreadsheet, Undo2 } from "lucide-react";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -28,12 +27,11 @@ import {
 import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
 import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { PlanItem } from "@/types/plan.ts";
-import { UNIDADES } from "@/data/mockData.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 // XLSX is loaded lazily inside the export handler to avoid bundling Node-only deps.
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
+import * as XLSX from "xlsx-js-style";
 interface PlanTableProps {
   items: PlanItem[];
   onUpdateQtdEstimada: (codigo: number, qtdEstimada: number) => void;
@@ -49,10 +47,10 @@ interface PlanTableProps {
 
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 
-export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
+export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
   const [editingCodigo, setEditingCodigo] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>("");
-  const editInputRef = useRef<HTMLInputElement | null>(null);
+  const _editInputRef = useRef<HTMLInputElement | null>(null);
   const skipBlurSaveRef = useRef(false);
   const [observacaoText, setObservacaoText] = useState<string>("");
   const [observacaoOpen, setObservacaoOpen] = useState<number | null>(null);
@@ -63,12 +61,12 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
   };
 
-  const handleStartEdit = (item: PlanItem) => {
+  const _handleStartEdit = (item: PlanItem) => {
     setEditingCodigo(item.codigo);
     setEditValue(item.qtdEstimada === 0 ? "" : String(item.qtdEstimada));
   };
 
-  const handleConfirmEdit = (rawValue?: string) => {
+  const _handleConfirmEdit = (rawValue?: string) => {
     if (editingCodigo !== null) {
       const normalizedValue = (rawValue ?? editValue).replace(/^0+(?=\d)/, "");
       onUpdateQtdEstimada(editingCodigo, Number(normalizedValue || 0));
@@ -77,7 +75,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
     skipBlurSaveRef.current = false;
   };
 
-  const handleCancelEdit = () => {
+  const _handleCancelEdit = () => {
     setEditingCodigo(null);
     skipBlurSaveRef.current = false;
   };
@@ -95,10 +93,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
     }
   };
 
-  const handleExportExcel = async () => {
-    // @ts-ignore
-    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
-    const XLSX = (xlsxModule as any).default ?? xlsxModule;
+  const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
     const wsData: unknown[][] = [];
 
@@ -376,7 +371,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade, onUpdat
                       }
                     >
                       <SelectTrigger className="h-8 w-[100px] mx-auto border-none bg-transparent p-0 justify-center">
-                        <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">
+                        <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as "default" | "secondary" | "destructive" | "outline"} className="cursor-pointer">
                           {item.prioridade}
                         </Badge>
                       </SelectTrigger>

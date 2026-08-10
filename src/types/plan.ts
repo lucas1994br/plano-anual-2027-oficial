@@ -60,6 +60,7 @@ export interface ServicoItem {
   observacao?: string;
   justificativaRejeicao?: string;
   justificativa_rejeicao?: string;
+  contrato?: string;
   created_at?: string;
   updated_at?: string;
 }

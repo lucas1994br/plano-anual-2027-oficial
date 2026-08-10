@@ -136,6 +136,7 @@ serve(async (req: Request) => {
       grau_prioridade: servico.grau_prioridade || "Médio",
       estimativa_valor: Number(servico.estimativa_valor) || 0,
       vinculacao: servico.vinculacao || "Não",
+      contrato: servico.contrato || null,
       dependencia_descricao: servico.dependencia_descricao || null,
       diretoria_id: servico.diretoria_id,
       gerencia_id: servico.gerencia_id,
@@ -200,6 +201,7 @@ serve(async (req: Request) => {
           estimativa_valor: servicoCatalogo.estimativa_valor,
           grau_prioridade: servicoCatalogo.grau_prioridade,
           vinculacao: servicoCatalogo.vinculacao,
+          contrato: servicoCatalogo.contrato,
           status: "rascunho",
         }));
 

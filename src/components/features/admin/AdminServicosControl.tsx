@@ -6,6 +6,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx-js-style";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -48,7 +49,7 @@ import {
   getTodasGerencias,
 } from "@/lib/services.ts";
 import { GrauPrioridade } from "@/types/plan.ts";
-import { SummaryCards } from "@/components/common/SummaryCards.tsx";
+
 import {
   Pagination,
   PaginationContent,
@@ -75,6 +76,7 @@ type ServicoCatalogo = {
   diretoria_id: string;
   gerencia_id: string;
   ativo: boolean;
+  contrato: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -143,6 +145,7 @@ export function AdminServicosControl() {
     estimativa_valor: "",
     vinculacao: "Não" as "Sim" | "Não",
     dependencia_descricao: "",
+    contrato: "",
     diretoria_id: "",
     gerencia_id: "",
   });
@@ -156,6 +159,7 @@ export function AdminServicosControl() {
     estimativa_valor: "",
     vinculacao: "Não" as "Sim" | "Não",
     dependencia_descricao: "",
+    contrato: "",
     diretoria_id: "",
     gerencia_id: "",
   });
@@ -236,6 +240,7 @@ export function AdminServicosControl() {
     return (servicos as ServicoCatalogo[]).filter(servico => 
       String(servico.item).toLowerCase().includes(term) ||
       servico.objeto.toLowerCase().includes(term) ||
+      (servico.contrato && servico.contrato.toLowerCase().includes(term)) ||
       servico.tipo_contratacao.toLowerCase().includes(term)
     );
   }, [servicos, searchTerm]);
@@ -271,6 +276,7 @@ export function AdminServicosControl() {
       estimativa_valor: "",
       vinculacao: "Não",
       dependencia_descricao: "",
+      contrato: "",
       diretoria_id: "",
       gerencia_id: "",
     });
@@ -285,6 +291,7 @@ export function AdminServicosControl() {
       estimativa_valor: "",
       vinculacao: "Não",
       dependencia_descricao: "",
+      contrato: "",
       diretoria_id: "",
       gerencia_id: "",
     });
@@ -326,6 +333,7 @@ export function AdminServicosControl() {
         grau_prioridade: formData.grau_prioridade,
         estimativa_valor: estimativaValor,
         vinculacao: formData.vinculacao,
+        contrato: formData.contrato.trim() || null,
         dependencia_descricao: formData.dependencia_descricao.trim() || undefined,
         diretoria_id: formData.diretoria_id,
         gerencia_id: formData.gerencia_id,
@@ -354,6 +362,7 @@ export function AdminServicosControl() {
       grau_prioridade: servico.grau_prioridade,
       estimativa_valor: String(servico.estimativa_valor),
       vinculacao: servico.vinculacao,
+      contrato: servico.contrato || "",
       dependencia_descricao: servico.dependencia_descricao || "",
       diretoria_id: servico.diretoria_id,
       gerencia_id: servico.gerencia_id,
@@ -378,6 +387,7 @@ export function AdminServicosControl() {
         grau_prioridade: editFormData.grau_prioridade,
         estimativa_valor: estimativaValor,
         vinculacao: editFormData.vinculacao,
+        contrato: editFormData.contrato.trim() || null,
         dependencia_descricao: editFormData.dependencia_descricao.trim() || null,
         diretoria_id: editFormData.diretoria_id,
         gerencia_id: editFormData.gerencia_id,
@@ -488,21 +498,19 @@ export function AdminServicosControl() {
     return ger?.sigla || gerenciaId.slice(0, 8);
   };
 
-  const handleExportExcel = async () => {
-    // @ts-ignore
-    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
-    const XLSX = xlsxModule.default ?? xlsxModule;
+  const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
-    const wsData: any[][] = [];
+    const wsData: (string | number | undefined)[][] = [];
 
     wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Serviços`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
-    wsData.push(["Item", "Objeto", "Tipo", "Prioridade", "Estimativa Valor", "Vinculação", "Diretoria", "Gerência", "Status"]);
+    wsData.push(["Item", "Contrato", "Objeto", "Tipo", "Prioridade", "Estimativa Valor", "Vinculação", "Diretoria", "Gerência", "Status"]);
 
-    (filteredServicos as any[]).forEach((s) => {
+    (filteredServicos as ServicoCatalogo[]).forEach((s) => {
       wsData.push([
         s.item,
+        s.contrato || "-",
         s.objeto,
         s.tipo_contratacao,
         s.grau_prioridade,
@@ -515,7 +523,7 @@ export function AdminServicosControl() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [{ wch: 10 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws["!cols"] = [{ wch: 10 }, { wch: 15 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws, "Serviços");
     XLSX.writeFile(wb, `PAC_2027_Catalogo_Servicos_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
@@ -533,15 +541,16 @@ export function AdminServicosControl() {
         : "—";
 
     autoTable(doc, {
-      head: [["Item", "Objeto", "Tipo", "Estimativa", "Diretoria", "Gerência"]],
-      body: (filteredServicos as any[]).map((s) => [
+      head: [["Item", "Contrato", "Objeto", "Tipo", "Estimativa", "Diretoria", "Gerência"]],
+      body: (filteredServicos as ServicoCatalogo[]).map((s) => [
         s.item,
+        s.contrato || "-",
         s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
         s.tipo_contratacao,
         formatCurrency(s.estimativa_valor),
         getDiretoriaSigla(s.diretoria_id),
         getGerenciaSigla(s.gerencia_id),
-      ]) as any,
+      ]) as import("jspdf-autotable").RowInput[],
       startY: 30,
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [22, 163, 74], textColor: 255 },
@@ -681,6 +690,7 @@ export function AdminServicosControl() {
                     />
                   </TableHead>
                   <SortableTableHead className="w-16 cursor-pointer hover:text-slate-900" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>Item</SortableTableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="contrato" sortConfig={sortConfig} onRequestSort={requestSort}>Contrato</SortableTableHead>
                   <SortableTableHead className="cursor-pointer hover:text-slate-900" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>Objeto</SortableTableHead>
                   <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="tipo_contratacao" sortConfig={sortConfig} onRequestSort={requestSort}>Tipo</SortableTableHead>
                   <SortableTableHead className="w-28 cursor-pointer hover:text-slate-900" field="grau_prioridade" sortConfig={sortConfig} onRequestSort={requestSort}>Prioridade</SortableTableHead>
@@ -703,6 +713,7 @@ export function AdminServicosControl() {
                       />
                     </TableCell>
                     <TableCell className="font-mono">{servico.item}</TableCell>
+                    <TableCell className="font-medium text-muted-foreground whitespace-nowrap">{servico.contrato || "-"}</TableCell>
                     <TableCell className="max-w-md">
                       <p className="font-medium truncate">{servico.objeto}</p>
                       {servico.justificativa && (
@@ -853,6 +864,17 @@ export function AdminServicosControl() {
                 onChange={(e) => setFormData(prev => ({ ...prev, justificativa: e.target.value }))}
                 placeholder="Fundamentação técnica e administrativa..."
                 rows={3}
+                className="mt-1"
+              />
+            </div>
+
+            {/* Contrato */}
+            <div>
+              <Label className="text-sm font-medium">Contrato</Label>
+              <Input
+                value={formData.contrato}
+                onChange={(e) => setFormData(prev => ({ ...prev, contrato: e.target.value }))}
+                placeholder="Ex: 028/2021"
                 className="mt-1"
               />
             </div>
@@ -1026,6 +1048,17 @@ export function AdminServicosControl() {
                 value={editFormData.justificativa}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, justificativa: e.target.value }))}
                 rows={3}
+                className="mt-1"
+              />
+            </div>
+
+            {/* Contrato */}
+            <div>
+              <Label className="text-sm font-medium">Contrato</Label>
+              <Input
+                value={editFormData.contrato}
+                onChange={(e) => setEditFormData(prev => ({ ...prev, contrato: e.target.value }))}
+                placeholder="Ex: 028/2021"
                 className="mt-1"
               />
             </div>

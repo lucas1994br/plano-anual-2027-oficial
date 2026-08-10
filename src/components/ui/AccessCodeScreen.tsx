@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { Lock, ArrowLeft } from "lucide-react";
+import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Card } from "@/components/ui/card.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { validateAccessCode } from "@/lib/services.ts";
 import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 

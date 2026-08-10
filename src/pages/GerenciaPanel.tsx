@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { PlanHeader } from "@/components/layout/PlanHeader";
 import { SummaryCards } from "@/components/common/SummaryCards";
@@ -108,6 +109,7 @@ import {
     const [novoServicoForm, setNovoServicoForm] = useState({
       objeto: "",
       justificativa: "",
+      contrato: "",
       tipoContratacao: "Contínuo",
       unidadeDemandante: "",
       previsaoInicio: "",
@@ -120,6 +122,11 @@ import {
     const [novoServicoLoading, setNovoServicoLoading] = useState(false);
     const [bulkEditAquisicaoOpen, setBulkEditAquisicaoOpen] = useState(false);
     const [bulkEditServicosOpen, setBulkEditServicosOpen] = useState(false);
+    
+    const [servicoEditOpen, setServicoEditOpen] = useState(false);
+    const [servicoEdicao, setServicoEdicao] = useState<ServicoItem | null>(null);
+    const [solicitacaoEditOpen, setSolicitacaoEditOpen] = useState(false);
+    const [solicitacaoEdicao, setSolicitacaoEdicao] = useState<PlanItem | null>(null);
     const [isBulkUpdating, setIsBulkUpdating] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [currentPageServicos, setCurrentPageServicos] = useState(1);
@@ -328,7 +335,7 @@ import {
 
   const ensureSolicitacao = async (itemCode: number, updates: any) => {
     try {
-      const existente = items.find((i) => i.codigo === itemCode);
+      const existente = items.find((i) => String(i.codigo) === String(itemCode));
       if (existente?.id) {
         if (existente.status !== "rascunho") return;
         await updateSolicitacao(existente.id, updates);
@@ -336,7 +343,7 @@ import {
         return;
       }
 
-      const catalogoItem = catalogoData.find((c: any) => c.codigo === itemCode);
+      const catalogoItem = catalogoData.find((c: any) => String(c.codigo) === String(itemCode));
       if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
 
       await createSolicitacao({
@@ -465,6 +472,34 @@ import {
     }
   };
 
+  const openSolicitacaoEditor = (item: PlanItem) => {
+    setSolicitacaoEdicao(item);
+    setSolicitacaoEditOpen(true);
+  };
+
+  const handleSaveSolicitacaoEdicao = async () => {
+    if (!solicitacaoEdicao?.codigo) return;
+
+    const updates: Partial<PlanItem> = {
+      descricao: solicitacaoEdicao.descricao,
+      categoria: solicitacaoEdicao.categoria,
+      unidade: solicitacaoEdicao.unidade,
+      qtdEstimada: solicitacaoEdicao.qtdEstimada,
+      prioridade: solicitacaoEdicao.prioridade,
+      observacao: solicitacaoEdicao.observacao,
+    };
+
+    try {
+      await ensureSolicitacao(solicitacaoEdicao.codigo, updates);
+      setSolicitacaoEditOpen(false);
+      setSolicitacaoEdicao(null);
+      toast({ title: "Solicitação atualizada", description: "Dados atualizados com sucesso." });
+    } catch (error) {
+      console.error("Erro ao atualizar solicitação:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+    }
+  };
+
   const handleBulkEditAquisicao = async (updates: any) => {
     setIsBulkUpdating(true);
     try {
@@ -491,9 +526,9 @@ import {
     }
   };
 
-  const ensureServico = async (itemCode: number, updates: any) => {
+  const ensureServico = async (itemCode: number | string, updates: any) => {
     try {
-      const servicoExistente = servicosData.find((s: ServicoItem) => s.item === itemCode);
+      const servicoExistente = servicosData.find((s: ServicoItem) => String(s.item) === String(itemCode));
       
       if (servicoExistente?.id) {
         if (servicoExistente.status !== "rascunho") return;
@@ -503,7 +538,7 @@ import {
       }
 
       // Se não existe, cria!
-      const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
+      const catalogoItem = servicosCatalogoData.find((c: any) => String(c.item) === String(itemCode));
       if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
 
       await createServico({
@@ -511,16 +546,18 @@ import {
         diretoria_id: diretoria.id,
         gerencia_id: gerenciaAtual.id,
         item: catalogoItem.item,
-        tipo_contratacao: catalogoItem.tipo_contratacao || "",
+        tipo_contratacao: updates.tipoContratacao !== undefined ? updates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
         unidade_demandante: gerenciaUpper,
-        objeto: catalogoItem.objeto || "",
+        objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
         justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
+        contrato: updates.contrato !== undefined ? updates.contrato : (catalogoItem.contrato || null),
         previsao_inicio: null,
-        estimativa_valor: catalogoItem.estimativa_valor || 0,
-        dotacao_orcamentaria: updates.dotacao_orcamentaria !== undefined ? updates.dotacao_orcamentaria : 0,
-        grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : (catalogoItem.grau_prioridade || "Baixo"),
+        estimativa_valor: updates.estimativaValor !== undefined ? updates.estimativaValor : (catalogoItem.estimativa_valor || 0),
+        dotacao_orcamentaria: updates.dotacaoOrcamentaria !== undefined ? updates.dotacaoOrcamentaria : 0,
+        grau_prioridade: updates.grauPrioridade !== undefined ? updates.grauPrioridade : (catalogoItem.grau_prioridade || "Baixo"),
         vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
-        dependencia_descricao: null,
+        dependencia_descricao: updates.dependenciaDescricao !== undefined ? updates.dependenciaDescricao : null,
+        observacao: updates.observacao !== undefined ? updates.observacao : "",
         status: updates.status || "rascunho",
       });
       
@@ -634,6 +671,7 @@ import {
         unidade_demandante: novoServicoForm.unidadeDemandante || gerenciaUpper,
         objeto: novoServicoForm.objeto.trim(),
         justificativa: novoServicoForm.justificativa.trim() || null,
+        contrato: novoServicoForm.contrato?.trim() || null,
         previsao_inicio: novoServicoForm.previsaoInicio || null,
         estimativa_valor: novoServicoForm.estimativaValor ? parseFloat(novoServicoForm.estimativaValor) : 0,
         dotacao_orcamentaria: novoServicoForm.dotacaoOrcamentaria ? parseFloat(novoServicoForm.dotacaoOrcamentaria) : 0,
@@ -648,6 +686,7 @@ import {
       setNovoServicoForm({
         objeto: "",
         justificativa: "",
+        contrato: "",
         tipoContratacao: "Contínuo",
         unidadeDemandante: "",
         previsaoInicio: "",
@@ -699,6 +738,38 @@ import {
     } catch (error) {
       console.error("Erro ao enviar serviços para diretoria:", error);
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    }
+  };
+
+  const openServicoEditor = (servico: ServicoItem) => {
+    setServicoEdicao(servico);
+    setServicoEditOpen(true);
+  };
+
+  const handleSaveServicoEdicao = async () => {
+    if (!servicoEdicao?.item) return;
+
+    const updates: Partial<ServicoItem> = {
+      objeto: servicoEdicao.objeto,
+      justificativa: servicoEdicao.justificativa,
+      observacao: servicoEdicao.observacao,
+      estimativaValor: servicoEdicao.estimativaValor,
+      dotacaoOrcamentaria: servicoEdicao.dotacaoOrcamentaria,
+      grauPrioridade: servicoEdicao.grauPrioridade,
+      vinculacao: servicoEdicao.vinculacao,
+      dependenciaDescricao: servicoEdicao.dependenciaDescricao,
+      contrato: servicoEdicao.contrato,
+      tipoContratacao: servicoEdicao.tipoContratacao,
+    };
+
+    try {
+      await ensureServico(servicoEdicao.item as number, updates);
+      setServicoEditOpen(false);
+      setServicoEdicao(null);
+      toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+    } catch (error) {
+      console.error("Erro ao atualizar serviço:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
     }
   };
 
@@ -1104,6 +1175,7 @@ import {
       diretoriaSigla: siglaUpper,
       status: s.status,
       observacao: s.observacao,
+      contrato: s.contrato,
     }));
 
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho";
@@ -1133,6 +1205,7 @@ import {
         observacao: catalogoItem.observacao || "",
         gerencia: gerenciaUpper,
         diretoriaSigla: siglaUpper,
+        contrato: catalogoItem.contrato,
       } as unknown as ServicoItem;
     });
     
@@ -1277,6 +1350,9 @@ import {
                   <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-12 cursor-pointer hover:text-foreground" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>
                     Nº
                   </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-24 cursor-pointer hover:text-foreground" field="contrato" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Contrato
+                  </SortableTableHead>
                   <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>
                     Objeto
                   </SortableTableHead>
@@ -1301,7 +1377,7 @@ import {
               <tbody>
                 {paginatedLista.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-6 text-muted-foreground text-sm">
+                    <td colSpan={10} className="text-center py-6 text-muted-foreground text-sm">
                       Nenhum serviço nesta seção.
                     </td>
                   </tr>
@@ -1321,6 +1397,7 @@ import {
                           />
                         </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
+                        <td className="p-3 text-sm font-medium text-muted-foreground whitespace-nowrap">{servico.contrato || "-"}</td>
                         <td className="p-3 text-sm max-w-xs" title={servico.objeto}>
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -1412,15 +1489,26 @@ import {
                         </td>
                         <td className="p-3 text-right">
                           {!readOnly ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive"
-                              onClick={() => handleDeleteServico(servico.id, servico.item)}
-                              title="Excluir serviço"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openServicoEditor(servico)}
+                                title="Editar serviço"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive"
+                                onClick={() => handleDeleteServico(servico.id, servico.item)}
+                                title="Excluir serviço"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           ) : servico.status === "enviado" && servico.id ? (
                             <Button
                               variant="ghost"
@@ -1714,6 +1802,16 @@ import {
                     onChange={(e) => setNovoServicoForm(f => ({ ...f, objeto: e.target.value }))}
                     className="w-full mt-1 text-sm border rounded px-3 py-2 min-h-20 bg-background"
                     placeholder="Descreva o objeto do serviço a ser contratado..."
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Contrato</label>
+                  <input
+                    type="text"
+                    value={novoServicoForm.contrato}
+                    onChange={(e) => setNovoServicoForm(f => ({ ...f, contrato: e.target.value }))}
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                    placeholder="Ex: 028/2021"
                   />
                 </div>
                 <div>
@@ -2216,16 +2314,27 @@ import {
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
                             {(item.status === "rascunho" || item.status === "rejeitado") && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                title="Excluir item"
-                                disabled={!item.id}
-                                onClick={() => item.id && handleDeleteItem(item.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  title="Editar item"
+                                  onClick={() => openSolicitacaoEditor(item)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive"
+                                  title="Excluir item"
+                                  disabled={!item.id}
+                                  onClick={() => item.id && handleDeleteItem(item.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
                             )}
                             {item.status === "enviado" && (
                               <Button
@@ -2346,6 +2455,193 @@ import {
         onConfirm={handleBulkEditServicos} 
         isUpdating={isBulkUpdating} 
       />
+
+      {/* Editor de Serviço Individual */}
+      <Dialog open={servicoEditOpen} onOpenChange={(open) => !open && setServicoEditOpen(false)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar Serviço</DialogTitle>
+          </DialogHeader>
+          {servicoEdicao && (
+            <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="text-sm font-medium">Objeto <span className="text-destructive">*</span></label>
+                <textarea
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
+                  value={servicoEdicao.objeto}
+                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, objeto: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Justificativa <span className="text-destructive">*</span></label>
+                <textarea
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
+                  value={servicoEdicao.justificativa || ""}
+                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, justificativa: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Contrato</label>
+                <input
+                  type="text"
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                  value={servicoEdicao.contrato || ""}
+                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: e.target.value })}
+                  placeholder="Ex: 028/2021"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Tipo de Contratação</label>
+                  <select
+                    value={servicoEdicao.tipoContratacao}
+                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, tipoContratacao: e.target.value })}
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                  >
+                    <option value="Contínuo">Contínuo</option>
+                    <option value="Renovação">Renovação</option>
+                    <option value="Outros">Outros</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Grau de Prioridade</label>
+                  <Select
+                    value={servicoEdicao.grauPrioridade}
+                    onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, grauPrioridade: v })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Baixo">Baixo</SelectItem>
+                      <SelectItem value="Médio">Médio</SelectItem>
+                      <SelectItem value="Alto">Alto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Estimativa de Valor (R$) <span className="text-destructive">*</span></label>
+                  <CurrencyInput
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                    value={servicoEdicao.estimativaValor?.toString() || ""}
+                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, estimativaValor: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Vinculação</label>
+                  <Select
+                    value={servicoEdicao.vinculacao}
+                    onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, vinculacao: v })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Sim">Sim</SelectItem>
+                      <SelectItem value="Não">Não</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Descrição da Vinculação</label>
+                <textarea
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
+                  value={servicoEdicao.dependenciaDescricao || ""}
+                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, dependenciaDescricao: e.target.value })}
+                  disabled={servicoEdicao.vinculacao !== "Sim"}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Diretoria <span className="text-destructive">*</span></label>
+                  <input
+                    type="text"
+                    value={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : ""}
+                    disabled
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Gerência <span className="text-destructive">*</span></label>
+                  <input
+                    type="text"
+                    value={gerenciaAtual?.sigla ? `${gerenciaAtual.sigla} - ${gerenciaAtual.nome}` : ""}
+                    disabled
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setServicoEditOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveServicoEdicao}>Salvar Alterações</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Editor de Solicitação de Aquisição Individual */}
+      <Dialog open={solicitacaoEditOpen} onOpenChange={(open) => !open && setSolicitacaoEditOpen(false)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Editar Solicitação de Aquisição</DialogTitle>
+          </DialogHeader>
+          {solicitacaoEdicao && (
+            <div className="grid gap-4 py-4">
+              <div>
+                <label className="text-sm font-medium">Descrição</label>
+                <textarea
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
+                  value={solicitacaoEdicao.descricao}
+                  disabled
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Quantidade Estimada</label>
+                  <input
+                    type="number"
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                    value={solicitacaoEdicao.qtdEstimada}
+                    onChange={(e) => setSolicitacaoEdicao({ ...solicitacaoEdicao, qtdEstimada: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Prioridade</label>
+                  <Select
+                    value={solicitacaoEdicao.prioridade}
+                    onValueChange={(v: any) => setSolicitacaoEdicao({ ...solicitacaoEdicao, prioridade: v })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Baixa">Baixa</SelectItem>
+                      <SelectItem value="Média">Média</SelectItem>
+                      <SelectItem value="Alta">Alta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Observação</label>
+                <textarea
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
+                  value={solicitacaoEdicao.observacao || ""}
+                  onChange={(e) => setSolicitacaoEdicao({ ...solicitacaoEdicao, observacao: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSolicitacaoEditOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveSolicitacaoEdicao}>Salvar Alterações</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     </div>
   );

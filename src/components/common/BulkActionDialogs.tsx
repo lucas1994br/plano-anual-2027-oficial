@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import { Label } from "@/components/ui/label.tsx";
 
 interface BulkEditAquisicaoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedCount: number;
-  onConfirm: (updates: any) => Promise<void>;
+  onConfirm: (updates: Record<string, string | number>) => Promise<void>;
   isUpdating: boolean;
 }
 
@@ -18,7 +18,7 @@ export function BulkEditAquisicaoDialog({ open, onOpenChange, selectedCount, onC
   const [value, setValue] = useState<string>("");
 
   const handleConfirm = async () => {
-    const updates: any = {};
+    const updates: Record<string, string | number> = {};
     if (field === "prioridade") updates.prioridade = value;
     if (field === "observacao") updates.observacao = value;
     if (field === "unidade") updates.unidade = value;
@@ -83,7 +83,7 @@ interface BulkEditServicosDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedCount: number;
-  onConfirm: (updates: any) => Promise<void>;
+  onConfirm: (updates: Record<string, string | number>) => Promise<void>;
   isUpdating: boolean;
 }
 
@@ -92,7 +92,7 @@ export function BulkEditServicosDialog({ open, onOpenChange, selectedCount, onCo
   const [value, setValue] = useState<string>("");
 
   const handleConfirm = async () => {
-    const updates: any = {};
+    const updates: Record<string, string | number> = {};
     if (field === "grauPrioridade") updates.grauPrioridade = value;
     if (field === "justificativa") updates.justificativa = value;
     if (field === "estimativaValor") updates.estimativaValor = Number(value);
