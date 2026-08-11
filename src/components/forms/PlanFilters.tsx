@@ -32,6 +32,7 @@ interface PlanFiltersProps {
   categorias: string[];
   gerencias?: string[];
   hideCategoriaFilter?: boolean;
+  searchPlaceholder?: string;
 }
 
 export function PlanFilters({
@@ -46,6 +47,7 @@ export function PlanFilters({
   categorias,
   gerencias,
   hideCategoriaFilter,
+  searchPlaceholder,
 }: PlanFiltersProps) {
   const [categoriaOpen, setCategoriaOpen] = useState(false);
 
@@ -60,7 +62,7 @@ export function PlanFilters({
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Pesquisar por código ou descrição..."
+            placeholder={searchPlaceholder || "Pesquisar por código ou descrição..."}
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-10 bg-card"

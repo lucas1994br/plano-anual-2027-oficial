@@ -178,7 +178,9 @@ const ComprasPanel = () => {
 
       const matchesSearch = termo === "" ||
         servico.objeto.toLowerCase().includes(termo) ||
-        (servico.justificativa || "").toLowerCase().includes(termo);
+        (servico.justificativa || "").toLowerCase().includes(termo) ||
+        String(servico.item).toLowerCase().includes(termo) ||
+        (servico.contrato && servico.contrato.toLowerCase().includes(termo));
 
       return matchesDiretoria && matchesSearch;
     });
@@ -823,7 +825,7 @@ const ComprasPanel = () => {
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <Input
                     type="text"
-                    placeholder="Buscar por objeto..."
+                    placeholder="Pesquisar por código, descrição e contrato"
                     className="pl-9 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm h-10"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -860,14 +862,16 @@ const ComprasPanel = () => {
                       <Undo2 className="h-4 w-4" />
                       Devolver ({selectedServicos.size})
                     </Button>
-                    <Button 
-                      variant="outline" 
-                      className="gap-2 text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => handleBulkDeleteServicos()}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Excluir ({selectedServicos.size})
-                    </Button>
+                    {selectedOption === "servicos_novos" && (
+                      <Button 
+                        variant="outline" 
+                        className="gap-2 text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => handleBulkDeleteServicos()}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Excluir ({selectedServicos.size})
+                      </Button>
+                    )}
                     <Button 
                       variant="default" 
                       className="gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
@@ -904,7 +908,7 @@ const ComprasPanel = () => {
             </div>
 
             {/* Tabela de Serviços */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
@@ -1012,9 +1016,11 @@ const ComprasPanel = () => {
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverServicos(servico.id)} title="Devolver Rascunho">
                               <Undo2 className="h-3 w-3" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleBulkDeleteServicos(servico.id)} title="Excluir">
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            {selectedOption === "servicos_novos" && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleBulkDeleteServicos(servico.id)} title="Excluir">
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1116,7 +1122,7 @@ const ComprasPanel = () => {
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-6">
-        <div className="max-w-6xl mx-auto flex items-center gap-4">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-4">
           <div className="bg-white/20 p-3 rounded-lg">
             <ShoppingBag className="h-8 w-8 text-white" />
           </div>
@@ -1221,6 +1227,7 @@ const ComprasPanel = () => {
               <Undo2 className="h-4 w-4" />
               Devolver ({selectedItems.size})
             </Button>
+            {/*
             <Button 
               variant="outline" 
               className="gap-2 text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive shadow-sm"
@@ -1229,6 +1236,7 @@ const ComprasPanel = () => {
               <Trash2 className="h-4 w-4" />
               Excluir ({selectedItems.size})
             </Button>
+            */}
             <Button 
               className={`shadow-md gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 ${selectedAquisicoesAreCompleted ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white border-none" : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-none"}`}
               onClick={() => handleMarcarConcluidoAquisicoes(selectedAquisicoesAreCompleted)}
@@ -1262,7 +1270,7 @@ const ComprasPanel = () => {
           </div>
         ) : (
           <Card className="shadow-sm border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b bg-slate-50">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border-b bg-slate-50 gap-4">
             <div className="flex items-center gap-4">
               <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
                 <ShoppingBag className="h-5 w-5 text-indigo-500" />
@@ -1367,9 +1375,11 @@ const ComprasPanel = () => {
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverAquisicao(item.id!)} title="Devolver Rascunho">
                           <Undo2 className="h-3 w-3" />
                         </Button>
+                        {/*
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleBulkDeleteAquisicao(item.id!)} title="Excluir">
                           <Trash2 className="h-3 w-3" />
                         </Button>
+                        */}
                       </div>
                     </TableCell>
                   </TableRow>

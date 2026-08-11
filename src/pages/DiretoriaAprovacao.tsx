@@ -725,7 +725,8 @@ const DiretoriaAprovacao = () => {
       list = list.filter(s => 
         (s.objeto || "").toLowerCase().includes(term) ||
         (s.justificativa || "").toLowerCase().includes(term) ||
-        String(s.item).toLowerCase().includes(term)
+        String(s.item).toLowerCase().includes(term) ||
+        (s.contrato && s.contrato.toLowerCase().includes(term))
       );
     }
     
@@ -2307,7 +2308,7 @@ const DiretoriaAprovacao = () => {
                 <div className="relative flex-1 max-w-md w-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Buscar serviço..."
+                    placeholder="Pesquisar por código, descrição e contrato"
                     value={ownServicosSearchTerm}
                     onChange={(e) => {
                       setOwnServicosSearchTerm(e.target.value);

@@ -258,7 +258,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
   return (
     <div className="px-6 pb-6">
       <div className="bg-card rounded-lg card-shadow overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border-b gap-4">
           <h2 className="text-lg font-semibold text-foreground">
             Itens do Plano ({items.length})
           </h2>

@@ -287,7 +287,7 @@ export function AdminBudgetControl({ diretorias }: { diretorias: DiretoriaResumo
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-[#1f2937] rounded-xl p-6 flex items-center justify-between shadow-xl">
+      <div className="bg-[#1f2937] rounded-xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-4">
           <div className="bg-white/10 p-4 rounded-xl backdrop-blur-md border border-white/20">
             <Wallet className="h-8 w-8 text-white" />

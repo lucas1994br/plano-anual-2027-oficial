@@ -436,7 +436,7 @@ export function AdminLogsOrcamentarios() {
       )}
 
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Detalhes da Movimentação Financeira</DialogTitle>
           </DialogHeader>

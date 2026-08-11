@@ -619,7 +619,7 @@ export function AdminServicosControl() {
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar serviço..."
+                placeholder="Pesquisar por código, descrição e contrato"
                 className="pl-8"
                 value={searchTerm}
                 onChange={(e) => {
@@ -836,7 +836,7 @@ export function AdminServicosControl() {
         setCreateDialogOpen(open);
         if (!open) resetForm();
       }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Cadastrar Novo Serviço</DialogTitle>
             <DialogDescription>
@@ -1022,7 +1022,7 @@ export function AdminServicosControl() {
           resetEditForm();
         }
       }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Serviço</DialogTitle>
             <DialogDescription>

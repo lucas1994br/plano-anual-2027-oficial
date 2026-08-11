@@ -22,6 +22,7 @@ import { AdminCatalogItemControl } from "../components/features/admin/AdminCatal
 import { AdminServicosControl } from "../components/features/admin/AdminServicosControl.tsx";
 import { AdminLogsAtividades } from "../components/features/admin/AdminLogsAtividades.tsx";
 import { AdminLogsOrcamentarios } from "../components/features/admin/AdminLogsOrcamentarios.tsx";
+import { AdminImportCsv } from "../components/features/admin/AdminImportCsv.tsx";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -54,6 +55,7 @@ const AdminPanel = () => {
     orcamento: "Orçamentos",
     catalogo: "Aquisição",
     servicos: "Serviços",
+    "importar-csv": "Importar dados",
     logs: "Logs de Atividades",
     "logs-orcamentarios": "Trilha Financeira",
   };
@@ -211,7 +213,7 @@ const AdminPanel = () => {
         />
 
         <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
-          <div className="max-w-5xl mx-auto flex items-center gap-4">
+          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="bg-white/20 p-3 rounded-lg">
               <Shield className="h-8 w-8 text-white" />
             </div>
@@ -224,18 +226,19 @@ const AdminPanel = () => {
 
         <div className="max-w-5xl mx-auto px-6 py-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="mb-5">
+            <TabsList className="mb-5 flex flex-wrap h-auto gap-1">
               <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
               <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
               <TabsTrigger value="catalogo">Aquisição</TabsTrigger>
               <TabsTrigger value="servicos">Serviços</TabsTrigger>
+              <TabsTrigger value="importar-csv">Importar dados</TabsTrigger>
               <TabsTrigger value="logs">Logs de Atividades</TabsTrigger>
               <TabsTrigger value="logs-orcamentarios">Trilha Financeira</TabsTrigger>
             </TabsList>
 
             <TabsContent value="periodos" className="space-y-6">
               <Card className="p-6 card-shadow">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
                   <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Calendar className="h-5 w-5 text-primary" />
                     Período Ativo
@@ -285,7 +288,7 @@ const AdminPanel = () => {
                                 className="mt-1"
                               />
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <Label htmlFor="edit-inicio" className="text-sm">Data Início</Label>
                                 <Input
@@ -327,7 +330,7 @@ const AdminPanel = () => {
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-start justify-between">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                             <div>
                               <p className="font-semibold text-lg text-foreground">{periodoAtivo.nome}</p>
                               <p className="text-sm text-muted-foreground mt-2">
@@ -371,7 +374,7 @@ const AdminPanel = () => {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <Label htmlFor="add-inicio">Data de Início</Label>
                       <Input
@@ -489,6 +492,10 @@ const AdminPanel = () => {
 
             <TabsContent value="servicos">
               <AdminServicosControl />
+            </TabsContent>
+
+            <TabsContent value="importar-csv">
+              <AdminImportCsv />
             </TabsContent>
 
             <TabsContent value="logs">

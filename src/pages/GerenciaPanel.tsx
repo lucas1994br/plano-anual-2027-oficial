@@ -1222,6 +1222,7 @@ import {
       const matchesSearch = searchTerm === "" || 
         item.objeto.toLowerCase().includes(searchLower) || 
         item.item.toString().includes(searchLower) ||
+        (item.contrato && item.contrato.toLowerCase().includes(searchLower)) ||
         objInitials.includes(searchLower) ||
         codInitials.includes(searchLower);
 
@@ -1500,16 +1501,18 @@ import {
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                onClick={() => handleDeleteServico(servico.id, servico.item)}
-                                title="Excluir serviço"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
+                                {selectedOption === "servicos_novos" && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-destructive"
+                                    onClick={() => handleDeleteServico(servico.id, servico.item)}
+                                    title="Excluir serviço"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
                           ) : servico.status === "enviado" && servico.id ? (
                             <Button
                               variant="ghost"
@@ -1591,15 +1594,17 @@ import {
               </Badge>
             ) : canSendServicos ? (
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
-                  onClick={handleBulkDeleteServicos}
-                  disabled={selectedServicos.size === 0}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Excluir Selecionados
-                </Button>
+                {selectedOption === "servicos_novos" && (
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                    onClick={handleBulkDeleteServicos}
+                    disabled={selectedServicos.size === 0}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Excluir Selecionados
+                  </Button>
+                )}
                 <Button
                   className="gap-2"
                   onClick={() => setConfirmSendServicosOpen(true)}
@@ -1714,6 +1719,7 @@ import {
             onPrioridadeChange={setPrioridade}
             categorias={[]}
             hideCategoriaFilter={true}
+            searchPlaceholder="Pesquisar por código, descrição e contrato"
           />
 
           {/* Ações gerais */}
@@ -2133,6 +2139,7 @@ import {
           <>
             {hasRascunhoItems && !hasApprovedItems && (
               <div className="flex flex-wrap items-center gap-2">
+                {/* 
                 <Button
                   variant="outline"
                   className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
@@ -2142,6 +2149,7 @@ import {
                   <Trash2 className="h-4 w-4" />
                   Excluir
                 </Button>
+                */}
                 <Button
                   className="gap-2"
                   disabled={!canSend || selectedAquisicaoIds.size === 0}
@@ -2452,6 +2460,7 @@ import {
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
+                                {/* 
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -2462,6 +2471,7 @@ import {
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
+                                */}
                               </>
                             )}
                             {item.status === "enviado" && (

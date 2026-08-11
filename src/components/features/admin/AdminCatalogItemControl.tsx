@@ -609,7 +609,7 @@ export function AdminCatalogItemControl() {
         setCreateDialogOpen(open);
         if (!open) resetForm();
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Cadastrar Novo Item</DialogTitle>
             <DialogDescription>
@@ -700,7 +700,7 @@ export function AdminCatalogItemControl() {
           resetEditForm();
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Editar Item</DialogTitle>
             <DialogDescription>
@@ -784,7 +784,7 @@ export function AdminCatalogItemControl() {
 
       {/* ==================== DIALOG EXCLUIR ITEM ==================== */}
       <Dialog open={!!deletingItem} onOpenChange={(open) => !open && setDeletingItem(null)}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>
@@ -812,7 +812,7 @@ export function AdminCatalogItemControl() {
           setBulkEditValue("");
         }
       }}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Editar {selectedIds.length} itens em lote</DialogTitle>
             <DialogDescription>

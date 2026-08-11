@@ -34,20 +34,20 @@ export function PlanHeader({ title, diretoria, ano, prazo }: PlanHeaderProps) {
 
   return (
     <header className="gradient-header px-6 py-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="bg-white/20 p-3 rounded-lg">
+          <div className="bg-white/20 p-3 rounded-lg shrink-0">
             <Package className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-white">{title}</h1>
+            <h1 className="text-xl font-semibold text-white leading-tight mb-1">{title}</h1>
             <p className="text-white/80 text-sm">
               {diretoria} - PAC {ano}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full md:w-auto">
           <div className="text-right text-white/80 text-xs mr-2">
             <span>
               Prazo: {prazo ? format(prazo, "dd/MM/yyyy", { locale: ptBR }) : "carregando..."}
