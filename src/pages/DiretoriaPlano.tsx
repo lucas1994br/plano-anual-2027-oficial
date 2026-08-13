@@ -69,7 +69,7 @@ const DiretoriaPlano = () => {
   useEffect(() => {
     if (diretoria?.id && periodAtivo?.id) {
       queryClient.prefetchQuery({
-        queryKey: ["solicitacoes-diretoria", diretoria.id, periodAtivo.id],
+        queryKey: ["solicitacoes", "diretoria", diretoria.id, periodAtivo.id],
         queryFn: () => getSolicitacoesByDiretoria(diretoria.id, periodAtivo.id),
       });
       queryClient.prefetchQuery({

@@ -94,6 +94,17 @@ serve(async (req: Request) => {
     if (updates.unidade !== undefined) updateData.unidade = String(updates.unidade).trim().toUpperCase();
     if (updates.valor_unitario !== undefined) updateData.valor_unitario = Number(updates.valor_unitario);
 
+    // Get the old 'codigo' of the item before updating, so we can reliably update dependent solicitacoes
+    const { data: oldItem, error: oldItemError } = await supabase
+      .from("itens_catalogo")
+      .select("codigo")
+      .eq("id", itemId)
+      .maybeSingle();
+
+    if (oldItemError) {
+      console.warn("Erro ao buscar item original:", oldItemError);
+    }
+
     const { data: itemData, error: itemError } = await supabase
       .from("itens_catalogo")
       .update(updateData)
@@ -105,24 +116,40 @@ serve(async (req: Request) => {
       throw itemError;
     }
 
-    // Tentar atualizar as descrições e valores unitários das solicitações dependentes deste item 
-    // apenas em solicitações com status 'rascunho' ou 'pendente'.
-    // Valores unitários de solicitações podem ser atualizados junto, dependendo da regra de negócio.
-    const { error: solicitacoesError } = await supabase
-      .from("solicitacoes")
-      .update({
-        codigo: updateData.codigo,
-        descricao: updateData.descricao,
-        categoria: updateData.categoria,
-        unidade: updateData.unidade,
-        valor_unitario: updateData.valor_unitario
-      })
-      .eq("item_id", itemId)
-      .in("status", ["rascunho", "pendente"]);
+    // Atualizar TODAS as solicitações dependentes com os novos dados base do item, 
+    // independentemente do status, para manter a sincronia completa. 
+    // Usamos o 'codigo' original para o match (útil caso 'item_id' não esteja preenchido 
+    // nas solicitações geradas pelas gerências ou se o código do item mudou).
+    if (oldItem && oldItem.codigo) {
+      const { error: solicitacoesError } = await supabase
+        .from("solicitacoes")
+        .update({
+          codigo: updateData.codigo !== undefined ? updateData.codigo : oldItem.codigo,
+          descricao: updateData.descricao,
+          categoria: updateData.categoria,
+          unidade: updateData.unidade,
+          valor_unitario: updateData.valor_unitario
+        })
+        .eq("codigo", oldItem.codigo);
 
-    if (solicitacoesError) {
-      console.warn("Erro ao atualizar solicitacoes dependentes:", solicitacoesError);
-      // Não quebra a requisição se falhar em solicitações
+      if (solicitacoesError) {
+        console.warn("Erro ao atualizar solicitacoes dependentes por codigo:", solicitacoesError);
+      }
+    } else {
+      // Fallback para item_id se o código antigo não puder ser recuperado
+      const { error: solicitacoesErrorFallback } = await supabase
+        .from("solicitacoes")
+        .update({
+          codigo: updateData.codigo,
+          descricao: updateData.descricao,
+          categoria: updateData.categoria,
+          unidade: updateData.unidade,
+          valor_unitario: updateData.valor_unitario
+        })
+        .eq("item_id", itemId);
+      if (solicitacoesErrorFallback) {
+         console.warn("Erro ao atualizar solicitacoes dependentes por item_id:", solicitacoesErrorFallback);
+      }
     }
 
     const matricula = accessCode.replace(/\\D/g, "") || "desconhecido";

@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
@@ -178,6 +178,22 @@ const DiretoriaAprovacao = () => {
 
   const diretoria = (diretorias as any[]).find((d: any) => d.sigla === siglaUpper);
 
+  // Buscar todas as gerências
+  const { data: todasGerenciasData = [] } = useQuery<any[]>({
+    queryKey: ["todas-gerencias"],
+    queryFn: getTodasGerencias,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Criar mapa global de gerencia_id -> diretoria_id e sigla
+  const globalGerenciaMap = useMemo(() => {
+    const map: Record<string, { sigla: string, diretoria_id: string }> = {};
+    (todasGerenciasData as any[]).forEach((g: any) => {
+      map[g.id] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+    });
+    return map;
+  }, [todasGerenciasData]);
+
   // Buscar gerências desta diretoria
   const { data: gerenciasData = [] } = useQuery<any[]>({
     queryKey: ["gerencias", diretoria?.id],
@@ -189,11 +205,11 @@ const DiretoriaAprovacao = () => {
   // Criar mapa de gerencia_id -> sigla
   const gerenciaMap = useMemo(() => {
     const map: Record<string, string> = {};
-    (gerenciasData as any[]).forEach((g: any) => {
+    (todasGerenciasData as any[]).forEach((g: any) => {
       map[g.id] = g.sigla;
     });
     return map;
-  }, [gerenciasData]);
+  }, [todasGerenciasData]);
 
   useEffect(() => {
     if (ownGerenciaId === "diretoria" && gerenciasData.length > 0) {
@@ -323,17 +339,19 @@ const DiretoriaAprovacao = () => {
           : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
             ? s.categoria
             : "diversos";
+        const trueRequesterDiretoriaId = globalGerenciaMap[s.gerencia_id]?.diretoria_id || s.diretoria_id;
+        
         const diretoriaOrcamentariaIdRaw = getBudgetOwnerDiretoriaId(
           orcamentoConfig,
           categoriaItem,
-          s.diretoria_id,
+          trueRequesterDiretoriaId,
           categoryBudgetOwnersFromDb,
         );
         // Fallback defensivo: evita sumir com itens quando a regra aponta para diretoria inexistente.
         const diretoriaOrcamentariaId = diretoriaMap[diretoriaOrcamentariaIdRaw]
           ? diretoriaOrcamentariaIdRaw
-          : s.diretoria_id;
-        const diretoriaSolicitante = diretoriaMap[s.diretoria_id];
+          : trueRequesterDiretoriaId;
+        const diretoriaSolicitante = diretoriaMap[trueRequesterDiretoriaId];
         const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
         const codigo = Number(s.codigo);
 
@@ -342,7 +360,7 @@ const DiretoriaAprovacao = () => {
           codigo,
           descricao: s.descricao,
           categoria: categoriaItem,
-          gerencia: gerenciaMap[s.gerencia_id] || "N/A",
+          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || "N/A",
           prioridade: s.prioridade || "Média",
           qtdEstimada: Number(s.qtd_estimada || 0),
           unidade: s.unidade || "un",
@@ -360,7 +378,7 @@ const DiretoriaAprovacao = () => {
       // Não filtramos por diretoriaOrcamentariaId aqui — todos os itens da diretoria
       // devem aparecer no painel de aprovação, independentemente de regras de roteamento.
       ;
-  }, [solicitacoes, diretoria, gerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {
@@ -383,7 +401,7 @@ const DiretoriaAprovacao = () => {
         codigo,
         descricao: s.descricao,
         categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0) ? s.categoria : "diversos",
-        gerencia: gerenciaMap[s.gerencia_id] || "N/A",
+        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || "N/A",
         prioridade: s.prioridade || "Média",
         qtdEstimada: Number(s.qtd_estimada || 0),
         unidade: s.unidade || "un",
@@ -396,7 +414,7 @@ const DiretoriaAprovacao = () => {
     });
 
     return Array.from(latestByCodigo.values());
-  }, [solicitacoes, diretoria, gerenciaMap]);
+  }, [solicitacoes, diretoria, globalGerenciaMap]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -860,7 +878,7 @@ const DiretoriaAprovacao = () => {
     });
 
     await updateSolicitacao(id, { qtdEstimada });
-    queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+    queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
   };
 
   const handleUpdateObservacao = async (id: string, observacao: string) => {
@@ -875,7 +893,7 @@ const DiretoriaAprovacao = () => {
     });
 
     await updateSolicitacao(id, { observacao });
-    queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+    queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
   };
 
   const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
@@ -890,7 +908,7 @@ const DiretoriaAprovacao = () => {
     });
 
     await updateSolicitacao(id, { prioridade });
-    queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+    queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
   };
 
   const handleUpdateUnidadeDiretoria = async (codigo: number, unidade: string) => {
@@ -917,7 +935,7 @@ const DiretoriaAprovacao = () => {
         );
       });
       await updateSolicitacao(itemExistente.id, updates);
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       return;
     }
 
@@ -970,7 +988,7 @@ const DiretoriaAprovacao = () => {
       status: updates.status || "rascunho",
     });
 
-    queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+    queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
   };
 
   const handleUpdateQtdEstimadaDiretoria = async (codigo: number, qtdEstimada: number) => {
@@ -1030,7 +1048,7 @@ const DiretoriaAprovacao = () => {
         await updateSolicitacaoStatusBulk(idsToApprove, newStatus, justificativa || undefined);
       }
       
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       
       let actionText = "processado(s)";
       if (actionOwnDialog.action === "aprovar") actionText = "aprovado(s)";
@@ -1045,7 +1063,7 @@ const DiretoriaAprovacao = () => {
       setSelectedOwnItems(new Set());
     } catch (error: any) {
       console.error("Erro ao executar ação (Seus Itens):", error);
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       toast({
         title: "Erro",
         description: error?.message || "Não foi possível executar a ação.",
@@ -1113,7 +1131,7 @@ const DiretoriaAprovacao = () => {
 
       await deleteServicosBulk([servicoId]);
       
-      await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
       toast({ title: "Serviço excluído", description: "Serviço excluído com sucesso." });
     } catch (error) {
       console.error("Erro ao excluir serviço:", error);
@@ -1337,13 +1355,13 @@ const DiretoriaAprovacao = () => {
       if (validIds.length > 0) {
         await updateSolicitacaoStatusBulk(validIds, "em_compra");
       }
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       toast({
         title: "Enviado para Compras",
         description: `${selectedApprovedItems.length} item(ns) enviado(s) para o setor de Compras.`,
       });
     } catch (error) {
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       toast({
         title: "Erro",
         description: "Nao foi possivel enviar para Compras.",
@@ -1378,7 +1396,7 @@ const DiretoriaAprovacao = () => {
         )
       );
 
-      await queryClient.invalidateQueries({ queryKey: servicosQueryKey, exact: true });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
       setSelectedServicos(new Set());
       setActionServicosDialog({ open: false, action: null });
       setJustificativa("");
@@ -1396,7 +1414,7 @@ const DiretoriaAprovacao = () => {
     try {
       const ids = editingBulkOwn ? Array.from(selectedOwnItems) : Array.from(selectedItems);
       await updateSolicitacoesBulkData(ids as string[], updates);
-      await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       toast({ title: "Itens atualizados", description: "Os itens selecionados foram atualizados com sucesso." });
       setBulkEditAquisicaoOpen(false);
     } catch (error: any) {
@@ -1410,7 +1428,7 @@ const DiretoriaAprovacao = () => {
     setIsBulkUpdating(true);
     try {
       await updateServicosBulkData(Array.from(selectedServicos), updates);
-      await queryClient.invalidateQueries({ queryKey: servicosQueryKey, exact: true });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
       toast({ title: "Serviços atualizados", description: "Os serviços selecionados foram atualizados com sucesso." });
       setBulkEditServicosOpen(false);
     } catch (error: any) {
@@ -1439,7 +1457,7 @@ const DiretoriaAprovacao = () => {
         status: "rascunho",
       });
 
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       setAddDialogOpen(false);
       setSelectedCatalogItem(null);
       setCatalogSearch("");
@@ -1494,7 +1512,7 @@ const DiretoriaAprovacao = () => {
 
         await updateSolicitacaoStatusBulk(validIds, newStatus, justificativa || undefined);
       }
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       
       let actionText = "processado(s)";
       if (actionDialog.action === "aprovar") actionText = "aprovado(s)";
@@ -1508,7 +1526,7 @@ const DiretoriaAprovacao = () => {
       });
     } catch (error: any) {
       console.error("Erro ao executar ação:", error);
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       toast({
         title: "Erro",
         description: error?.message || "Não foi possível executar a ação.",
@@ -1579,7 +1597,7 @@ const DiretoriaAprovacao = () => {
       const servicoDb = servicosData.find((s: any) => String(s.item) === String(itemCode) && s.unidadeDemandante === siglaUpper);
       if (servicoDb && servicoDb.id) {
         await updateServico(servicoDb.id, updates);
-        queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+        queryClient.invalidateQueries({ queryKey: ["servicos"] });
         return servicoDb.id;
       }
       
@@ -1607,7 +1625,7 @@ const DiretoriaAprovacao = () => {
         observacao: updates.observacao !== undefined ? updates.observacao : "",
         status: updates.status || "rascunho",
       });
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
     } catch (e) {
       console.error(e);
     }
@@ -1622,7 +1640,7 @@ const DiretoriaAprovacao = () => {
       await ensureServicoDiretoria(servico.item, { grau_prioridade: grauPrioridade });
     } else {
       await updateServico(servico.id, { grau_prioridade: grauPrioridade });
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
     }
   };
 
@@ -1632,7 +1650,7 @@ const DiretoriaAprovacao = () => {
       await ensureServicoDiretoria(servico.item, { estimativa_valor: estimativaValor });
     } else {
       await updateServico(servico.id, { estimativa_valor: estimativaValor });
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
     }
   };
 
@@ -1755,7 +1773,7 @@ const DiretoriaAprovacao = () => {
             return updateServico(s.id, updates);
           })
       );
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
       toast({
         title: "Ação executada",
         description: `${servicosToUpdate.length} serviço(s) ${
@@ -1770,7 +1788,7 @@ const DiretoriaAprovacao = () => {
       });
     } catch (error) {
       console.error("Erro ao executar ação:", error);
-      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
       toast({
         title: "Erro",
         description: "Não foi possível executar a ação.",

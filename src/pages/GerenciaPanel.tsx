@@ -131,9 +131,6 @@ import {
     const [isBulkUpdating, setIsBulkUpdating] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [currentPageServicos, setCurrentPageServicos] = useState(1);
-    useEffect(() => {
-      setCurrentPageServicos(1);
-    }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
     const ITEMS_PER_PAGE = 100;
     const queryClient = useQueryClient();
     const { toast } = useToast();
@@ -230,10 +227,16 @@ import {
     return unique.sort();
   }, [items]);
 
-  // Resetar página quando filtros mudarem
+  // Resetar página e seleções quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1);
+    setSelectedAquisicaoIds(new Set());
   }, [categoria, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
+
+  useEffect(() => {
+    setCurrentPageServicos(1);
+    setSelectedServicos(new Set());
+  }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
   const { sortedItems: sortedFilteredItems, sortConfig: itemsSortConfig, requestSort: requestItemsSort } = useSortableTable(filteredItems);
 
@@ -334,24 +337,27 @@ import {
     [queryClient, solicitacoesQueryKey],
   );
 
-  const ensureSolicitacao = async (itemCode: number, updates: any) => {
-    try {
-      const existente = items.find((i) => String(i.codigo) === String(itemCode));
-      if (existente?.id) {
-        if (existente.status !== "rascunho") return;
-        await updateSolicitacao(existente.id, updates);
-        queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
-        return;
-      }
+    const ensureSolicitacao = async (itemCode: number, updates: any) => {
+      try {
+        const existente = items.find((i) => String(i.codigo) === String(itemCode));
+        if (existente?.id) {
+          if (existente.status !== "rascunho") return;
+          await updateSolicitacao(existente.id, updates);
+          queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+          return;
+        }
+  
+        const catalogoItem = catalogoData.find((c: any) => String(c.codigo) === String(itemCode));
+        if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
 
-      const catalogoItem = catalogoData.find((c: any) => String(c.codigo) === String(itemCode));
-      if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
-
-      await createSolicitacao({
-        periodo_id: periodAtivo.id,
-        diretoria_id: diretoria.id,
-        gerencia_id: gerenciaAtual.id,
-        codigo: catalogoItem.codigo,
+        const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || diretoria.id;
+  
+        await createSolicitacao({
+          periodo_id: periodAtivo.id,
+          diretoria_id: destinoId,
+          gerencia_id: gerenciaAtual.id,
+          item_id: catalogoItem.id,
+          codigo: catalogoItem.codigo,
         descricao: catalogoItem.descricao,
         categoria: catalogoItem.categoria,
         unidade: updates.unidade !== undefined ? updates.unidade : (catalogoItem.unidade || "un"),
@@ -463,8 +469,23 @@ import {
       // Executar update em massa sem aguardar refetch
       await updateSolicitacaoStatusBulk(idsParaEnviar, "enviado");
       
+      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id;
+
+      // Atualização otimista no cache da diretoria para garantir reflexo imediato
+      queryClient.setQueryData(
+        ["solicitacoes-diretoria", destinoId, periodAtivo.id],
+        (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((item: any) => 
+            idsParaEnviar.includes(item.id) ? { ...item, status: "enviado" } : item
+          );
+        }
+      );
+
       // Invalidar query apenas uma vez após todos os updates
       await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+      // Invalidar a query da diretoria para que os dados sejam consolidados pelo servidor em background
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", destinoId, periodAtivo.id], exact: true });
       
       setConfirmSendOpen(false);
     } catch (error) {
@@ -542,11 +563,14 @@ import {
       const catalogoItem = servicosCatalogoData.find((c: any) => String(c.item) === String(itemCode));
       if (!catalogoItem || !gerenciaAtual || !diretoria || !periodAtivo) return;
 
+      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || diretoria.id;
+
       await createServico({
         periodo_id: periodAtivo.id,
-        diretoria_id: diretoria.id,
+        diretoria_id: destinoId,
         gerencia_id: gerenciaAtual.id,
         item: catalogoItem.item,
+        item_id: catalogoItem.id,
         tipo_contratacao: updates.tipoContratacao !== undefined ? updates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
         unidade_demandante: gerenciaUpper,
         objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
@@ -718,6 +742,20 @@ import {
       );
       
       await Promise.all(updates);
+
+      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id;
+
+      // Atualização otimista no cache da diretoria para reflexo instantâneo
+      queryClient.setQueryData(
+        ["servicos-diretoria", destinoId, periodAtivo.id],
+        (old: any) => {
+          if (!Array.isArray(old)) return old;
+          const idsEnviados = new Set(Array.from(selectedServicos));
+          return old.map((item: any) => 
+            idsEnviados.has(item.id) || idsEnviados.has(item.codigo) ? { ...item, status: "enviado" } : item
+          );
+        }
+      );
 
       await queryClient.invalidateQueries({
         queryKey: ["servicos"]

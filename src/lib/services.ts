@@ -261,6 +261,16 @@ export async function getGerenciasByDiretoria(
   return data || [];
 }
 
+export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabase
+    .from("gerencias")
+    .select("*")
+    .order("sigla");
+
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
   const { data, error } = await supabase
     .from("gerencias")
@@ -571,11 +581,13 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   periodo_id: string;
   diretoria_id: string;
   gerencia_id: string;
+  item_id?: string;
 }): Promise<PlanItem> {
   const payload: Record<string, unknown> = {
     periodo_id: solicitacao.periodo_id,
     diretoria_id: solicitacao.diretoria_id,
     gerencia_id: solicitacao.gerencia_id,
+    item_id: solicitacao.item_id,
     codigo: solicitacao.codigo,
     descricao: solicitacao.descricao,
     categoria: solicitacao.categoria,
@@ -1346,6 +1358,7 @@ function mapServicoItemToDb(item: any): any {
   
   if (item.id !== undefined) dbRow.id = item.id;
   if (item.item !== undefined) dbRow.item = item.item;
+  if (item.item_id !== undefined) dbRow.item_id = item.item_id;
   
   const tipoContratacao = item.tipo_contratacao ?? item.tipoContratacao;
   if (tipoContratacao !== undefined) dbRow.tipo_contratacao = tipoContratacao;
@@ -1869,7 +1882,7 @@ export async function registrarLogOrcamentario(
       .insert([{
         ano: 2026, // Forçando 2026 para os testes de PAC 2027 que ocorrem em 2026
         centro_custo_id: centroCustoId,
-        referencia_tipo: 'solicitacao_compra',
+        referencia_tipo: 'solicitacao',
         referencia_id: solicitacaoId,
         acao,
         valor
@@ -1922,7 +1935,7 @@ export async function registrarLogsOrcamentariosBulk(
       recordsToInsert.push({
         ano: 2026, // Forçando 2026 para os testes de PAC 2027 que ocorrem em 2026
         centro_custo_id: centroCustoId,
-        referencia_tipo: 'solicitacao_compra',
+        referencia_tipo: 'solicitacao',
         referencia_id: log.solicitacaoId,
         acao: log.acao,
         valor: log.valor

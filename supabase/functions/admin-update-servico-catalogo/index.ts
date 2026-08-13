@@ -89,7 +89,7 @@ serve(async (req: Request) => {
     // Verificar se o serviço existe
     const { data: servico, error: fetchError } = await supabase
       .from("servicos_catalogo")
-      .select("id")
+      .select("id, item")
       .eq("id", servicoId)
       .maybeSingle();
 
@@ -146,6 +146,30 @@ serve(async (req: Request) => {
       .single();
 
     if (updateError) throw updateError;
+
+    // Atualizar TODOS os serviços dependentes com os novos dados base, independentemente do status
+    if (servico && servico.item) {
+      const servicoUpdates: Record<string, unknown> = {};
+      if (filteredUpdates.tipo_contratacao !== undefined) servicoUpdates.tipo_contratacao = filteredUpdates.tipo_contratacao;
+      if (filteredUpdates.objeto !== undefined) servicoUpdates.objeto = filteredUpdates.objeto;
+      if (filteredUpdates.justificativa !== undefined) servicoUpdates.justificativa = filteredUpdates.justificativa;
+      if (filteredUpdates.grau_prioridade !== undefined) servicoUpdates.grau_prioridade = filteredUpdates.grau_prioridade;
+      if (filteredUpdates.estimativa_valor !== undefined) servicoUpdates.estimativa_valor = filteredUpdates.estimativa_valor;
+      if (filteredUpdates.vinculacao !== undefined) servicoUpdates.vinculacao = filteredUpdates.vinculacao;
+      if (filteredUpdates.contrato !== undefined) servicoUpdates.contrato = filteredUpdates.contrato;
+      if (filteredUpdates.dependencia_descricao !== undefined) servicoUpdates.dependencia_descricao = filteredUpdates.dependencia_descricao;
+
+      if (Object.keys(servicoUpdates).length > 0) {
+        const { error: dependentesError } = await supabase
+          .from("servicos")
+          .update(servicoUpdates)
+          .eq("item", servico.item);
+
+        if (dependentesError) {
+           console.warn("Erro ao atualizar servicos dependentes:", dependentesError);
+        }
+      }
+    }
 
     return new Response(JSON.stringify({
       success: true,

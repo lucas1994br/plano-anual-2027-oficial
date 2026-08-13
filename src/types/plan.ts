@@ -43,6 +43,7 @@ export type GrauPrioridade =
 
 export interface ServicoItem {
   id?: string;
+  item_id?: string;
   item: number;
   tipoContratacao: string;
   unidadeDemandante: string;

@@ -67,6 +67,7 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     queryFn: () => (gerenciaAtual && periodAtivo) ? getSolicitacoesByGerencia(gerenciaAtual.id, periodAtivo.id) : [],
     enabled: !!periodAtivo && !!gerenciaAtual,
     staleTime: 2 * 60 * 1000,
+    refetchInterval: 5000,
   });
 
   const { data: servicosData = [] } = useQuery({
