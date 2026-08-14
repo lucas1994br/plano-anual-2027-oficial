@@ -1315,8 +1315,8 @@ export async function createSolicitacoesFromCatalogo(
   });
 
   const { data, error } = await supabase
-    .from("solicitacoes")
-    .insert(solicitacoes)
+    .from("itens_catalogo")
+    .insert(itens_catalogo)
     .select();
 
   if (error) throw error;
