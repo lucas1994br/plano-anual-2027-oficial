@@ -59,10 +59,9 @@ export function AdminImportCsv() {
   }, []);
 
   const aquisicaoHeaders = [
-    "codigo", "descricao", "categoria", "unidade", "valor_unitario",
-    "qtd_estimada", "prioridade", "gerencia"
+    "codigo", "descricao", "categoria", "unidade", "valor_unitario"
   ];
-  const aquisicaoOptionalHeaders = ["observacao", "status"];
+  const aquisicaoOptionalHeaders = [];
 
   const servicosHeaders = [
     "item", "tipo_contratacao", "unidade_demandante", "objeto", "justificativa",
@@ -117,16 +116,18 @@ export function AdminImportCsv() {
       let hasError = false;
       const processedRow = { ...row };
 
-      const gerenciaSigla = row.gerencia?.toString().toUpperCase().trim();
-      if (!gerenciaSigla) {
-        errors.push({ row: rowNum, col: "gerencia", message: "Sigla da gerência não informada" });
-        hasError = true;
-      } else if (!gerenciasMap[gerenciaSigla]) {
-        errors.push({ row: rowNum, col: "gerencia", message: `Gerência '${gerenciaSigla}' não encontrada` });
-        hasError = true;
-      } else {
-        processedRow._gerencia_id = gerenciasMap[gerenciaSigla].id;
-        processedRow._diretoria_id = gerenciasMap[gerenciaSigla].diretoria_id;
+      if (type === "servicos") {
+        const gerenciaSigla = row.gerencia?.toString().toUpperCase().trim();
+        if (!gerenciaSigla) {
+          errors.push({ row: rowNum, col: "gerencia", message: "Sigla da gerência não informada" });
+          hasError = true;
+        } else if (!gerenciasMap[gerenciaSigla]) {
+          errors.push({ row: rowNum, col: "gerencia", message: `Gerência '${gerenciaSigla}' não encontrada` });
+          hasError = true;
+        } else {
+          processedRow._gerencia_id = gerenciasMap[gerenciaSigla].id;
+          processedRow._diretoria_id = gerenciasMap[gerenciaSigla].diretoria_id;
+        }
       }
 
       const parseNumber = (val: any, col: string) => {
@@ -147,12 +148,6 @@ export function AdminImportCsv() {
         
         processedRow.codigo = parseNumber(row.codigo, "codigo");
         processedRow.valor_unitario = parseNumber(row.valor_unitario, "valor_unitario");
-        processedRow.qtd_estimada = parseNumber(row.qtd_estimada, "qtd_estimada");
-        
-        if (!["Baixa", "Média", "Alta"].includes(row.prioridade)) {
-          errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixa, Média ou Alta" });
-          hasError = true;
-        }
       } else {
         if (!row.item) { errors.push({ row: rowNum, col: "item", message: "Item numérico obrigatório" }); hasError = true; }
         
@@ -242,21 +237,14 @@ export function AdminImportCsv() {
     try {
       if (importType === "aquisicao") {
         const payload = data.rows.map(row => ({
-          periodo_id: activePeriodId,
-          diretoria_id: row._diretoria_id,
-          gerencia_id: row._gerencia_id,
           codigo: row.codigo,
           descricao: row.descricao,
           categoria: row.categoria,
           unidade: row.unidade,
-          valor_unitario: row.valor_unitario,
-          qtd_estimada: row.qtd_estimada,
-          prioridade: row.prioridade,
-          observacao: row.observacao || null,
-          status: row.status || "rascunho"
+          valor_unitario: row.valor_unitario
         }));
 
-        const { error } = await supabase.from("solicitacoes").insert(payload);
+        const { error } = await supabase.from("itens_catalogo").insert(payload);
         if (error) throw error;
       } else {
         const payload = data.rows.map(row => ({
@@ -308,7 +296,7 @@ export function AdminImportCsv() {
   };
 
   const getTemplateExcel = () => {
-    const headers = importType === "aquisicao" ? [...aquisicaoHeaders, "observacao", "status"] : [...servicosHeaders, "dependencia_descricao", "contrato", "observacao", "status"];
+    const headers = importType === "aquisicao" ? [...aquisicaoHeaders] : [...servicosHeaders, "dependencia_descricao", "contrato", "observacao", "status"];
     
     const worksheet = XLSX.utils.aoa_to_sheet([headers]);
     const workbook = XLSX.utils.book_new();
@@ -353,7 +341,7 @@ export function AdminImportCsv() {
                   <SelectValue placeholder="Selecione o tipo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="aquisicao">Aquisições</SelectItem>
+                  <SelectItem value="aquisicao">Aquisições (Itens Catálogo)</SelectItem>
                   <SelectItem value="servicos">Serviços Existentes</SelectItem>
                 </SelectContent>
               </Select>
