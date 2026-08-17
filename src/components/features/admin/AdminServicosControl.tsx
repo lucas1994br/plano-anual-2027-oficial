@@ -489,12 +489,14 @@ export function AdminServicosControl() {
     );
   };
 
-  const getDiretoriaSigla = (diretoriaId: string): string => {
+  const getDiretoriaSigla = (diretoriaId: string | null): string => {
+    if (!diretoriaId) return "-";
     const dir = diretorias.find((d: Diretoria) => d.id === diretoriaId);
     return dir?.sigla || diretoriaId;
   };
 
-  const getGerenciaSigla = (gerenciaId: string): string => {
+  const getGerenciaSigla = (gerenciaId: string | null): string => {
+    if (!gerenciaId) return "-";
     const ger = todasGerencias.find((g: Gerencia) => g.id === gerenciaId);
     return ger?.sigla || gerenciaId.slice(0, 8);
   };

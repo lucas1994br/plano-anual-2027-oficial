@@ -27,7 +27,8 @@ export function AdminImportCsv() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   
-  const [gerenciasMap, setGerenciasMap] = useState<Record<string, { id: string, diretoria_id: string }>>({});
+  const [gerenciasList, setGerenciasList] = useState<{ id: string, diretoria_id: string, sigla: string }[]>([]);
+  const [diretoriasMap, setDiretoriasMap] = useState<Record<string, string>>({});
   const [activePeriodId, setActivePeriodId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,16 +41,23 @@ export function AdminImportCsv() {
 
         const { data: gerencias } = await supabase
           .from("gerencias")
-          .select("id, sigla, diretoria_id");
+          .select("id, sigla, diretoria_id")
+          .eq("ativa", true);
           
         if (gerencias) {
-          const map: Record<string, { id: string, diretoria_id: string }> = {};
-          gerencias.forEach((g: any) => {
-            if (g.sigla) {
-              map[g.sigla.toUpperCase().trim()] = { id: g.id, diretoria_id: g.diretoria_id };
-            }
+          setGerenciasList(gerencias as any[]);
+        }
+
+        const { data: diretorias } = await supabase
+          .from("diretorias")
+          .select("id, sigla");
+          
+        if (diretorias) {
+          const map: Record<string, string> = {};
+          diretorias.forEach((d: any) => {
+            if (d.sigla) map[d.sigla.toUpperCase().trim()] = d.id;
           });
-          setGerenciasMap(map);
+          setDiretoriasMap(map);
         }
       } catch (err) {
         console.error("Erro ao carregar dependências para importação", err);
@@ -61,14 +69,13 @@ export function AdminImportCsv() {
   const aquisicaoHeaders = [
     "codigo", "descricao", "categoria", "unidade", "valor_unitario"
   ];
+
   const aquisicaoOptionalHeaders = [];
 
   const servicosHeaders = [
-    "item", "tipo_contratacao", "unidade_demandante", "objeto", "justificativa",
-    "previsao_inicio", "estimativa_valor", "dotacao_orcamentaria",
-    "grau_prioridade", "vinculacao", "gerencia"
+    "item", "contrato", "objeto", "tipo", "prioridade", "vinculação", "diretoria", "status"
   ];
-  const servicosOptionalHeaders = ["dependencia_descricao", "contrato", "observacao", "status"];
+
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -116,20 +123,6 @@ export function AdminImportCsv() {
       let hasError = false;
       const processedRow = { ...row };
 
-      if (type === "servicos") {
-        const gerenciaSigla = row.gerencia?.toString().toUpperCase().trim();
-        if (!gerenciaSigla) {
-          errors.push({ row: rowNum, col: "gerencia", message: "Sigla da gerência não informada" });
-          hasError = true;
-        } else if (!gerenciasMap[gerenciaSigla]) {
-          errors.push({ row: rowNum, col: "gerencia", message: `Gerência '${gerenciaSigla}' não encontrada` });
-          hasError = true;
-        } else {
-          processedRow._gerencia_id = gerenciasMap[gerenciaSigla].id;
-          processedRow._diretoria_id = gerenciasMap[gerenciaSigla].diretoria_id;
-        }
-      }
-
       const parseNumber = (val: any, col: string) => {
         if (val === undefined || val === null || val === "") return 0;
         if (typeof val === "number") return val;
@@ -142,27 +135,32 @@ export function AdminImportCsv() {
         return num;
       };
 
-      if (type === "aquisicao") {
-        if (!row.codigo) { errors.push({ row: rowNum, col: "codigo", message: "Código obrigatório" }); hasError = true; }
-        if (!row.descricao) { errors.push({ row: rowNum, col: "descricao", message: "Descrição obrigatória" }); hasError = true; }
-        
-        processedRow.codigo = parseNumber(row.codigo, "codigo");
-        processedRow.valor_unitario = parseNumber(row.valor_unitario, "valor_unitario");
-      } else {
+      if (type === "servicos") {
+        const diretoriaSigla = row.diretoria?.toString().toUpperCase().trim();
+        if (!diretoriaSigla) {
+          errors.push({ row: rowNum, col: "diretoria", message: "Sigla da diretoria não informada" });
+          hasError = true;
+        } else if (!diretoriasMap[diretoriaSigla]) {
+          errors.push({ row: rowNum, col: "diretoria", message: `Diretoria '${diretoriaSigla}' não encontrada` });
+          hasError = true;
+        } else {
+          processedRow._diretoria_id = diretoriasMap[diretoriaSigla];
+        }
+
         if (!row.item) { errors.push({ row: rowNum, col: "item", message: "Item numérico obrigatório" }); hasError = true; }
         
         processedRow.item = parseNumber(row.item, "item");
-        processedRow.estimativa_valor = parseNumber(row.estimativa_valor, "estimativa_valor");
-        processedRow.dotacao_orcamentaria = parseNumber(row.dotacao_orcamentaria, "dotacao_orcamentaria");
         
-        if (!["Baixo", "Médio", "Alto"].includes(row.grau_prioridade)) {
-          errors.push({ row: rowNum, col: "grau_prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
+        if (!["Baixo", "Médio", "Alto"].includes(row.prioridade)) {
+          errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
           hasError = true;
         }
-        if (!["Sim", "Não"].includes(row.vinculacao)) {
-          errors.push({ row: rowNum, col: "vinculacao", message: "Deve ser: Sim ou Não" });
+        if (!["Sim", "Não"].includes(row.vinculação)) {
+          errors.push({ row: rowNum, col: "vinculação", message: "Deve ser: Sim ou Não" });
           hasError = true;
         }
+
+        processedRow._ativo = row.status?.toString().toLowerCase().trim() !== "inativo";
       }
 
       if (!hasError) {
@@ -247,28 +245,54 @@ export function AdminImportCsv() {
         const { error } = await supabase.from("itens_catalogo").insert(payload);
         if (error) throw error;
       } else {
-        const payload = data.rows.map(row => ({
-          periodo_id: activePeriodId,
-          diretoria_id: row._diretoria_id,
-          gerencia_id: row._gerencia_id,
+        const catalogoPayload = data.rows.map(row => ({
           item: row.item,
-          tipo_contratacao: row.tipo_contratacao,
-          unidade_demandante: row.unidade_demandante,
+          tipo_contratacao: row.tipo || "Novo",
           objeto: row.objeto,
-          justificativa: row.justificativa,
-          previsao_inicio: row.previsao_inicio,
-          estimativa_valor: row.estimativa_valor,
-          dotacao_orcamentaria: row.dotacao_orcamentaria,
-          grau_prioridade: row.grau_prioridade,
-          vinculacao: row.vinculacao,
-          dependencia_descricao: row.dependencia_descricao || null,
+          justificativa: null,
+          grau_prioridade: row.prioridade,
+          estimativa_valor: 0,
+          vinculacao: row.vinculação,
           contrato: row.contrato || null,
-          observacao: row.observacao || null,
-          status: row.status || "rascunho"
+          dependencia_descricao: null,
+          diretoria_id: row._diretoria_id,
+          gerencia_id: null,
+          ativo: row._ativo
         }));
 
-        const { error } = await supabase.from("servicos").insert(payload);
-        if (error) throw error;
+        const { error: catalogoError } = await supabase.from("servicos_catalogo").insert(catalogoPayload);
+        if (catalogoError) throw catalogoError;
+
+        const servicosPayload: any[] = [];
+        data.rows.forEach(row => {
+          gerenciasList.forEach(g => {
+            servicosPayload.push({
+              periodo_id: activePeriodId,
+              diretoria_id: g.diretoria_id,
+              gerencia_id: g.id,
+              item: row.item,
+              tipo_contratacao: row.tipo || "Novo",
+              unidade_demandante: g.sigla || "N/A",
+              objeto: row.objeto,
+              justificativa: null,
+              previsao_inicio: null,
+              estimativa_valor: 0,
+              dotacao_orcamentaria: 0,
+              grau_prioridade: row.prioridade,
+              vinculacao: row.vinculação,
+              dependencia_descricao: null,
+              contrato: row.contrato || null,
+              observacao: null,
+              status: "rascunho"
+            });
+          });
+        });
+
+        for (let i = 0; i < servicosPayload.length; i += 500) {
+          const chunk = servicosPayload.slice(i, i + 500);
+          const { error: servicosError } = await supabase.from("servicos").insert(chunk);
+          if (servicosError) throw servicosError;
+        }
       }
       
       toast({
@@ -296,7 +320,7 @@ export function AdminImportCsv() {
   };
 
   const getTemplateExcel = () => {
-    const headers = importType === "aquisicao" ? [...aquisicaoHeaders] : [...servicosHeaders, "dependencia_descricao", "contrato", "observacao", "status"];
+    const headers = importType === "aquisicao" ? [...aquisicaoHeaders] : [...servicosHeaders];
     
     const worksheet = XLSX.utils.aoa_to_sheet([headers]);
     const workbook = XLSX.utils.book_new();
