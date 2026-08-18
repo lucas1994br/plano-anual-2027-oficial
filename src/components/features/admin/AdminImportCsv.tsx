@@ -73,7 +73,7 @@ export function AdminImportCsv() {
   const aquisicaoOptionalHeaders = [];
 
   const servicosHeaders = [
-    "item", "contrato", "objeto", "tipo", "prioridade", "vinculação", "diretoria", "status"
+    "item", "contrato", "contratada", "objeto", "tipo", "prioridade", "vinculação", "diretoria", "status"
   ];
 
 
@@ -254,6 +254,7 @@ export function AdminImportCsv() {
           estimativa_valor: 0,
           vinculacao: row.vinculação,
           contrato: row.contrato || null,
+          contratada: row.contratada || null,
           dependencia_descricao: null,
           diretoria_id: row._diretoria_id,
           gerencia_id: null,
@@ -282,6 +283,7 @@ export function AdminImportCsv() {
               vinculacao: row.vinculação,
               dependencia_descricao: null,
               contrato: row.contrato || null,
+              contratada: row.contratada || null,
               observacao: null,
               status: "rascunho"
             });

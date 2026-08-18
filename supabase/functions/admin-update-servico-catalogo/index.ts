@@ -108,6 +108,7 @@ serve(async (req: Request) => {
 
     // Lista de campos permitidos para edição
     const allowedFields = [
+      "item",
       "tipo_contratacao",
       "objeto",
       "justificativa",
@@ -115,6 +116,7 @@ serve(async (req: Request) => {
       "estimativa_valor",
       "vinculacao",
       "contrato",
+      "contratada",
       "dependencia_descricao",
       "diretoria_id",
       "gerencia_id",
@@ -124,7 +126,7 @@ serve(async (req: Request) => {
     const filteredUpdates: Record<string, unknown> = {};
     for (const key of Object.keys(updates)) {
       if (allowedFields.includes(key)) {
-        if (key === "estimativa_valor") {
+        if (key === "estimativa_valor" || key === "item") {
           filteredUpdates[key] = Number(updates[key]);
         } else {
           filteredUpdates[key] = updates[key];
@@ -154,6 +156,7 @@ serve(async (req: Request) => {
     // Atualizar TODOS os serviços dependentes com os novos dados base, independentemente do status
     if (servico && servico.item) {
       const servicoUpdates: Record<string, unknown> = {};
+      if (filteredUpdates.item !== undefined) servicoUpdates.item = filteredUpdates.item;
       if (filteredUpdates.tipo_contratacao !== undefined) servicoUpdates.tipo_contratacao = filteredUpdates.tipo_contratacao;
       if (filteredUpdates.objeto !== undefined) servicoUpdates.objeto = filteredUpdates.objeto;
       if (filteredUpdates.justificativa !== undefined) servicoUpdates.justificativa = filteredUpdates.justificativa;
@@ -161,7 +164,10 @@ serve(async (req: Request) => {
       if (filteredUpdates.estimativa_valor !== undefined) servicoUpdates.estimativa_valor = filteredUpdates.estimativa_valor;
       if (filteredUpdates.vinculacao !== undefined) servicoUpdates.vinculacao = filteredUpdates.vinculacao;
       if (filteredUpdates.contrato !== undefined) servicoUpdates.contrato = filteredUpdates.contrato;
+      if (filteredUpdates.contratada !== undefined) servicoUpdates.contratada = filteredUpdates.contratada;
       if (filteredUpdates.dependencia_descricao !== undefined) servicoUpdates.dependencia_descricao = filteredUpdates.dependencia_descricao;
+      if (filteredUpdates.diretoria_id !== undefined) servicoUpdates.diretoria_id = filteredUpdates.diretoria_id;
+      if (filteredUpdates.gerencia_id !== undefined) servicoUpdates.gerencia_id = filteredUpdates.gerencia_id;
 
       if (Object.keys(servicoUpdates).length > 0) {
         const { error: dependentesError } = await supabase

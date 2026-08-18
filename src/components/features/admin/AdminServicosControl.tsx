@@ -78,6 +78,7 @@ type ServicoCatalogo = {
   gerencia_id: string;
   ativo: boolean;
   contrato: string | null;
+  contratada: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -147,6 +148,7 @@ export function AdminServicosControl() {
     vinculacao: "Não" as "Sim" | "Não",
     dependencia_descricao: "",
     contrato: "",
+    contratada: "",
     diretoria_id: "",
     gerencia_id: "",
   });
@@ -161,6 +163,8 @@ export function AdminServicosControl() {
     vinculacao: "Não" as "Sim" | "Não",
     dependencia_descricao: "",
     contrato: "",
+    contratada: "",
+    item: 0,
     diretoria_id: "",
     gerencia_id: "",
   });
@@ -278,6 +282,7 @@ export function AdminServicosControl() {
       vinculacao: "Não",
       dependencia_descricao: "",
       contrato: "",
+      contratada: "",
       diretoria_id: "",
       gerencia_id: "",
     });
@@ -293,6 +298,8 @@ export function AdminServicosControl() {
       vinculacao: "Não",
       dependencia_descricao: "",
       contrato: "",
+      contratada: "",
+      item: 0,
       diretoria_id: "",
       gerencia_id: "",
     });
@@ -335,6 +342,7 @@ export function AdminServicosControl() {
         estimativa_valor: estimativaValor,
         vinculacao: formData.vinculacao,
         contrato: formData.contrato.trim() || null,
+        contratada: formData.contratada.trim() || null,
         dependencia_descricao: formData.dependencia_descricao.trim() || undefined,
         diretoria_id: formData.diretoria_id,
         gerencia_id: formData.gerencia_id,
@@ -364,9 +372,11 @@ export function AdminServicosControl() {
       estimativa_valor: String(servico.estimativa_valor),
       vinculacao: servico.vinculacao,
       contrato: servico.contrato || "",
+      contratada: servico.contratada || "",
       dependencia_descricao: servico.dependencia_descricao || "",
-      diretoria_id: servico.diretoria_id,
-      gerencia_id: servico.gerencia_id,
+      item: servico.item,
+      diretoria_id: servico.diretoria_id || "",
+      gerencia_id: servico.gerencia_id || "",
     });
   };
 
@@ -389,7 +399,9 @@ export function AdminServicosControl() {
         estimativa_valor: estimativaValor,
         vinculacao: editFormData.vinculacao,
         contrato: editFormData.contrato.trim() || null,
+        contratada: editFormData.contratada.trim() || null,
         dependencia_descricao: editFormData.dependencia_descricao.trim() || null,
+        item: editFormData.item,
         diretoria_id: editFormData.diretoria_id,
         gerencia_id: editFormData.gerencia_id,
       });
@@ -458,6 +470,11 @@ export function AdminServicosControl() {
       if (bulkEditField === "tipo_contratacao") updates.tipo_contratacao = bulkEditValue;
       if (bulkEditField === "grau_prioridade") updates.grau_prioridade = bulkEditValue;
       if (bulkEditField === "vinculacao") updates.vinculacao = bulkEditValue;
+      if (bulkEditField === "contratada") updates.contratada = bulkEditValue;
+      if (bulkEditField === "contrato") updates.contrato = bulkEditValue;
+      if (bulkEditField === "item") updates.item = parseInt(bulkEditValue, 10);
+      if (bulkEditField === "diretoria_id") updates.diretoria_id = bulkEditValue;
+      if (bulkEditField === "gerencia_id") updates.gerencia_id = bulkEditValue;
 
       await Promise.all(selectedIds.map(id => updateServicoCatalogoAdmin(id, updates)));
       
@@ -694,6 +711,7 @@ export function AdminServicosControl() {
                   </TableHead>
                   <SortableTableHead className="w-16 cursor-pointer hover:text-slate-900" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>Item</SortableTableHead>
                   <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="contrato" sortConfig={sortConfig} onRequestSort={requestSort}>Contrato</SortableTableHead>
+                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="contratada" sortConfig={sortConfig} onRequestSort={requestSort}>Contratada</SortableTableHead>
                   <SortableTableHead className="cursor-pointer hover:text-slate-900" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>Objeto</SortableTableHead>
                   <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="tipo_contratacao" sortConfig={sortConfig} onRequestSort={requestSort}>Tipo</SortableTableHead>
                   <SortableTableHead className="w-28 cursor-pointer hover:text-slate-900" field="grau_prioridade" sortConfig={sortConfig} onRequestSort={requestSort}>Prioridade</SortableTableHead>
@@ -717,6 +735,7 @@ export function AdminServicosControl() {
                     </TableCell>
                     <TableCell className="font-mono">{servico.item}</TableCell>
                     <TableCell className="font-medium text-muted-foreground whitespace-nowrap">{servico.contrato || "-"}</TableCell>
+                    <TableCell className="font-medium text-muted-foreground whitespace-nowrap">{servico.contratada || "-"}</TableCell>
                     <TableCell className="max-w-md">
                       <p className="font-medium truncate">{servico.objeto}</p>
                       {servico.justificativa && (
@@ -872,14 +891,26 @@ export function AdminServicosControl() {
             </div>
 
             {/* Contrato */}
-            <div>
-              <Label className="text-sm font-medium">Contrato</Label>
-              <Input
-                value={formData.contrato}
-                onChange={(e) => setFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
-                placeholder="Ex: 028/2021"
-                className="mt-1"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium">Contrato</Label>
+                <Input
+                  value={formData.contrato}
+                  onChange={(e) => setFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
+                  placeholder="Ex: 028/2021"
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium">Contratada</Label>
+                <Input
+                  value={formData.contratada}
+                  onChange={(e) => setFormData(prev => ({ ...prev, contratada: e.target.value }))}
+                  placeholder="Nome da empresa contratada"
+                  className="mt-1"
+                />
+              </div>
             </div>
 
             {/* Grid 2 colunas */}
@@ -1033,6 +1064,17 @@ export function AdminServicosControl() {
           </DialogHeader>
 
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium">Item</Label>
+                <Input
+                  type="number"
+                  value={editFormData.item}
+                  onChange={(e) => setEditFormData(prev => ({ ...prev, item: parseInt(e.target.value, 10) || 0 }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
             {/* Objeto */}
             <div>
               <Label className="text-sm font-medium">Objeto *</Label>
@@ -1056,14 +1098,26 @@ export function AdminServicosControl() {
             </div>
 
             {/* Contrato */}
-            <div>
-              <Label className="text-sm font-medium">Contrato</Label>
-              <Input
-                value={editFormData.contrato}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
-                placeholder="Ex: 028/2021"
-                className="mt-1"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium">Contrato</Label>
+                <Input
+                  value={editFormData.contrato}
+                  onChange={(e) => setEditFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
+                  placeholder="Ex: 028/2021"
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium">Contratada</Label>
+                <Input
+                  value={editFormData.contratada}
+                  onChange={(e) => setEditFormData(prev => ({ ...prev, contratada: e.target.value }))}
+                  placeholder="Nome da empresa contratada"
+                  className="mt-1"
+                />
+              </div>
             </div>
 
             {/* Grid 2 colunas */}
@@ -1257,6 +1311,11 @@ export function AdminServicosControl() {
                   <SelectItem value="tipo_contratacao">Tipo de Contratação</SelectItem>
                   <SelectItem value="grau_prioridade">Grau de Prioridade</SelectItem>
                   <SelectItem value="vinculacao">Vinculação</SelectItem>
+                  <SelectItem value="contratada">Contratada</SelectItem>
+                  <SelectItem value="contrato">Contrato</SelectItem>
+                  <SelectItem value="item">Item</SelectItem>
+                  <SelectItem value="diretoria_id">Diretoria</SelectItem>
+                  <SelectItem value="gerencia_id">Gerência</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1282,7 +1341,7 @@ export function AdminServicosControl() {
                       <SelectItem value="Alto">Alto</SelectItem>
                     </SelectContent>
                   </Select>
-                ) : (
+                ) : bulkEditField === "vinculacao" ? (
                   <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
                     <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
                     <SelectContent>
@@ -1290,7 +1349,50 @@ export function AdminServicosControl() {
                       <SelectItem value="Não">Não</SelectItem>
                     </SelectContent>
                   </Select>
-                )}
+                ) : bulkEditField === "diretoria_id" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione a diretoria..." /></SelectTrigger>
+                    <SelectContent>
+                      {diretorias.map((dir: Diretoria) => (
+                        <SelectItem key={dir.id} value={dir.id}>
+                          {dir.sigla} - {dir.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : bulkEditField === "gerencia_id" ? (
+                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                    <SelectTrigger><SelectValue placeholder="Selecione a gerência..." /></SelectTrigger>
+                    <SelectContent>
+                      {todasGerencias.map((ger: Gerencia) => (
+                        <SelectItem key={ger.id} value={ger.id}>
+                          {ger.sigla} - {ger.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : bulkEditField === "item" ? (
+                  <Input
+                    type="number"
+                    value={bulkEditValue}
+                    onChange={(e) => setBulkEditValue(e.target.value)}
+                    placeholder="Número do item"
+                  />
+                ) : bulkEditField === "contrato" ? (
+                  <Input
+                    type="text"
+                    value={bulkEditValue}
+                    onChange={(e) => setBulkEditValue(e.target.value)}
+                    placeholder="Ex: 028/2021"
+                  />
+                ) : bulkEditField === "contratada" ? (
+                  <Input
+                    type="text"
+                    value={bulkEditValue}
+                    onChange={(e) => setBulkEditValue(e.target.value)}
+                    placeholder="Nome da empresa contratada"
+                  />
+                ) : null}
               </div>
             )}
             <Button className="w-full" disabled={!bulkEditField || !bulkEditValue || isUpdatingBulk} onClick={handleBulkEdit}>

@@ -505,13 +505,15 @@ const ComprasPanel = () => {
     wsData.push([`Painel de Compras - ${categoryTitle}`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
-    wsData.push(["Objeto", "Diretoria", "Gerencia", "Justificativa", "Prioridade", "Estimativa Valor"]);
+    wsData.push(["Objeto", "Diretoria", "Gerencia", "Contrato", "Contratada", "Justificativa", "Prioridade", "Estimativa Valor"]);
 
     filteredServicos.forEach((servico) => {
       wsData.push([
         servico.objeto,
         servico.diretoriaSigla || "-",
         servico.gerencia,
+        servico.contrato || "-",
+        servico.contratada || "-",
         servico.justificativa || "",
         servico.grauPrioridade,
         servico.estimativaValor || 0,
@@ -519,7 +521,7 @@ const ComprasPanel = () => {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [{ wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 18 }];
+    ws["!cols"] = [{ wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, "Servicos");
     const hoje = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
     XLSX.writeFile(wb, `Compras_${categoryFile}_${hoje}.xlsx`);
@@ -537,11 +539,13 @@ const ComprasPanel = () => {
     doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
 
     autoTable(doc, {
-      head: [["Objeto", "Diretoria", "Gerência", "Justificativa", "Prioridade", "Estimativa"]],
+      head: [["Objeto", "Diretoria", "Gerência", "Contrato", "Contratada", "Justificativa", "Prioridade", "Estimativa"]],
       body: filteredServicos.map((s) => [
         s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
         s.diretoriaSigla || "-",
         s.gerencia,
+        s.contrato || "-",
+        s.contratada || "-",
         (s.justificativa || "-").substring(0, 40),
         s.grauPrioridade,
         formatCurrency(s.estimativaValor || 0),
@@ -925,6 +929,9 @@ const ComprasPanel = () => {
                     <SortableTableHead className="w-24 cursor-pointer select-none hover:text-slate-900" field="contrato" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
                       Contrato
                     </SortableTableHead>
+                    <SortableTableHead className="w-32 cursor-pointer select-none hover:text-slate-900" field="contratada" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
+                      Contratada
+                    </SortableTableHead>
                     <SortableTableHead className="cursor-pointer select-none hover:text-slate-900" field="objeto" sortConfig={servicosSortConfig} onRequestSort={requestServicosSort}>
                       Objeto
                     </SortableTableHead>
@@ -974,6 +981,9 @@ const ComprasPanel = () => {
                         </TableCell>
                         <TableCell className="text-sm font-medium text-slate-600 whitespace-nowrap">
                           {servico.contrato || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium text-slate-600 whitespace-nowrap">
+                          {servico.contratada || "-"}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col">

@@ -137,6 +137,7 @@ serve(async (req: Request) => {
       estimativa_valor: Number(servico.estimativa_valor) || 0,
       vinculacao: servico.vinculacao || "Não",
       contrato: servico.contrato || null,
+      contratada: servico.contratada || null,
       dependencia_descricao: servico.dependencia_descricao || null,
       diretoria_id: servico.diretoria_id,
       gerencia_id: servico.gerencia_id,
@@ -201,6 +202,7 @@ serve(async (req: Request) => {
           grau_prioridade: servicoCatalogo.grau_prioridade,
           vinculacao: servicoCatalogo.vinculacao,
           contrato: servicoCatalogo.contrato,
+          contratada: servicoCatalogo.contratada,
           status: "rascunho",
         }));
 
@@ -238,7 +240,7 @@ serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : (error?.message || String(error));
+    const errorMessage = error instanceof Error ? error.message : ((error as any)?.message || String(error));
     console.error("Error in admin-create-servico-catalogo:", errorMessage, error);
     return new Response(JSON.stringify({ 
       error: errorMessage,

@@ -62,6 +62,7 @@ export interface ServicoItem {
   justificativaRejeicao?: string;
   justificativa_rejeicao?: string;
   contrato?: string;
+  contratada?: string;
   created_at?: string;
   updated_at?: string;
 }

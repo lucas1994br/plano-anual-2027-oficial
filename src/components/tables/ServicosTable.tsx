@@ -95,6 +95,8 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       "Item",
       "Tipo de Contratação",
       "Unidade Demandante",
+      "Contrato",
+      "Contratada",
       "Objeto",
       "Justificativa",
       "Previsão Início",
@@ -110,6 +112,8 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
         s.item,
         s.tipoContratacao,
         s.unidadeDemandante,
+        s.contrato || "",
+        s.contratada || "",
         s.objeto,
         s.justificativa,
         s.previsaoInicio || "",
@@ -127,6 +131,8 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
       { wch: 8 },   // Item
       { wch: 20 },  // Tipo
       { wch: 20 },  // Unidade
+      { wch: 20 },  // Contrato
+      { wch: 30 },  // Contratada
       { wch: 40 },  // Objeto
       { wch: 40 },  // Justificativa
       { wch: 15 },  // Previsão
@@ -152,14 +158,15 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
     const tableData = servicos.map((s) => [
       s.item,
       s.tipoContratacao,
-      s.unidadeDemandante,
+      s.contrato || "-",
+      s.contratada || "-",
       s.objeto.substring(0, 40) + (s.objeto.length > 40 ? "..." : ""),
       formatCurrency(s.estimativaValor),
       s.grauPrioridade,
     ]);
 
     autoTable(doc, {
-      head: [["Item", "Tipo", "Unidade", "Objeto", "Estimativa", "Prioridade"]],
+      head: [["Item", "Tipo", "Contrato", "Contratada", "Objeto", "Estimativa", "Prioridade"]],
       body: tableData,
       startY: 35,
       styles: { fontSize: 8, cellPadding: 2 },
@@ -193,6 +200,8 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                 <TableHead className="w-16">Item</TableHead>
                 <TableHead className="w-34">Tipo de Contratação</TableHead>
                 <TableHead className="w-32">Unidade Demandante</TableHead>
+                <TableHead className="w-24">Contrato</TableHead>
+                <TableHead className="w-32">Contratada</TableHead>
                 <TableHead className="min-w-[300px]">Objeto</TableHead>
                 <TableHead className="w-34">Estimativa de Valor</TableHead>
                 <TableHead className="w-32">Prioridade</TableHead>
@@ -215,6 +224,8 @@ export function ServicosTable({ servicos, onUpdateGrauPrioridade, onUpdateObserv
                     <TableCell className="font-medium">{servico.item}</TableCell>
                     <TableCell className="text-sm">{servico.tipoContratacao}</TableCell>
                     <TableCell className="text-sm">{servico.unidadeDemandante}</TableCell>
+                    <TableCell className="text-sm">{servico.contrato || "-"}</TableCell>
+                    <TableCell className="text-sm">{servico.contratada || "-"}</TableCell>
                     <TableCell className="text-sm">
                       <div className="max-w-[300px] overflow-hidden text-ellipsis">
                         {servico.objeto}

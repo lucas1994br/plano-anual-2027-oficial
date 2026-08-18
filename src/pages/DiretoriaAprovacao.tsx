@@ -154,6 +154,7 @@ const DiretoriaAprovacao = () => {
     grauPrioridade: "Médio" as GrauPrioridade,
     vinculacao: "Não" as "Sim" | "Não",
     dependenciaDescricao: "",
+    contratada: "",
   });
 
   const isAuthenticated = () => {
@@ -686,7 +687,19 @@ const DiretoriaAprovacao = () => {
   // Serviços da própria diretoria
   const servicosPropriosBase: ServicoItem[] = useMemo(() => {
     if (!diretoria) return [];
-    const servicosDaDiretoria = servicosData.filter((s: ServicoItem) => s.unidadeDemandante === siglaUpper);
+    
+    const getContratadaFallback = (contrato: string | undefined | null) => {
+      if (!contrato) return null;
+      const found = (servicosCatalogoData as any[]).find(c => c.contrato === contrato && c.contratada);
+      return found ? found.contratada : null;
+    };
+
+    const servicosDaDiretoria = servicosData
+      .filter((s: ServicoItem) => s.unidadeDemandante === siglaUpper)
+      .map((s: ServicoItem) => ({
+        ...s,
+        contratada: s.contratada || getContratadaFallback(s.contrato),
+      }));
     
     if (selectedOption === "servicos_existentes") {
       return (servicosCatalogoData as any[]).map((catalogoItem) => {
@@ -707,8 +720,9 @@ const DiretoriaAprovacao = () => {
           grauPrioridade: catalogoItem.grau_prioridade || "Baixo",
           vinculacao: catalogoItem.vinculacao || "Não",
           dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
-          status: "rascunho",
+          status: catalogoItem.status || "rascunho",
           contrato: catalogoItem.contrato,
+          contratada: catalogoItem.contratada,
           observacao: catalogoItem.observacao || "",
           gerencia: siglaUpper,
           diretoriaSigla: siglaUpper,
@@ -766,10 +780,19 @@ const DiretoriaAprovacao = () => {
 
   // Mostrar serviços de gerências (não rascunho)
   const servicosRecebidosBase = useMemo(() => {
-    return servicosData.filter((s: ServicoItem) => 
-      s.status !== "rascunho"
-    );
-  }, [servicosData]);
+    const getContratadaFallback = (contrato: string | undefined | null) => {
+      if (!contrato) return null;
+      const found = (servicosCatalogoData as any[]).find(c => c.contrato === contrato && c.contratada);
+      return found ? found.contratada : null;
+    };
+
+    return servicosData
+      .filter((s: ServicoItem) => s.status !== "rascunho")
+      .map((s: ServicoItem) => ({
+        ...s,
+        contratada: s.contratada || getContratadaFallback(s.contrato),
+      }));
+  }, [servicosData, servicosCatalogoData]);
 
   const filteredServicos = useMemo(() => {
     const list = selectedGerencia === "todas"
@@ -1152,6 +1175,7 @@ const DiretoriaAprovacao = () => {
       vinculacao: servicoEdicao.vinculacao,
       dependenciaDescricao: servicoEdicao.dependenciaDescricao,
       contrato: servicoEdicao.contrato,
+      contratada: servicoEdicao.contratada,
       tipoContratacao: servicoEdicao.tipoContratacao,
     };
 
@@ -1616,6 +1640,7 @@ const DiretoriaAprovacao = () => {
         objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
         justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
         contrato: updates.contrato !== undefined ? updates.contrato : (catalogoItem.contrato || null),
+        contratada: updates.contratada !== undefined ? updates.contratada : (catalogoItem.contratada || null),
         previsao_inicio: null,
         estimativa_valor: updates.estimativaValor !== undefined ? updates.estimativaValor : (catalogoItem.estimativa_valor || 0),
         dotacao_orcamentaria: updates.dotacaoOrcamentaria !== undefined ? updates.dotacaoOrcamentaria : 0,
@@ -1679,6 +1704,7 @@ const DiretoriaAprovacao = () => {
         objeto: novoServicoForm.objeto.trim(),
         justificativa: novoServicoForm.justificativa.trim(),
         contrato: novoServicoForm.contrato?.trim() || null,
+        contratada: novoServicoForm.contratada?.trim() || null,
         previsao_inicio: novoServicoForm.previsaoInicio || null,
         estimativa_valor: novoServicoForm.estimativaValor
           ? parseFloat(novoServicoForm.estimativaValor)
@@ -1711,6 +1737,7 @@ const DiretoriaAprovacao = () => {
         grauPrioridade: "Médio",
         vinculacao: "Não",
         dependenciaDescricao: "",
+        contratada: "",
       });
       toast({ title: "Serviço adicionado", description: "Novo serviço cadastrado com sucesso." });
     } catch (error) {
@@ -2104,6 +2131,9 @@ const DiretoriaAprovacao = () => {
                 <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900 w-24" field="contrato" sortConfig={sortConfig} onRequestSort={requestSort}>
                   Contrato
                 </SortableTableHead>
+                <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900 w-32" field="contratada" sortConfig={sortConfig} onRequestSort={requestSort}>
+                  Contratada
+                </SortableTableHead>
                 <SortableTableHead className="px-4 py-3 text-left text-sm font-semibold cursor-pointer hover:text-gray-900" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>
                   Objeto / Justificativa
                 </SortableTableHead>
@@ -2147,6 +2177,7 @@ const DiretoriaAprovacao = () => {
                   </td>
                   <td className="px-4 py-3 text-sm font-mono text-gray-500">{servico.item}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{servico.contrato || "-"}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{servico.contratada || "-"}</td>
                   <td className="px-4 py-3 text-sm max-w-xs" title={servico.objeto}>
                     <p className="font-medium line-clamp-2">{servico.objeto}</p>
                     {servico.justificativa && (
@@ -2787,15 +2818,27 @@ const DiretoriaAprovacao = () => {
                       placeholder="Descreva o objeto do serviço..."
                     />
                   </div>
-                  <div>
-                    <label className="text-sm font-medium">Contrato</label>
-                    <input
-                      type="text"
-                      value={novoServicoForm.contrato}
-                      onChange={(e) => setNovoServicoForm(f => ({ ...f, contrato: formatContratoMask(e.target.value) }))}
-                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                      placeholder="Ex: 028/2021"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium">Contrato</label>
+                      <input
+                        type="text"
+                        value={novoServicoForm.contrato}
+                        onChange={(e) => setNovoServicoForm(f => ({ ...f, contrato: formatContratoMask(e.target.value) }))}
+                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                        placeholder="Ex: 028/2021"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Contratada</label>
+                      <input
+                        type="text"
+                        value={novoServicoForm.contratada}
+                        onChange={(e) => setNovoServicoForm(f => ({ ...f, contratada: e.target.value }))}
+                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                        placeholder="Nome da empresa contratada"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="text-sm font-medium">Justificativa <span className="text-destructive">*</span></label>
@@ -4116,15 +4159,27 @@ const DiretoriaAprovacao = () => {
                   onChange={(e) => setServicoEdicao({ ...servicoEdicao, justificativa: e.target.value })}
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium">Contrato</label>
-                <input
-                  type="text"
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                  value={servicoEdicao.contrato || ""}
-                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: formatContratoMask(e.target.value) })}
-                  placeholder="Ex: 028/2021"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Contrato</label>
+                  <input
+                    type="text"
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                    value={servicoEdicao.contrato || ""}
+                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: formatContratoMask(e.target.value) })}
+                    placeholder="Ex: 028/2021"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Contratada</label>
+                  <input
+                    type="text"
+                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                    value={servicoEdicao.contratada || ""}
+                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, contratada: e.target.value })}
+                    placeholder="Nome da empresa contratada"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

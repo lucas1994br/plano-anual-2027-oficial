@@ -1111,6 +1111,7 @@ export async function createServicoCatalogoAndDistribuir(servico: {
   vinculacao: "Sim" | "Não";
   dependencia_descricao?: string;
   contrato?: string | null;
+  contratada?: string | null;
   diretoria_id: string;
   gerencia_id: string;
 }): Promise<unknown> {
@@ -1136,6 +1137,7 @@ export async function createServicoCatalogoAndDistribuir(servico: {
             estimativa_valor: Number(servico.estimativa_valor),
             vinculacao: servico.vinculacao,
             contrato: servico.contrato || null,
+            contratada: servico.contratada || null,
             dependencia_descricao: servico.dependencia_descricao || null,
             diretoria_id: servico.diretoria_id,
             gerencia_id: servico.gerencia_id,
@@ -1178,9 +1180,11 @@ export async function updateServicoCatalogoAdmin(
     estimativa_valor: number;
     vinculacao: "Sim" | "Não";
     contrato?: string | null;
+    contratada?: string | null;
     dependencia_descricao: string | null;
     diretoria_id: string;
     gerencia_id: string;
+    item?: number;
   }
 ): Promise<unknown> {
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
@@ -1380,6 +1384,7 @@ function mapDbToServicoItem(row: any): ServicoItem {
     justificativaRejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
     justificativa_rejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
     contrato: row.contrato,
+    contratada: row.contratada,
     created_at: row.created_at,
     updated_at: row.updated_at,
   } as ServicoItem;
@@ -1425,6 +1430,7 @@ function mapServicoItemToDb(item: any): any {
   if (item.status !== undefined) dbRow.status = item.status;
   if (item.observacao !== undefined) dbRow.observacao = item.observacao;
   if (item.contrato !== undefined) dbRow.contrato = item.contrato;
+  if (item.contratada !== undefined) dbRow.contratada = item.contratada;
   
   if (item.created_at !== undefined) dbRow.created_at = item.created_at;
   if (item.updated_at !== undefined) dbRow.updated_at = item.updated_at;

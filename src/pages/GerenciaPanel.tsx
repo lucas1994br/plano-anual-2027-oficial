@@ -111,6 +111,7 @@ import {
       objeto: "",
       justificativa: "",
       contrato: "",
+      contratada: "",
       tipoContratacao: "Contínuo",
       unidadeDemandante: "",
       previsaoInicio: "",
@@ -576,6 +577,7 @@ import {
         objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
         justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
         contrato: updates.contrato !== undefined ? updates.contrato : (catalogoItem.contrato || null),
+        contratada: updates.contratada !== undefined ? updates.contratada : (catalogoItem.contratada || null),
         previsao_inicio: null,
         estimativa_valor: updates.estimativaValor !== undefined ? updates.estimativaValor : (catalogoItem.estimativa_valor || 0),
         dotacao_orcamentaria: updates.dotacaoOrcamentaria !== undefined ? updates.dotacaoOrcamentaria : 0,
@@ -697,6 +699,7 @@ import {
         objeto: novoServicoForm.objeto.trim(),
         justificativa: novoServicoForm.justificativa.trim() || null,
         contrato: novoServicoForm.contrato?.trim() || null,
+        contratada: novoServicoForm.contratada?.trim() || null,
         previsao_inicio: novoServicoForm.previsaoInicio || null,
         estimativa_valor: novoServicoForm.estimativaValor ? parseFloat(novoServicoForm.estimativaValor) : 0,
         dotacao_orcamentaria: novoServicoForm.dotacaoOrcamentaria ? parseFloat(novoServicoForm.dotacaoOrcamentaria) : 0,
@@ -712,6 +715,7 @@ import {
         objeto: "",
         justificativa: "",
         contrato: "",
+        contratada: "",
         tipoContratacao: "Contínuo",
         unidadeDemandante: "",
         previsaoInicio: "",
@@ -798,6 +802,7 @@ import {
       vinculacao: servicoEdicao.vinculacao,
       dependenciaDescricao: servicoEdicao.dependenciaDescricao,
       contrato: servicoEdicao.contrato,
+      contratada: servicoEdicao.contratada,
       tipoContratacao: servicoEdicao.tipoContratacao,
     };
 
@@ -1197,6 +1202,12 @@ import {
       observacao?: string;
     };
 
+    const getContratadaFallback = (contrato: string | undefined | null) => {
+      if (!contrato) return null;
+      const found = (servicosCatalogoData as any[]).find(c => c.contrato === contrato && c.contratada);
+      return found ? found.contratada : null;
+    };
+
     const servicos: ServicoItem[] = (servicosData as any[]).map((s: any) => ({
       id: s.id,
       item: s.item,
@@ -1215,6 +1226,7 @@ import {
       status: s.status,
       observacao: s.observacao,
       contrato: s.contrato,
+      contratada: s.contratada || getContratadaFallback(s.contrato),
     }));
 
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho";
@@ -1245,6 +1257,7 @@ import {
         gerencia: gerenciaUpper,
         diretoriaSigla: siglaUpper,
         contrato: catalogoItem.contrato,
+        contratada: catalogoItem.contratada,
       } as unknown as ServicoItem;
     });
     
@@ -1307,12 +1320,12 @@ import {
       wsData.push([`Plano Anual de Contratações 2027 — ${titleLabel} — ${gerenciaUpper}`]);
       wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
       wsData.push([]);
-      wsData.push(["Item", "Tipo", "Unidade Demandante", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Grau Prioridade", "Vinculação", "Status"]);
+      wsData.push(["Item", "Tipo", "Unidade Demandante", "Contrato", "Contratada", "Objeto", "Justificativa", "Previsão Início", "Estimativa Valor", "Grau Prioridade", "Vinculação", "Status"]);
       filteredServicos.forEach((s) => {
-        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
+        wsData.push([s.item, s.tipoContratacao, s.unidadeDemandante, s.contrato || "", s.contratada || "", s.objeto, s.justificativa || "", s.previsaoInicio || "", s.estimativaValor || 0, s.grauPrioridade, s.vinculacao, s.status || "rascunho"]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
+      (ws as Record<string, unknown>)["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 45 }, { wch: 40 }, { wch: 15 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, titleLabel);
       XLSX.writeFile(wb, `PAC_2027_${filenameSuffix}_${gerenciaUpper}_${new Date().toISOString().split("T")[0]}.xlsx`);
     };
@@ -1326,10 +1339,12 @@ import {
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
       autoTable(doc, {
-        head: [["Item", "Tipo", "Objeto", "Estimativa", "Prioridade", "Status"]],
+        head: [["Item", "Tipo", "Contrato", "Contratada", "Objeto", "Estimativa", "Prioridade", "Status"]],
         body: filteredServicos.map((s) => [
           s.item,
           s.tipoContratacao,
+          s.contrato || "-",
+          s.contratada || "-",
           s.objeto.length > 50 ? s.objeto.substring(0, 50) + "…" : s.objeto,
           formatCurrency(s.estimativaValor),
           s.grauPrioridade,
@@ -1393,6 +1408,9 @@ import {
                   <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-24 cursor-pointer hover:text-foreground" field="contrato" sortConfig={sortConfig} onRequestSort={requestSort}>
                     Contrato
                   </SortableTableHead>
+                  <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-32 cursor-pointer hover:text-foreground" field="contratada" sortConfig={sortConfig} onRequestSort={requestSort}>
+                    Contratada
+                  </SortableTableHead>
                   <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground" field="objeto" sortConfig={sortConfig} onRequestSort={requestSort}>
                     Objeto
                   </SortableTableHead>
@@ -1438,6 +1456,7 @@ import {
                         </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
                         <td className="p-3 text-sm font-medium text-muted-foreground whitespace-nowrap">{servico.contrato || "-"}</td>
+                        <td className="p-3 text-sm font-medium text-muted-foreground whitespace-nowrap">{servico.contratada || "-"}</td>
                         <td className="p-3 text-sm max-w-xs" title={servico.objeto}>
                           <p className="font-medium line-clamp-2">{servico.objeto}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -1849,15 +1868,27 @@ import {
                     placeholder="Descreva o objeto do serviço a ser contratado..."
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Contrato</label>
-                  <input
-                    type="text"
-                    value={novoServicoForm.contrato}
-                    onChange={(e) => setNovoServicoForm(f => ({ ...f, contrato: formatContratoMask(e.target.value) }))}
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                    placeholder="Ex: 028/2021"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Contrato</label>
+                    <input
+                      type="text"
+                      value={novoServicoForm.contrato}
+                      onChange={(e) => setNovoServicoForm(f => ({ ...f, contrato: formatContratoMask(e.target.value) }))}
+                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                      placeholder="Ex: 028/2021"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Contratada</label>
+                    <input
+                      type="text"
+                      value={novoServicoForm.contratada || ""}
+                      onChange={(e) => setNovoServicoForm(f => ({ ...f, contratada: e.target.value }))}
+                      className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                      placeholder="Nome da empresa contratada"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium">Justificativa <span className="text-destructive">*</span></label>
@@ -2664,6 +2695,16 @@ import {
                   value={servicoEdicao.contrato || ""}
                   onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: formatContratoMask(e.target.value) })}
                   placeholder="Ex: 028/2021"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Contratada</label>
+                <input
+                  type="text"
+                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
+                  value={servicoEdicao.contratada || ""}
+                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, contratada: e.target.value })}
+                  placeholder="Nome da empresa contratada"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
