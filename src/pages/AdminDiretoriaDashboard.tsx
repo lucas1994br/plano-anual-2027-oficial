@@ -1,1278 +1,509 @@
-
-import { useState, useMemo, useEffect } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Download, FileText, BarChart3, TrendingUp, PieChart as PieChartIcon, Table as TableIcon, Filter, CalendarDays, Activity, Target } from "lucide-react";
-import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
-import { Button } from "@/components/ui/button.tsx";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.tsx";
+import React, { useMemo, useState } from "react";
+import { Activity, ShieldCheck, TrendingUp, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Card } from "@/components/ui/card.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
-import { Progress } from "@/components/ui/progress.tsx";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Select as UISelect, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
+import { useQuery } from "@tanstack/react-query";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
-  ComposedChart,
-  Line
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell
 } from "recharts";
-import { exportToExcel, exportToPDF } from "@/lib/exportUtils.ts";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { 
-  getPeriodosAtivos, 
-  getDiretorias, 
-  getTodasGerencias, 
-  getSolicitacoesByPeriodo, 
-  getServicosByPeriodo,
-  getAdminMiniErpConfigDb,
-  getDadosExcel2026
+import {
+  getPeriodosAtivos,
+  getDiretorias,
+  getTodasGerencias,
+  getSolicitacoesByDiretoria,
+  getServicosByDiretoria
 } from "@/lib/services.ts";
-import { loadAdminBudgetConfig, AdminBudgetConfig, getDiretoriaBudget, getGerenciaBudget, getTotalDiretoriaBudget, getTotalGerenciaBudget } from "@/lib/adminBudgetConfig.ts";
 
-// ==================== REAL DATA FOR DASHBOARD ====================
-const REAL_DIRETORIAS = ["DG", "DE", "DC", "DO", "PR"];
+const COLORS = ["#10b981", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#64748b"];
 
-// Mapeamento em CASCATA: Cada Diretoria tem suas próprias gerências reais
-const DIRETORIA_GERENCIAS: Record<string, string[]> = {
-  "DG": ["GCFI", "GCON", "GEPE", "GESL", "GSAD"],
-  "DE": ["EMAR", "EOBR", "EPRE", "EPRO"],
-  "DC": ["CCRC", "CCRF", "CCRR"],
-  "DO": ["ODCD", "OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB", "OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"],
-  "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
-};
+interface AdminDiretoriaDashboardProps {
+  diretoriaId: string;
+  filterGerencia?: string;
+  filterYear?: string;
+  filterMonth?: string;
+  filterDay?: string;
+  adminConfig?: any;
+}
 
-const MOCK_MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-const COLORS = ["#4F46E5", "#06B6D4", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#3B82F6"];
+export const AdminDiretoriaDashboard = ({ 
+  diretoriaId,
+  filterGerencia = "all",
+  filterYear = "all",
+  filterMonth = "all",
+  filterDay = "all",
+  adminConfig
+}: AdminDiretoriaDashboardProps) => {
+  const [activeTab, setActiveTab] = useState("resultados");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterTipo, setFilterTipo] = useState("todos");
+  const [filterStatus, setFilterStatus] = useState("todos");
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
 
-const TRIMESTRES = ["1º Trimestre", "2º Trimestre", "3º Trimestre", "4º Trimestre"];
-const BIMESTRES = ["1º Bimestre", "2º Bimestre", "3º Bimestre", "4º Bimestre", "5º Bimestre", "6º Bimestre"];
-const SEMANAS = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"];
-const ANOS = ["2026", "2027", "2028"];
-
-const useDashboardData = (filtroDiretoria: string, filtroAno: string) => {
-  const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({ queryKey: ["periodos-ativos"], queryFn: getPeriodosAtivos, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
+  // --- Data Fetching ---
+  const { data: periodosAtivos, isLoading: isLoadingPer } = useQuery({
+    queryKey: ["periodos-ativos"],
+    queryFn: getPeriodosAtivos,
+    staleTime: 5 * 60 * 1000,
+  });
   const periodoAtivoId = periodosAtivos?.[0]?.id as string | undefined;
 
-  const { data: diretorias, isLoading: isLoadingDir } = useQuery({ queryKey: ["diretorias"], queryFn: getDiretorias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
-  
-  const diretoria = useMemo(() => {
-    return (diretorias || []).find((d: any) => d.sigla.toUpperCase() === filtroDiretoria.toUpperCase());
-  }, [diretorias, filtroDiretoria]);
+  const { data: diretorias = [], isLoading: isLoadingDir } = useQuery({
+    queryKey: ["diretorias"],
+    queryFn: getDiretorias,
+    staleTime: 5 * 60 * 1000,
+  });
+  const diretoria = diretorias.find(d => d.id === diretoriaId);
 
-  const { data: todasGerencias, isLoading: isLoadingGer } = useQuery({ queryKey: ["todas-gerencias"], queryFn: getTodasGerencias, staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000 });
-  
-  const gerenciasAtuaisDb = useMemo(() => {
-    return (todasGerencias || []).filter((g: any) => g.diretoria_id === diretoria?.id);
-  }, [todasGerencias, diretoria?.id]);
-  
-  const gerenciasAtuais = useMemo(() => {
-    return gerenciasAtuaisDb.length > 0 
-      ? gerenciasAtuaisDb.map((g: any) => `${g.sigla}${g.nome ? ` - ${g.nome}` : ''}`) 
-      : (DIRETORIA_GERENCIAS[filtroDiretoria.toUpperCase()] || []);
-  }, [gerenciasAtuaisDb, filtroDiretoria]);
+  const { data: gerencias = [], isLoading: isLoadingGer } = useQuery({
+    queryKey: ["todas-gerencias"],
+    queryFn: getTodasGerencias,
+    staleTime: 5 * 60 * 1000,
+  });
+  const gerenciasAtuais = useMemo(() => gerencias.filter((g: any) => g.diretoria_id === diretoriaId), [gerencias, diretoriaId]);
 
-  const { data: todasSolicitacoes = [], isLoading: isLoadingSol } = useQuery({
-    queryKey: ["solicitacoes-todas", periodoAtivoId],
-    queryFn: () => getSolicitacoesByPeriodo({ periodoId: periodoAtivoId! }),
-    enabled: !!periodoAtivoId,
-    staleTime: 60 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
+  const { data: solicitacoes = [], isLoading: isLoadingSol } = useQuery({
+    queryKey: ["solicitacoes-diretoria", periodoAtivoId, diretoriaId],
+    queryFn: () => getSolicitacoesByDiretoria(diretoriaId, periodoAtivoId!),
+    enabled: !!periodoAtivoId && !!diretoriaId,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const { data: todosServicos = [], isLoading: isLoadingSer } = useQuery({
-    queryKey: ["servicos-todos", periodoAtivoId],
-    queryFn: () => getServicosByPeriodo({ periodoId: periodoAtivoId! }),
-    enabled: !!periodoAtivoId,
-    staleTime: 60 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
+  const { data: servicos = [], isLoading: isLoadingSer } = useQuery({
+    queryKey: ["servicos-diretoria", periodoAtivoId, diretoriaId],
+    queryFn: () => getServicosByDiretoria(diretoriaId, periodoAtivoId!),
+    enabled: !!periodoAtivoId && !!diretoriaId,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const solicitacoes = useMemo(() => {
-    if (!diretoria?.id) return [];
-    return todasSolicitacoes.filter((s: any) => s.diretoria_id === diretoria.id);
-  }, [todasSolicitacoes, diretoria?.id]);
+  const isLoading = isLoadingPer || isLoadingDir || isLoadingGer || (!!periodoAtivoId && (isLoadingSol || isLoadingSer));
 
-  const servicos = useMemo(() => {
-    if (!diretoria?.id) return [];
-    return todosServicos.filter((s: any) => s.diretoria_id === diretoria.id);
-  }, [todosServicos, diretoria?.id]);
+  // --- Data Processing ---
+  const { kpis, chartDataGerencias, chartDataStatus, unifiedList } = useMemo(() => {
+    const filterByDateAndStructure = (item: any) => {
+      if (filterGerencia !== "all" && item.gerencia_id !== filterGerencia) return false;
 
-  const { data: adminMiniConfigFromDb, isLoading: isLoadingConfig } = useQuery({
-    queryKey: ["admin-mini-erp-config-db"],
-    queryFn: getAdminMiniErpConfigDb,
-    staleTime: 60 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
-  });
-
-  const { data: excelData, isLoading: isLoadingExcel } = useQuery({
-    queryKey: ["excel-2026"],
-    queryFn: getDadosExcel2026,
-    enabled: filtroAno === "2026",
-    staleTime: 60 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
-  });
-
-  const isLoading = 
-    (!periodosAtivos && isLoadingPer) || 
-    (!diretorias?.length && isLoadingDir) || 
-    (!todasGerencias?.length && isLoadingGer) || 
-    (!todasSolicitacoes.length && isLoadingSol) || 
-    (!todosServicos.length && isLoadingSer) || 
-    (!adminMiniConfigFromDb && isLoadingConfig) || 
-    (filtroAno === "2026" && !excelData && isLoadingExcel);
-
-  const orcamentoConfig = useMemo(() => {
-    const localConfig = loadAdminBudgetConfig();
-    const dbConfig = adminMiniConfigFromDb as Partial<AdminBudgetConfig>;
-    if (!localConfig && !dbConfig) return null;
-    return {
-      ...(localConfig || {}),
-      ...(dbConfig || {}),
-      routingRules: dbConfig?.routingRules || localConfig?.routingRules || {},
-    } as AdminBudgetConfig;
-  }, [adminMiniConfigFromDb]);
-
-  const limiteAquisicao = useMemo(() => {
-    if (!diretoria) return 0;
-    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
-      let orcAquisicao = 0;
-      const firstRow = excelData.orcamentoData[0];
-      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
-      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_AQUISICAO');
-      const targetDir = diretoria.sigla.toUpperCase();
-      
-      excelData.orcamentoData.forEach((row: any) => {
-        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
-        if (d === targetDir) {
-           orcAquisicao += Number((orcKey ? row[orcKey] : row.ORCAMENTO_AQUISICAO || row.orcamento_aquisicao) || 0);
-        }
-      });
-      return orcAquisicao;
-    }
-    if (!orcamentoConfig) return 0;
-    const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "aquisicao");
-    const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "aquisicao"), 0);
-    return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno, excelData]);
-
-  const limiteServicosNovos = useMemo(() => {
-    if (filtroAno === "2026") return 0;
-    if (!diretoria || !orcamentoConfig) return 0;
-    const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos_novos");
-    const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "servicos_novos"), 0);
-    return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno]);
-
-  const limiteServicosExistentes = useMemo(() => {
-    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
-      let orcServico = 0;
-      const firstRow = excelData.orcamentoData[0];
-      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
-      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_SERVICO');
-      const targetDir = diretoria?.sigla.toUpperCase();
-
-      excelData.orcamentoData.forEach((row: any) => {
-        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
-        if (d === targetDir) {
-           orcServico += Number((orcKey ? row[orcKey] : row.orcamento_servico) || 0);
-        }
-      });
-      return orcServico;
-    }
-    if (!diretoria || !orcamentoConfig) return 0;
-    const retido = getDiretoriaBudget(orcamentoConfig, diretoria.id, "servicos_existentes");
-    const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getGerenciaBudget(orcamentoConfig, g.id, "servicos_existentes"), 0);
-    return retido + repassado;
-  }, [diretoria, orcamentoConfig, gerenciasAtuaisDb, filtroAno, excelData]);
-
-  const limiteTotal = useMemo(() => {
-    if (filtroAno === "2026" && excelData?.orcamentoData && excelData.orcamentoData.length > 0) {
-      let orcAprovado = 0;
-      const firstRow = excelData.orcamentoData[0];
-      const dirKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'DIRETORIA');
-      const orcKey = Object.keys(firstRow).find(k => k.trim().toUpperCase() === 'ORCAMENTO_APROVADO');
-      const targetDir = diretoria?.sigla.toUpperCase();
-
-      excelData.orcamentoData.forEach((row: any) => {
-        const d = String((dirKey ? row[dirKey] : row.DIRETORIA || row.diretoria) || "").trim().toUpperCase();
-        if (d === targetDir) {
-           orcAprovado += Number((orcKey ? row[orcKey] : row.orcamento_aprovado) || 0);
-        }
-      });
-      return orcAprovado;
-    }
-    if (!diretoria || !orcamentoConfig) return 0;
-    const retido = getTotalDiretoriaBudget(orcamentoConfig, diretoria.id);
-    const repassado = gerenciasAtuaisDb.reduce((acc: number, g: any) => acc + getTotalGerenciaBudget(orcamentoConfig, g.id), 0);
-    return retido + repassado;
-  }, [filtroAno, excelData, diretoria, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes]);
-
-  const mappedData = useMemo(() => {
-    const getStatusProgresso = (status?: string) => {
-      switch(status) {
-        case "concluido": return 100;
-        case "em_compra": return 75;
-        case "aprovado": return 50;
-        case "em_analise": return 25;
-        default: return 0;
+      if (filterYear !== "all" || filterMonth !== "all" || filterDay !== "all") {
+        if (!item.created_at) return false;
+        const [y, m, d] = item.created_at.substring(0, 10).split("-");
+        if (filterYear !== "all" && y !== filterYear) return false;
+        if (filterMonth !== "all" && m !== filterMonth) return false;
+        if (filterDay !== "all" && d !== filterDay) return false;
       }
-    };
-
-    const getStatusText = (progresso: number) => {
-      if (progresso === 100) return "Concluído";
-      if (progresso > 30) return "Em Execução";
-      return "Planejado";
-    };
-
-    const getMesName = (dateStr?: string) => {
-      if (!dateStr) return "Jan";
-      const d = new Date(dateStr);
-      return MOCK_MESES[d.getMonth()] || "Jan";
-    };
-
-    const matrixData: any[] = [];
-
-    if (filtroAno === "2026" && excelData?.realizadoData && excelData.realizadoData.length > 0) {
-       const firstRow = excelData.realizadoData[0];
-       const keys = Object.keys(firstRow);
-       const keyMap = {
-           diretoria: keys.find(k => k.trim().toUpperCase() === 'DIRETORIA') || 'DIRETORIA',
-           tipo: keys.find(k => k.trim().toUpperCase() === 'TIPO') || 'TIPO',
-           data: keys.find(k => k.trim().toUpperCase() === 'DATA') || 'DATA',
-           mes_nome: keys.find(k => k.trim().toUpperCase() === 'MES_NOME') || 'MES_NOME',
-           gerencia: keys.find(k => k.trim().toUpperCase() === 'GERENCIA') || 'GERENCIA',
-           valor_oc: keys.find(k => k.trim().toUpperCase() === 'VALOR_OC') || 'VALOR_OC',
-           valor_nf: keys.find(k => k.trim().toUpperCase() === 'VALOR_NF') || 'VALOR_NF',
-           oc: keys.find(k => k.trim().toUpperCase() === 'OC') || 'OC',
-           nf: keys.find(k => k.trim().toUpperCase() === 'NF') || 'NF',
-           classificacao: keys.find(k => k.trim().toUpperCase() === 'CLASSIFICACAO') || 'CLASSIFICACAO',
-           descricao: keys.find(k => k.trim().toUpperCase() === 'DESCRICAO') || 'DESCRICAO',
-           fornecedor: keys.find(k => k.trim().toUpperCase() === 'FORNECEDOR') || 'FORNECEDOR',
-           previsto: keys.find(k => k.trim().toUpperCase() === 'PREVISTO') || 'PREVISTO'
-       };
-
-       const targetDir = diretoria?.sigla?.toUpperCase();
-       const gerenciasMap = gerenciasAtuais.map((g: string) => ({
-           full: g,
-           sigla: g.split(" - ")[0].trim().toUpperCase()
-       }));
-
-       excelData.realizadoData.forEach((row: any) => {
-           const dirVal = String(row[keyMap.diretoria] || "").trim().toUpperCase();
-           if (dirVal !== targetDir) return;
-           
-           const tipoVal = String(row[keyMap.tipo] || "").trim().toUpperCase();
-           const isAquisicao = tipoVal === "AQUISICAO";
-           
-           let mesStr = "Jan";
-           if (row[keyMap.data]) {
-               let date: Date;
-               if (typeof row[keyMap.data] === 'number') {
-                   date = new Date(Math.round((row[keyMap.data] - 25569)*86400*1000));
-               } else {
-                   date = new Date(row[keyMap.data]);
-               }
-               if (!isNaN(date.getTime())) {
-                   mesStr = MOCK_MESES[date.getMonth()] || "Jan";
-               }
-           } else if (row[keyMap.mes_nome]) {
-               mesStr = row[keyMap.mes_nome];
-           }
-           
-           const gerenciaSigla = String(row[keyMap.gerencia] || "Indefinido").trim().toUpperCase();
-           const gerenciaFull = gerenciasMap.find(g => {
-               return gerenciaSigla === g.sigla || gerenciaSigla.startsWith(g.sigla) || g.sigla.startsWith(gerenciaSigla);
-           })?.full || row[keyMap.gerencia] || "Indefinido";
-
-            const valOC = Number(row[keyMap.valor_oc]) || 0;
-            const valNF = Number(row[keyMap.valor_nf]) || 0;
-            
-            let prog = 0;
-            let currentStatus = "Não Iniciado";
-            
-            if (valOC > 0) {
-                 prog = Math.round((valNF / valOC) * 100);
-                 if (prog >= 100) {
-                     currentStatus = "Concluído";
-                     prog = 100;
-                 } else if (prog > 0) {
-                     currentStatus = "Em Andamento";
-                 } else {
-                     currentStatus = "Não Iniciado";
-                 }
-            } else if (valNF > 0) {
-                 prog = 0;
-                 currentStatus = "Não Previsto";
-            }
-
-            matrixData.push({
-                id: `EXC-${row[keyMap.oc] || row[keyMap.nf] || Math.floor(Math.random()*10000)}`,
-                gerencia: gerenciaFull,
-                tipo: isAquisicao ? "Aquisição" : "Serviço Existente", 
-                subcategoria: row[keyMap.classificacao] || row[keyMap.descricao] || "Geral",
-                status: currentStatus,
-                orcamentoPlanejado: valOC,
-                orcamentoExecutado: valNF,
-                variacao: valOC - valNF,
-                mes: mesStr,
-                ano: "2026",
-                trimestre: "1º Trimestre",
-                bimestre: "1º Bimestre",
-                semana: "Semana 1",
-                progresso: prog,
-                tendencia: (valOC - valNF) >= 0 ? "down" : "up",
-                oc: String(row[keyMap.oc] || ""),
-                fornecedor: String(row[keyMap.fornecedor] || ""),
-                previsto: String(row[keyMap.previsto] || "")
-            });
-       });
-    }
-
-    if (filtroAno !== "2026") {
-      solicitacoes.forEach((s: any) => {
-      const orcamentoPlanejado = (s.qtdEstimada || s.qtd_estimada || 0) * (s.valorUnitario || s.valor_unitario || 0);
-      const progresso = getStatusProgresso(s.status);
-      const orcamentoExecutado = orcamentoPlanejado * (progresso / 100);
-      const variacao = orcamentoPlanejado - orcamentoExecutado;
-      
-      const gerenciaSigla = s.gerencia || s.gerencias?.sigla || "Indefinido";
-      const gerenciaFull = gerenciasAtuais.find((g: any) => g.startsWith(gerenciaSigla)) || gerenciaSigla;
-
-      matrixData.push({
-        id: `REQ-${s.codigo || s.id?.substring(0,6)}`,
-        gerencia: gerenciaFull,
-        tipo: "Aquisição",
-        subcategoria: s.categoria || "Geral",
-        status: getStatusText(progresso),
-        orcamentoPlanejado,
-        orcamentoExecutado,
-        variacao,
-        mes: getMesName(s.created_at),
-        ano: "2027",
-        trimestre: "1º Trimestre",
-        bimestre: "1º Bimestre",
-        semana: "Semana 1",
-        progresso,
-        tendencia: variacao >= 0 ? "down" : "up",
-        oc: "",
-        fornecedor: ""
-      });
-    });
-
-    servicos.forEach((s: any) => {
-      const orcamentoPlanejado = s.estimativaValor || s.estimativa_valor || 0;
-      const progresso = getStatusProgresso(s.status);
-      const orcamentoExecutado = orcamentoPlanejado * (progresso / 100);
-      const variacao = orcamentoPlanejado - orcamentoExecutado;
-      
-      const gerenciaSigla = s.gerencia || s.gerencias?.sigla || "Indefinido";
-      const gerenciaFull = gerenciasAtuais.find((g: any) => g.startsWith(gerenciaSigla)) || gerenciaSigla;
-
-      matrixData.push({
-        id: `SRV-${s.item || s.id?.substring(0,6)}`,
-        gerencia: gerenciaFull,
-        tipo: s.tipoContratacao === "Novo" || s.tipo_contratacao === "Novo" ? "Serviço Novo" : "Serviço Existente",
-        subcategoria: s.objeto ? (s.objeto.length > 25 ? s.objeto.substring(0, 25) + "..." : s.objeto) : "Geral",
-        status: getStatusText(progresso),
-        orcamentoPlanejado,
-        orcamentoExecutado,
-        variacao,
-        mes: getMesName(s.created_at),
-        ano: "2027",
-        trimestre: "1º Trimestre",
-        bimestre: "1º Bimestre",
-        semana: "Semana 1",
-        progresso,
-        tendencia: variacao >= 0 ? "down" : "up",
-        oc: "",
-        fornecedor: ""
-      });
-    });
-    }
-
-    const evolutionData = MOCK_MESES.map(mes => {
-      const itemsInMonth = matrixData.filter(m => m.mes === mes);
-      return {
-        name: mes,
-        aquisicoes: itemsInMonth.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        servicosNovos: itemsInMonth.filter(m => m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        servicosExistentes: itemsInMonth.filter(m => m.tipo === "Serviço Existente").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        orcamentoPlanejado: itemsInMonth.reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        orcamentoExecutado: itemsInMonth.reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
-        realizadoPrevisto: itemsInMonth.filter((m: any) => String(m.previsto).trim().toUpperCase() === "SIM").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
-        naoPrevisto: itemsInMonth.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0),
-      };
-    });
-
-    const gerenciaData = gerenciasAtuais.map((gerFullName: any) => {
-      const gerSigla = gerFullName.split(" - ")[0];
-      const itemsInGer = matrixData.filter(m => m.gerencia === gerFullName);
-      return {
-        name: gerSigla,
-        fullName: gerFullName,
-        aquisicoes: itemsInGer.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        servicosNovos: itemsInGer.filter(m => m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        servicosExistentes: itemsInGer.filter(m => m.tipo === "Serviço Existente").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0),
-        eficiencia: itemsInGer.length > 0 ? itemsInGer.reduce((acc, curr) => acc + curr.progresso, 0) / itemsInGer.length : 0,
-        agilidade: itemsInGer.length > 0 ? 80 : 0, 
-        conformidade: itemsInGer.length > 0 ? 95 : 0 
-      };
-    });
-
-    const pieDataMap = new Map();
-    const statusPieDataMap = new Map();
-
-    matrixData.forEach(item => {
-      // Subcategorias
-      if (!pieDataMap.has(item.subcategoria)) {
-        pieDataMap.set(item.subcategoria, { name: item.subcategoria, value: 0, tipo: item.tipo });
-      }
-      pieDataMap.get(item.subcategoria).value += item.orcamentoPlanejado;
-
-      // Status
-      const statusFormatado = item.status.replace("_", " ").toUpperCase();
-      if (!statusPieDataMap.has(statusFormatado)) {
-        statusPieDataMap.set(statusFormatado, { name: statusFormatado, value: 0 });
-      }
-      statusPieDataMap.get(statusFormatado).value += item.orcamentoPlanejado;
-    });
-
-    let pieData = Array.from(pieDataMap.values()).filter(p => p.value > 0);
-    // Agrupar se houver mais de 5 itens
-    pieData.sort((a, b) => b.value - a.value);
-    if (pieData.length > 5) {
-      const top4 = pieData.slice(0, 4);
-      const outrosValue = pieData.slice(4).reduce((acc, curr) => acc + curr.value, 0);
-      top4.push({ name: "Outros", value: outrosValue, tipo: "Diversos" });
-      pieData = top4;
-    }
-
-    const statusPieData = Array.from(statusPieDataMap.values()).filter(p => p.value > 0);
-    statusPieData.sort((a, b) => b.value - a.value);
-
-    const isLimitedData = solicitacoes.length >= 2000 || servicos.length >= 2000;
-
-    return { evolutionData, gerenciaData, pieData, statusPieData, matrixData, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes, isLimitedData };
-  }, [solicitacoes, servicos, gerenciasAtuais, limiteTotal, limiteAquisicao, limiteServicosNovos, limiteServicosExistentes, filtroAno, excelData]);
-
-  return { ...mappedData, isLoading };
-};
-
-// ==================== DASHBOARD COMPONENT ====================
-const AdminDiretoriaDashboard = () => {
-  const { id } = useParams();
-  const navigate = useNavigate();
-
-  const currentDirUpper = (id || "DC").toUpperCase();
-
-  const [visao, setVisao] = useState<"diretoria" | "gerencias">("diretoria");
-
-  const [searchParams] = useSearchParams();
-  const gerenciaQuery = searchParams.get("gerencia");
-
-  // Slicer States (Filtros Normais)
-  const [filtroDiretoria, setFiltroDiretoria] = useState<string>(currentDirUpper);
-  const [filtroGerencia, setFiltroGerencia] = useState<string>(gerenciaQuery || "todas");
-  const [filtroCategoria, setFiltroCategoria] = useState<string>("todas");
-  const [filtroSubcategoria, setFiltroSubcategoria] = useState<string>("todas");
-  const [filtroAno, setFiltroAno] = useState<string>("2027");
-  const [filtroTrimestre, setFiltroTrimestre] = useState<string>("todos");
-  const [filtroBimestre, setFiltroBimestre] = useState<string>("todos");
-  const [filtroMes, setFiltroMes] = useState<string>("todos");
-  const [filtroSemana, setFiltroSemana] = useState<string>("todas");
-
-  // Cross-Filtering States (Interatividade Deep Power BI)
-  const [crossFilterGerencia, setCrossFilterGerencia] = useState<string | null>(null);
-  const [crossFilterSubcat, setCrossFilterSubcat] = useState<string | null>(null);
-  const [crossFilterMes, setCrossFilterMes] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (id && id.toUpperCase() !== filtroDiretoria) {
-      setFiltroDiretoria(id.toUpperCase());
-      
-      // Se a URL trouxer uma gerência, seta ela. Se não, reseta pra todas
-      const validGerencias = DIRETORIA_GERENCIAS[id.toUpperCase()] || [];
-      const novaGerencia = gerenciaQuery && validGerencias.some(g => g.startsWith(gerenciaQuery)) 
-        ? validGerencias.find(g => g.startsWith(gerenciaQuery)) || "todas"
-        : "todas";
-
-      setFiltroGerencia(novaGerencia);
-      setCrossFilterGerencia(null);
-    } else if (gerenciaQuery && !id) {
-       // Apenas em caso de mudança de query na mesma diretoria (opcional)
-       const validGerencias = DIRETORIA_GERENCIAS[filtroDiretoria] || [];
-       const novaGerencia = validGerencias.find(g => g.startsWith(gerenciaQuery));
-       if (novaGerencia) setFiltroGerencia(novaGerencia);
-    }
-  }, [id, gerenciaQuery]);
-
-  const handleDiretoriaChange = (val: string) => {
-    setFiltroDiretoria(val);
-    setFiltroGerencia("todas");
-    setCrossFilterGerencia(null);
-    navigate(`/admin/diretoria/${val.toLowerCase()}`);
-  };
-
-  const { isLoading, ...rawData } = useDashboardData(filtroDiretoria, filtroAno);
-
-  const filteredMatrix = useMemo(() => {
-    return rawData.matrixData.filter(item => {
-      // Slicers Button & Select
-      if (filtroGerencia !== "todas" && item.gerencia !== filtroGerencia) return false;
-      if (filtroCategoria !== "todas" && item.tipo !== filtroCategoria) return false;
-      if (filtroSubcategoria !== "todas" && item.subcategoria !== filtroSubcategoria) return false;
-      if (filtroAno !== "todos" && item.ano !== filtroAno) return false;
-      if (filtroTrimestre !== "todos" && item.trimestre !== filtroTrimestre) return false;
-      if (filtroBimestre !== "todos" && item.bimestre !== filtroBimestre) return false;
-      if (filtroMes !== "todos" && item.mes !== filtroMes) return false;
-      if (filtroSemana !== "todas" && item.semana !== filtroSemana) return false;
-      
-      // Deep Cross-Filters (Cliques nos Gráficos e Tabelas)
-      if (crossFilterGerencia && item.gerencia !== crossFilterGerencia) return false;
-      if (crossFilterSubcat && item.subcategoria !== crossFilterSubcat) return false;
-      if (crossFilterMes && item.mes !== crossFilterMes) return false;
-
       return true;
+    };
+
+    const solDir = solicitacoes.filter(filterByDateAndStructure);
+    const serDir = servicos.filter(filterByDateAndStructure);
+
+    const categorizeStatus = (status?: string) => {
+      if (!status) return "pendente";
+      const s = status.toLowerCase();
+      if (s.includes("aprov") || s.includes("conclu") || s.includes("valid") || s === "em_compra") return "aprovado";
+      if (s.includes("reprov") || s.includes("cancel") || s.includes("devolv") || s === "rejeitado") return "reprovado";
+      return "pendente";
+    };
+
+    const gerenciaMap = new Map<string, any>();
+    gerenciasAtuais.forEach((g: any) => {
+      gerenciaMap.set(g.id, {
+        sigla: g.sigla,
+        nome: g.nome,
+        aquisicao: { aprovado: 0, reprovado: 0, pendente: 0, total: 0 },
+        servicoExistente: { aprovado: 0, reprovado: 0, pendente: 0, total: 0 },
+        servicoNovo: { aprovado: 0, reprovado: 0, pendente: 0, total: 0 },
+        totalGeral: 0
+      });
     });
-  }, [rawData.matrixData, filtroGerencia, filtroCategoria, filtroSubcategoria, filtroAno, filtroTrimestre, filtroBimestre, filtroMes, filtroSemana, crossFilterGerencia, crossFilterSubcat, crossFilterMes]);
 
-  const dynamicGerenciaData = useMemo(() => {
-    return rawData.gerenciaData
-      .filter(g => filtroGerencia === "todas" || g.fullName === filtroGerencia)
-      .map(g => {
-        const isFaded = crossFilterGerencia && crossFilterGerencia !== g.fullName;
-        const opacityMult = isFaded ? 0.3 : 1;
+    const getGerenciaId = (gerenciaId?: string) => {
+      if (gerenciaId && gerenciaMap.has(gerenciaId)) return gerenciaId;
+      return null;
+    };
 
-        const mulAq = filtroCategoria === "todas" || filtroCategoria === "Aquisição" ? 1 : 0;
-        const mulSn = filtroCategoria === "todas" || filtroCategoria === "Serviço Novo" ? 1 : 0;
-        const mulSe = filtroCategoria === "todas" || filtroCategoria === "Serviço Existente" ? 1 : 0;
+    const totalAquisicao = { aprovado: 0, reprovado: 0, pendente: 0, total: 0 };
+    let orcamentoPlanejado = 0;
+    const list: any[] = [];
+
+    solDir.forEach((sol: any) => {
+      const statusGroup = categorizeStatus(sol.status);
+      totalAquisicao[statusGroup as keyof typeof totalAquisicao]++;
+      totalAquisicao.total++;
+
+      const gerId = getGerenciaId(sol.gerencia_id);
+      if (gerId) {
+        const g = gerenciaMap.get(gerId);
+        g.aquisicao[statusGroup]++;
+        g.aquisicao.total++;
+        g.totalGeral++;
+      }
+
+      list.push({
+        id: `REQ-${sol.codigo || sol.id?.substring(0, 6)}`,
+        tipo: "Aquisição",
+        descricao: sol.descricao,
+        gerencia: gerencias.find(g => g.id === sol.gerencia_id)?.sigla || sol.gerencia || "-",
+        status: sol.status || "rascunho",
+        statusGroup,
+        valor: (sol.qtdEstimada || sol.qtd_estimada || 0) * (sol.valorUnitario || sol.valor_unitario || 0),
+        data: sol.created_at
+      });
+      orcamentoPlanejado += (sol.qtdEstimada || sol.qtd_estimada || 0) * (sol.valorUnitario || sol.valor_unitario || 0);
+    });
+
+    const totalServExistente = { aprovado: 0, reprovado: 0, pendente: 0, total: 0 };
+    const totalServNovo = { aprovado: 0, reprovado: 0, pendente: 0, total: 0 };
+
+    serDir.forEach((srv: any) => {
+      const statusGroup = categorizeStatus(srv.status);
+      const isNovo = (srv.tipoContratacao || srv.tipo_contratacao) === "Novo";
+      const tipoStr = isNovo ? "Serviço Novo" : "Serviço Existente";
+
+      if (isNovo) {
+        totalServNovo[statusGroup as keyof typeof totalServNovo]++;
+        totalServNovo.total++;
+      } else {
+        totalServExistente[statusGroup as keyof typeof totalServExistente]++;
+        totalServExistente.total++;
+      }
+
+      const gerId = getGerenciaId(srv.gerencia_id);
+      if (gerId) {
+        const g = gerenciaMap.get(gerId);
+        if (isNovo) {
+          g.servicoNovo[statusGroup]++;
+          g.servicoNovo.total++;
+        } else {
+          g.servicoExistente[statusGroup]++;
+          g.servicoExistente.total++;
+        }
+        g.totalGeral++;
+      }
+
+      list.push({
+        id: `SRV-${srv.item || srv.id?.substring(0, 6)}`,
+        tipo: tipoStr,
+        descricao: srv.objeto,
+        gerencia: gerencias.find(g => g.id === srv.gerencia_id)?.sigla || srv.gerencia || "-",
+        status: srv.status || "rascunho",
+        statusGroup,
+        valor: srv.estimativaValor || srv.estimativa_valor || 0,
+        data: srv.created_at
+      });
+      orcamentoPlanejado += Number(srv.estimativaValor || srv.estimativa_valor || 0);
+    });
+
+    const chartGer = Array.from(gerenciaMap.values()).map(g => ({
+      name: g.sigla,
+      "Aquis. Aprov.": g.aquisicao.aprovado,
+      "Aquis. Pend.": g.aquisicao.pendente,
+      "Serv. Exist. Aprov.": g.servicoExistente.aprovado,
+      "Serv. Exist. Pend.": g.servicoExistente.pendente,
+      "Serv. Novo Aprov.": g.servicoNovo.aprovado,
+      "Serv. Novo Pend.": g.servicoNovo.pendente,
+      total: g.totalGeral
+    })).sort((a, b) => b.total - a.total);
+
+    const chartStat = [
+      { name: "Aprovados", value: totalAquisicao.aprovado + totalServExistente.aprovado + totalServNovo.aprovado, color: COLORS[0] },
+      { name: "Reprovados", value: totalAquisicao.reprovado + totalServExistente.reprovado + totalServNovo.reprovado, color: COLORS[1] },
+      { name: "Pendentes", value: totalAquisicao.pendente + totalServExistente.pendente + totalServNovo.pendente, color: COLORS[2] },
+    ];
+
+    const totalValorDiretoria = list.reduce((acc, curr) => acc + curr.valor, 0);
+    const listWithPercent = list.map(item => ({
+      ...item,
+      percentual: totalValorDiretoria > 0 ? (item.valor / totalValorDiretoria) * 100 : 0
+    }));
+
+    const limiteOrcamentario = Number(adminConfig?.diretoriaBudgetsOrcamentoGeral?.[diretoriaId] || 0);
+    const saldoDisponivel = limiteOrcamentario - orcamentoPlanejado;
+    const eficienciaGeral = limiteOrcamentario > 0 ? (orcamentoPlanejado / limiteOrcamentario) * 100 : 0;
+
+    return {
+      kpis: {
+        limiteOrcamentario,
+        orcamentoPlanejado,
+        saldoDisponivel,
+        eficienciaGeral,
+        totalGeral: totalAquisicao.total + totalServExistente.total + totalServNovo.total
+      },
+      chartDataGerencias: chartGer,
+      chartDataStatus: chartStat,
+      unifiedList: listWithPercent.sort((a, b) => new Date(b.data || 0).getTime() - new Date(a.data || 0).getTime())
+    };
+  }, [solicitacoes, servicos, gerenciasAtuais, diretoriaId, gerencias, filterGerencia, filterYear, filterMonth, filterDay, adminConfig]);
+
+  const filteredList = useMemo(() => {
+    const result = unifiedList.filter(item => {
+      const matchesSearch = item.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) || item.id.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesTipo = filterTipo === "todos" || item.tipo === filterTipo;
+      const matchesStatus = filterStatus === "todos" || item.statusGroup === filterStatus;
+      return matchesSearch && matchesTipo && matchesStatus;
+    });
+
+    if (sortConfig !== null) {
+      result.sort((a: any, b: any) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
         
-        return {
-          ...g,
-          aquisicoes: g.aquisicoes * mulAq * opacityMult,
-          servicosNovos: g.servicosNovos * mulSn * opacityMult,
-          servicosExistentes: g.servicosExistentes * mulSe * opacityMult,
-          opacity: opacityMult
-        };
+        if (typeof aVal === 'string') {
+          aVal = aVal.toLowerCase();
+          bVal = bVal.toLowerCase();
+        }
+        
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
       });
-  }, [rawData.gerenciaData, filtroGerencia, filtroCategoria, crossFilterGerencia]);
-
-  const dynamicEvolutionData = useMemo(() => {
-    return rawData.evolutionData.filter(e => (filtroMes === "todos" && !crossFilterMes) || e.name === filtroMes || e.name === crossFilterMes).map(e => {
-       const mulAq = filtroCategoria === "todas" || filtroCategoria === "Aquisição" ? 1 : 0;
-       const mulSn = filtroCategoria === "todas" || filtroCategoria === "Serviço Novo" ? 1 : 0;
-       const mulSe = filtroCategoria === "todas" || filtroCategoria === "Serviço Existente" ? 1 : 0;
-       
-       const isFaded = crossFilterMes && crossFilterMes !== e.name;
-
-       return {
-         ...e,
-         aquisicoes: e.aquisicoes * mulAq * (isFaded ? 0.3 : 1),
-         servicosNovos: e.servicosNovos * mulSn * (isFaded ? 0.3 : 1),
-         servicosExistentes: e.servicosExistentes * mulSe * (isFaded ? 0.3 : 1),
-         orcamentoPlanejado: e.orcamentoPlanejado * (isFaded ? 0.3 : 1)
-       };
-    });
-  }, [rawData.evolutionData, filtroMes, filtroCategoria, crossFilterMes]);
-
-  const dynamicPieData = useMemo(() => {
-    return rawData.pieData
-      .filter((p: any) => filtroSubcategoria === "todas" || p.name === filtroSubcategoria)
-      .filter((p: any) => filtroCategoria === "todas" || p.tipo === filtroCategoria || p.tipo.includes(filtroCategoria.split(" ")[0]))
-      .map((p: any) => {
-        const factor = crossFilterGerencia ? 0.4 : 1;
-        return {
-          ...p,
-          value: p.value * factor,
-          opacity: (crossFilterSubcat && crossFilterSubcat !== p.name) ? 0.3 : 1
-        };
-      });
-  }, [rawData.pieData, filtroSubcategoria, filtroCategoria, crossFilterGerencia, crossFilterSubcat]);
-
-  const radarData = useMemo(() => {
-    return rawData.gerenciaData.filter(g => (!crossFilterGerencia && (filtroGerencia === "todas" || g.fullName === filtroGerencia)) || g.fullName === crossFilterGerencia);
-  }, [rawData.gerenciaData, crossFilterGerencia, filtroGerencia]);
-
-
-  const formatCurrency = (value: number) => 
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  const totalPlanejado = filteredMatrix.reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
-  const totalRealizado = filteredMatrix.filter(item => item.progresso >= 50).reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
-  const totalExecutado = filteredMatrix.reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-  const variacaoTotal = totalPlanejado - totalExecutado;
-  const variacaoPercGlobal = totalPlanejado ? (variacaoTotal / totalPlanejado) * 100 : 0;
-
-  const totalItens = filteredMatrix.length;
-  const execucaoMedia = Math.floor(filteredMatrix.reduce((acc, curr) => acc + curr.progresso, 0) / (totalItens || 1));
-
-  // Novos KPIs de Operação
-  const kpiSomaItensAquisicao = filteredMatrix.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
-  const kpiSomaItensServicos = filteredMatrix.filter(m => m.tipo === "Serviço Existente" || m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-  const kpiNfServicos = filteredMatrix.filter(m => m.tipo === "Serviço Existente" || m.tipo === "Serviço Novo").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-  const kpiNfAquisicoes = filteredMatrix.filter(m => m.tipo === "Aquisição").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-  const kpiQtdOc = new Set(filteredMatrix.map(m => String(m.oc).trim()).filter(o => o && o !== "-" && o.toUpperCase() !== "INDEFINIDO")).size;
-  const kpiQtdFornecedores = new Set(filteredMatrix.map(m => String(m.fornecedor).trim()).filter(f => f && f !== "-" && f.toUpperCase() !== "INDEFINIDO")).size;
-  const kpiRealizadoPrevisto = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "SIM").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-  const kpiNaoPrevistoPlanejado = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoPlanejado, 0);
-  const kpiNaoPrevistoExecutado = filteredMatrix.filter((m: any) => String(m.previsto).trim().toUpperCase() === "NÃO" || String(m.previsto).trim().toUpperCase() === "NAO").reduce((acc, curr) => acc + curr.orcamentoExecutado, 0);
-
-  const getChartDataKey = () => {
-    switch (filtroCategoria) {
-      case "Aquisição": return "aquisicoes";
-      case "Serviço Novo": return "servicosNovos";
-      case "Serviço Existente": return "servicosExistentes";
-      default: return "aquisicoes";
     }
-  };
 
-  const handleExportExcel = () => exportToExcel(filteredMatrix, `Relatorio_${currentDirUpper}`, `Relatório Detalhado - Diretoria ${currentDirUpper}`);
-  const handleExportPDF = () => exportToPDF(filteredMatrix, `Relatorio_${currentDirUpper}`, `Matriz de Dados - Diretoria ${currentDirUpper}`);
+    return result;
+  }, [unifiedList, searchTerm, filterTipo, filterStatus, sortConfig]);
 
-  const limparFiltros = () => {
-    setFiltroGerencia("todas");
-    setFiltroCategoria("todas");
-    setFiltroSubcategoria("todas");
-    setFiltroAno("2027");
-    setFiltroTrimestre("todos");
-    setFiltroBimestre("todos");
-    setFiltroMes("todos");
-    setFiltroSemana("todas");
-    setCrossFilterGerencia(null);
-    setCrossFilterSubcat(null);
-    setCrossFilterMes(null);
-  };
-
-  const getSubcategoriasOptions = () => {
-    const allSubs = Array.from(new Set(rawData.matrixData.map((m: any) => m.subcategoria)));
-    if (filtroCategoria === "todas") return allSubs as string[];
-    return Array.from(new Set(rawData.matrixData.filter((m: any) => m.tipo === filtroCategoria || m.tipo.includes(filtroCategoria.split(" ")[0])).map((m: any) => m.subcategoria))) as string[];
-  };
-
-  // Click Handlers (DEEP Power BI Interactivity)
-  const onBarClick = (data: { fullName: string }) => {
-    if (crossFilterGerencia === data.fullName) setCrossFilterGerencia(null);
-    else setCrossFilterGerencia(data.fullName);
-  };
-  const onPieClick = (data: { name: string }) => {
-    if (crossFilterSubcat === data.name) setCrossFilterSubcat(null);
-    else setCrossFilterSubcat(data.name);
-  };
-  const onComposedChartClick = (data: { activeLabel?: string } | null | undefined) => {
-    if (data?.activeLabel) {
-      if (crossFilterMes === data.activeLabel) setCrossFilterMes(null);
-      else setCrossFilterMes(data.activeLabel);
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
     }
+    setSortConfig({ key, direction });
   };
-  const onTableRowClick = (row: { gerencia: string; subcategoria: string }) => {
-    setCrossFilterGerencia(crossFilterGerencia === row.gerencia ? null : row.gerencia);
-    setCrossFilterSubcat(crossFilterSubcat === row.subcategoria ? null : row.subcategoria);
+
+  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+    if (sortConfig?.key !== columnKey) return <ArrowUpDown className="w-3 h-3 ml-1 text-slate-300" />;
+    return sortConfig.direction === 'asc' 
+      ? <ArrowUp className="w-3 h-3 ml-1 text-primary" />
+      : <ArrowDown className="w-3 h-3 ml-1 text-primary" />;
   };
+
+  if (isLoading || !diretoria) {
+    return (
+      <div className="w-full flex justify-center items-center p-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Old KPICard component removed as we will use financial cards inline
 
   return (
-    <div className="min-h-screen bg-slate-50 relative pb-12">
-      {isLoading && (
-        <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-xl shadow-lg border">
-            <div className="h-10 w-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-            <p className="font-semibold text-slate-700">Carregando Dados Reais do Banco...</p>
-          </div>
+    <div className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
+          <TabsList>
+            <TabsTrigger value="resultados">Visão de Resultados</TabsTrigger>
+            <TabsTrigger value="solicitacoes">Tabela de Solicitações</TabsTrigger>
+          </TabsList>
+          <Badge variant="outline" className="mt-4 sm:mt-0 px-3 py-1 bg-indigo-50 border-indigo-200 text-indigo-700">
+            Total de Requisições ({diretoria.sigla}): {kpis.totalGeral}
+          </Badge>
         </div>
-      )}
 
-      <PageBreadcrumb
-        onBack={() => navigate("/admin")}
-        onHome={() => navigate("/")}
-        crumbs={[
-          { label: "Admin", onClick: () => navigate("/admin") },
-          { label: `Dashboard ${currentDirUpper}`, onClick: () => setVisao("diretoria") },
-          { label: visao === "gerencias" ? "Visão por Gerência" : "Visão Consolidada", isActive: true },
-        ]}
-      />
-
-      {/* HEADER GRADIENTE */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-900 px-6 py-8 text-white shadow-lg">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Badge variant="outline" className="bg-white/20 text-white border-white/30 px-3 py-1 text-sm">
-                  Ambiente Analítico
-                </Badge>
-                {crossFilterGerencia || crossFilterSubcat || crossFilterMes ? (
-                  <Badge className="bg-amber-500 hover:bg-amber-600 animate-pulse">Deep Cross-Filter Ativo</Badge>
-                ) : (
-                  <Badge className="bg-green-500 hover:bg-green-600">Tempo Real</Badge>
-                )}
-              </div>
-              <h1 className="text-3xl font-bold tracking-tight">Dashboard Avançado (BI)</h1>
-              <p className="text-blue-200 mt-1">Interatividade Máxima: Clique EM QUALQUER LUGAR (tabelas, gráficos, KPIs) para segmentar.</p>
-              {rawData.isLimitedData && (
-                <div className="mt-3 inline-flex items-center gap-2 bg-amber-500/20 border border-amber-400 text-amber-200 px-3 py-1.5 rounded-md text-sm font-medium">
-                  ⚠️ Aviso: Apenas os 2.000 registros mais recentes foram carregados para evitar travamentos. Os totais financeiros abaixo representam apenas esta amostra.
-                </div>
-              )}
-            </div>
+        <TabsContent value="resultados" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <Card className="p-4 flex flex-col justify-center border-l-4 border-l-purple-500">
+              <h3 className="text-sm font-medium text-slate-500 mb-2">Limite Orçamentário</h3>
+              <p className="text-2xl font-bold text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(kpis.limiteOrcamentario)}</p>
+            </Card>
             
-            <div className="flex gap-2">
-              <Button onClick={handleExportExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-md">
-                <FileText className="h-4 w-4 mr-2" /> Excel
-              </Button>
-              <Button onClick={handleExportPDF} className="bg-rose-600 hover:bg-rose-700 text-white shadow-md">
-                <Download className="h-4 w-4 mr-2" /> PDF
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+            <Card className="p-4 flex flex-col justify-center border-l-4 border-l-blue-500">
+              <h3 className="text-sm font-medium text-slate-500 mb-2">Orçamento Planejado</h3>
+              <p className="text-2xl font-bold text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(kpis.orcamentoPlanejado)}</p>
+            </Card>
 
-      <div className="max-w-7xl mx-auto px-6 mt-6 space-y-6">
-        
-        {/* SLICER BAR (POWER BI STYLE BUTTON SLICERS) */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 flex flex-col gap-4 transition-all">
-          <div className="flex items-center justify-between border-b pb-2">
-            <div className="flex items-center gap-2 text-indigo-700 font-semibold">
-              <Filter className="h-5 w-5" /> Painel de Segmentação Visual
-            </div>
-            <Button variant="ghost" size="sm" onClick={limparFiltros} className="text-slate-500 hover:text-indigo-600 h-8">
-              Limpar Todos os Filtros
-            </Button>
-          </div>
-          
-          {/* LINHA 1: SLICERS DE BOTÃO (Aparecem automaticamente, sem dropdown para as principais dimensões) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Diretoria */}
-            <div className="space-y-1 lg:col-span-2">
-              <label className="text-xs font-bold text-indigo-700">📌 Diretoria</label>
-              <Select value={filtroDiretoria} onValueChange={handleDiretoriaChange}>
-                <SelectTrigger className="bg-indigo-50 border-indigo-200 text-indigo-800 font-semibold"><SelectValue placeholder="Diretoria" /></SelectTrigger>
-                <SelectContent>
-                  {REAL_DIRETORIAS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <Card className="p-4 flex flex-col justify-center border-l-4 border-l-green-500">
+              <h3 className="text-sm font-medium text-slate-500 mb-2">Saldo Disponível</h3>
+              <p className="text-2xl font-bold text-green-600">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(kpis.saldoDisponivel)}</p>
+              <p className="text-xs text-slate-400 mt-1">{kpis.eficienciaGeral.toFixed(1)}% do limite consumido</p>
+            </Card>
 
-            {/* Gerência Button Slicer */}
-            <div className="space-y-1 lg:col-span-5 lg:border-l lg:pl-4">
-              <label className="text-xs font-medium text-slate-500">Segmentação de Gerências (Visível)</label>
-              <div className="flex flex-wrap gap-2 mt-1">
-                <Badge variant={filtroGerencia === "todas" ? "default" : "outline"} className={`cursor-pointer px-3 py-1 text-sm transition-all hover:scale-105 ${filtroGerencia === "todas" ? "bg-indigo-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100 bg-white"}`} onClick={() => { setFiltroGerencia("todas"); setCrossFilterGerencia(null); }}>
-                  Todas
-                </Badge>
-                {rawData.gerenciasAtuais.map(g => (
-                  <Badge key={g} variant={filtroGerencia === g ? "default" : "outline"} className={`cursor-pointer px-3 py-1 text-sm transition-all hover:scale-105 ${filtroGerencia === g ? "bg-indigo-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100 bg-white"} ${crossFilterGerencia === g ? 'ring-2 ring-amber-400' : ''}`} onClick={() => { setFiltroGerencia(g === filtroGerencia ? "todas" : g); setCrossFilterGerencia(null); }} title={g}>
-                    {g.split(" - ")[0]}
-                  </Badge>
-                ))}
+            <Card className="p-4 flex flex-col justify-center border-l-4 border-l-amber-400">
+              <h3 className="text-sm font-medium text-slate-500 mb-2">Eficiência</h3>
+              <p className="text-2xl font-bold text-amber-500 mb-2">{kpis.eficienciaGeral.toFixed(0)}%</p>
+              <div className="w-full bg-slate-100 rounded-full h-2">
+                <div className="bg-amber-400 h-2 rounded-full" style={{ width: `${Math.min(100, kpis.eficienciaGeral)}%` }}></div>
               </div>
-            </div>
-
-            {/* Categoria Button Slicer */}
-            <div className="space-y-1 lg:col-span-5 lg:border-l lg:pl-4">
-              <label className="text-xs font-medium text-slate-500">Categoria Geral</label>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {["todas", "Aquisição", "Serviço Novo", "Serviço Existente"].map(cat => (
-                  <Badge key={cat} variant={filtroCategoria === cat ? "default" : "outline"} className={`cursor-pointer px-3 py-1 text-sm transition-all hover:scale-105 ${filtroCategoria === cat ? "bg-indigo-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100 bg-white"}`} onClick={() => { setFiltroCategoria(cat); setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }}>
-                    {cat === "todas" ? "Todas" : cat}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+            </Card>
           </div>
 
-          {/* LINHA 2: TEMPO E SUBCATEGORIAS (Selects) */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 pt-3 border-t mt-1">
-             <div className="space-y-1 lg:col-span-2">
-              <label className="text-xs font-medium text-slate-500">Subcategoria (Dependente)</label>
-              <Select value={filtroSubcategoria} onValueChange={(val) => { setFiltroSubcategoria(val); setCrossFilterSubcat(null); }}>
-                <SelectTrigger className={`bg-slate-50 border-slate-200 h-8 text-xs ${crossFilterSubcat ? 'border-amber-400 bg-amber-50' : ''}`}><SelectValue placeholder="Item" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todas">Todos os Itens</SelectItem>
-                  {getSubcategoriasOptions().map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-             </div>
-             
-             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">Ano</label>
-              <Select value={filtroAno} onValueChange={setFiltroAno}>
-                <SelectTrigger className="bg-slate-50 border-slate-200 h-8 text-xs"><SelectValue placeholder="Ano" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  {ANOS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                </SelectContent>
-              </Select>
-             </div>
-
-             <div className="space-y-1">
-               <label className="text-xs font-medium text-slate-500">Trimestre</label>
-               <Select value={filtroTrimestre} onValueChange={(val) => { setFiltroTrimestre(val); setFiltroBimestre("todos"); }}>
-                 <SelectTrigger className="bg-slate-50 border-slate-200 h-8 text-xs"><SelectValue placeholder="Trimestre" /></SelectTrigger>
-                 <SelectContent>
-                   <SelectItem value="todos">Sem Filtro</SelectItem>
-                   {TRIMESTRES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                 </SelectContent>
-               </Select>
-             </div>
-             <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-500">Bimestre</label>
-                <Select value={filtroBimestre} onValueChange={(val) => { setFiltroBimestre(val); setFiltroTrimestre("todos"); }}>
-                  <SelectTrigger className="bg-slate-50 border-slate-200 h-8 text-xs"><SelectValue placeholder="Bimestre" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todos">Sem Filtro</SelectItem>
-                    {BIMESTRES.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-             </div>
-             <div className="space-y-1 relative">
-               <label className="text-xs font-medium text-slate-500">Mês</label>
-               <Select value={filtroMes} onValueChange={(val) => { setFiltroMes(val); setCrossFilterMes(null); }}>
-                 <SelectTrigger className={`bg-slate-50 border-slate-200 h-8 text-xs ${crossFilterMes ? 'border-amber-400 bg-amber-50' : ''}`}><SelectValue placeholder="Mês" /></SelectTrigger>
-                 <SelectContent>
-                   <SelectItem value="todos">Todos</SelectItem>
-                   {MOCK_MESES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                 </SelectContent>
-               </Select>
-             </div>
-             <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-500">Semana</label>
-                <Select value={filtroSemana} onValueChange={setFiltroSemana}>
-                  <SelectTrigger className="bg-slate-50 border-slate-200 h-8 text-xs"><SelectValue placeholder="Semana" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todas">Todas</SelectItem>
-                    {SEMANAS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-             </div>
-          </div>
-        </div>
-
-        {/* CONTROLES (Visão) */}
-        <div className="flex justify-between items-center bg-white p-2 rounded-xl shadow-sm border border-slate-200">
-          <Tabs value={visao} onValueChange={(v) => setVisao(v as "diretoria" | "gerencias")} className="w-full lg:w-auto">
-            <TabsList className="grid w-full grid-cols-2 lg:w-[400px] bg-slate-100">
-              <TabsTrigger value="diretoria" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Visão Consolidada</TabsTrigger>
-              <TabsTrigger value="gerencias" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Visão por Gerência</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <div className="hidden lg:flex items-center text-sm text-slate-500 gap-2 pr-4">
-            <CalendarDays className="h-4 w-4" /> Dados sincronizados da Diretoria {filtroDiretoria}
-          </div>
-        </div>
-
-        {/* KPIs (Now React to Deep Filters and act as reset buttons) */}
-        <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${filtroAno === "2026" ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
-          <Card className="border-l-4 border-l-indigo-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-indigo-50" onClick={() => setFiltroCategoria("todas")} title="Clique para resetar Categoria">
-            <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">
-                {filtroAno === "2026" ? "Orçamento Aprovado" : "Limite Orçamentário (Admin)"}
-              </CardDescription>
-              <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteTotal || 0)}</CardTitle>
-            </CardHeader>
-          </Card>
-          
-          {filtroAno === "2026" ? (
-             <>
-               <Card className="border-l-4 border-l-teal-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-teal-50" onClick={() => setFiltroCategoria("Aquisição")}>
-                 <CardHeader className="pb-2">
-                   <CardDescription className="font-medium text-slate-500">Orçamento Aquisição</CardDescription>
-                   <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteAquisicao || 0)}</CardTitle>
-                 </CardHeader>
-               </Card>
-               <Card className="border-l-4 border-l-blue-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-blue-50" onClick={() => setFiltroCategoria("Serviço Existente")}>
-                 <CardHeader className="pb-2">
-                   <CardDescription className="font-medium text-slate-500">Orçamento Serviços</CardDescription>
-                   <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(rawData.limiteServicosExistentes || 0)}</CardTitle>
-                 </CardHeader>
-               </Card>
-             </>
-          ) : (
-             <Card className="border-l-4 border-l-cyan-500 shadow-sm transition-all hover:shadow-md cursor-pointer hover:bg-cyan-50" onClick={() => setFiltroGerencia("todas")} title="Clique para resetar Gerência">
-               <CardHeader className="pb-2">
-                 <CardDescription className="font-medium text-slate-500">Orçamento Planejado (Soma Itens)</CardDescription>
-                 <CardTitle className="text-lg xl:text-xl font-bold text-slate-800 tracking-tight">{formatCurrency(totalPlanejado)}</CardTitle>
-               </CardHeader>
-             </Card>
-          )}
-          
-          <Card className={`border-l-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? 'border-l-emerald-500 hover:bg-emerald-50' : 'border-l-rose-500 hover:bg-rose-50'}`} onClick={() => { setFiltroSubcategoria("todas"); setCrossFilterSubcat(null); }} title="Clique para resetar Subcategoria">
-            <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-slate-500">{rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? "Saldo Disponível" : "Excedente Orçamentário"}</CardDescription>
-              <CardTitle className={`text-lg xl:text-xl font-bold tracking-tight ${rawData.limiteTotal - (filtroAno === "2026" ? totalExecutado : totalPlanejado) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {formatCurrency(Math.abs((rawData.limiteTotal || 0) - (filtroAno === "2026" ? totalExecutado : totalPlanejado)))}
-              </CardTitle>
-              {rawData.limiteTotal > 0 && <div className="text-xs text-slate-500 mt-1 font-medium">{Math.abs(((filtroAno === "2026" ? totalExecutado : totalPlanejado) / rawData.limiteTotal) * 100).toFixed(1)}% do limite consumido</div>}
-            </CardHeader>
-          </Card>
-
-          <Card className="border-l-4 border-l-amber-500 shadow-sm bg-gradient-to-br from-white to-amber-50 transition-all hover:shadow-md cursor-pointer" onClick={limparFiltros} title="Clique para resetar TODOS os filtros">
-            <CardHeader className="pb-2">
-              <CardDescription className="font-medium text-amber-800">Eficiência Geral</CardDescription>
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-3xl font-bold text-amber-600">{execucaoMedia}%</CardTitle>
-                <Progress value={execucaoMedia} className="h-2 w-full bg-amber-200 [&>div]:bg-amber-600" />
-              </div>
-            </CardHeader>
-          </Card>
-        </div>
-
-        {/* Novos KPIs de Operação (Adicionados) */}
-        {filtroAno === "2026" && (
-          <div className="flex flex-col gap-4 mt-4 mb-6">
-            {/* Primeira Linha: Métricas de Aquisição/Operação */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-teal-500">
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-[10px] font-bold text-teal-700 uppercase tracking-wider">VALOR TOTAL DE AQUISIÇÃO</CardDescription>
-                  <CardTitle className="text-xl font-bold text-teal-800">{formatCurrency(kpiRealizadoPrevisto)}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-blue-500">
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">VALOR TOTAL DE SERVIÇOS EXISTENTES</CardDescription>
-                  <CardTitle className="text-xl font-bold text-blue-800">{formatCurrency(kpiSomaItensServicos)}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="shadow-sm border-slate-200 bg-slate-100/50">
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">QTD. ORDENS DE COMPRA</CardDescription>
-                  <CardTitle className="text-xl font-bold text-slate-800">{kpiQtdOc}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="shadow-sm border-slate-200 bg-slate-100/50">
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">QTD. FORNECEDORES</CardDescription>
-                  <CardTitle className="text-xl font-bold text-slate-800">{kpiQtdFornecedores}</CardTitle>
-                </CardHeader>
-              </Card>
-            </div>
-
-            {/* Segunda Linha: Métricas de Previsibilidade */}
-            <div className="grid grid-cols-1 gap-4 w-1/3">
-              <Card className="shadow-sm border-slate-200 bg-slate-100/50 border-l-4 border-l-amber-500">
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">NÃO PREVISTO (ORÇADO)</CardDescription>
-                  <CardTitle className="text-xl font-bold text-amber-800">{formatCurrency(kpiNaoPrevistoPlanejado)}</CardTitle>
-                </CardHeader>
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {/* CHARTS AREA */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* COMPOSED CHART - PREVISTO vs REALIZADO */}
-          <Card className="col-span-1 lg:col-span-2 shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <Target className="h-5 w-5 text-indigo-500" />
-                Orçamento Planejado x Realizado Diário (Clique na barra para Filtrar Mês)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[350px]">
-               <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={dynamicEvolutionData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }} onClick={(e) => onComposedChartClick(e as any)}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000}k`} />
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
-                    <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                    {filtroAno === "2026" ? (
-                      <>
-                        <Bar dataKey="realizadoPrevisto" name="Realizado Previsto" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                        <Bar dataKey="naoPrevisto" name="Não Previsto" fill={COLORS[1]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                      </>
-                    ) : (
-                      <Bar dataKey="orcamentoExecutado" name="Realizado (Barra)" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                    )}
-                    <Line type="monotone" dataKey="orcamentoPlanejado" name="Orçamento Base (Linha)" stroke={COLORS[3]} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 8 }} className="cursor-pointer hover:opacity-80" />
-                  </ComposedChart>
-               </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* ORÇAMENTO AQUISIÇÃO vs REALIZADO (Apenas 2026) */}
-          {filtroAno === "2026" && (
-            <Card className="col-span-1 lg:col-span-3 shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-slate-700">
-                  <BarChart3 className="h-5 w-5 text-teal-500" />
-                  Orçamento Aquisição vs Realizado
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="h-[280px]">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="p-4 lg:col-span-2">
+              <h3 className="text-lg font-semibold text-slate-800 mb-4">Volume por Gerência</h3>
+              <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { name: "Orçamento Aquisição", valor: rawData.limiteAquisicao, fill: COLORS[3] },
-                    { name: "NF Aquisições", valor: kpiNfAquisicoes, fill: COLORS[0] }
-                  ]} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000}k`} />
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
-                    <Bar dataKey="valor" radius={[4, 4, 0, 0]}>
-                      {
-                        [
-                          { fill: COLORS[3] },
-                          { fill: COLORS[0] }
-                        ].map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.fill} />
-                        ))
-                      }
-                    </Bar>
+                  <BarChart data={chartDataGerencias} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
+                    <YAxis axisLine={false} tickLine={false} fontSize={12} />
+                    <RechartsTooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', color: '#64748b' }} />
+                    <Bar dataKey="Aquis. Aprov." stackId="a" fill="#3b82f6" />
+                    <Bar dataKey="Aquis. Pend." stackId="a" fill="#93c5fd" />
+                    <Bar dataKey="Serv. Exist. Aprov." stackId="a" fill="#4f46e5" />
+                    <Bar dataKey="Serv. Exist. Pend." stackId="a" fill="#a5b4fc" />
+                    <Bar dataKey="Serv. Novo Aprov." stackId="a" fill="#9333ea" />
+                    <Bar dataKey="Serv. Novo Pend." stackId="a" fill="#d8b4fe" radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          )}
-
-
-          {/* RADAR CHART - PERFORMANCE GERENCIAL */}
-          <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow flex flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <Activity className="h-5 w-5 text-rose-500" />
-                Performance Qualitativa
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex justify-center items-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData.length > 0 ? radarData.slice(0,3) : []}>
-                  <PolarGrid stroke="#e2e8f0" />
-                  <PolarAngleAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10 }} />
-                  <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                  <Radar name="Eficiência" dataKey="eficiencia" stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.4} />
-                  <Radar name="Agilidade" dataKey="agilidade" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.4} />
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: '10px' }} />
-                </RadarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* BAR CHART - CLUSTERIZADO (INTERATIVO) */}
-          <Card className="col-span-1 lg:col-span-2 shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <BarChart3 className="h-5 w-5 text-cyan-500" />
-                {visao === "gerencias" ? "Volume por Gerência (Clique para Filtrar Cruzado)" : "Volume Geral (Clique para Filtrar)"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dynamicGerenciaData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} onClick={(e) => e?.activePayload && onBarClick(e.activePayload[0].payload as any)}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `R$ ${val / 1000000}M`} />
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
-                  <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                  {visao === "diretoria" && filtroCategoria === "todas" ? (
-                    <>
-                      <Bar dataKey="aquisicoes" name="Aquisições" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                      <Bar dataKey="servicosNovos" name="Serviços Novos" fill={COLORS[1]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                      <Bar dataKey="servicosExistentes" name="Serv. Existentes" fill={COLORS[2]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                    </>
-                  ) : (
-                    <Bar dataKey={getChartDataKey()} name="Valor" fill={COLORS[0]} radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-80" />
-                  )}
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          </div>
-        
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {/* PIE CHART (INTERATIVO) */}
-            <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-slate-700">
-                  <PieChartIcon className="h-5 w-5 text-emerald-500" />
-                  Top Subcategorias
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="h-[300px] flex justify-center items-center">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart onClick={(e) => e && onPieClick(e as any)}>
-                    <Pie
-                      data={dynamicPieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={90}
-                      paddingAngle={5}
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      labelLine={false}
-                      className="cursor-pointer"
-                    >
-                      {dynamicPieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} opacity={entry.opacity} className="hover:opacity-80 transition-opacity" />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
+              </div>
             </Card>
 
-            {/* STATUS PIE CHART */}
-            <Card className="shadow-sm border-slate-200 hover:shadow-md transition-shadow">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-slate-700">
-                  <Activity className="h-5 w-5 text-blue-500" />
-                  Status de Execução
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="h-[300px] flex justify-center items-center">
+            <Card className="p-4 flex flex-col">
+              <h3 className="text-lg font-semibold text-slate-800 mb-2">Status Geral ({diretoria.sigla})</h3>
+              <div className="flex-1 min-h-[250px] relative">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={rawData.statusPieData}
+                      data={chartDataStatus}
                       cx="50%"
                       cy="50%"
-                      innerRadius={50}
-                      outerRadius={90}
-                      paddingAngle={5}
+                      innerRadius={65}
+                      outerRadius={85}
+                      paddingAngle={2}
                       dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      labelLine={false}
+                      stroke="#ffffff"
+                      strokeWidth={1}
                     >
-                      {rawData.statusPieData.map((entry, index) => (
-                        <Cell key={`status-cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} className="hover:opacity-80 transition-opacity" />
+                      {chartDataStatus.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <RechartsTooltip itemStyle={{ color: '#1e293b' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
                   </PieChart>
                 </ResponsiveContainer>
-              </CardContent>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none mt-[-20px]">
+                  <div className="text-center">
+                    <p className="text-3xl font-bold text-slate-800">
+                      {chartDataStatus.reduce((acc, curr) => acc + curr.value, 0)}
+                    </p>
+                    <p className="text-xs text-slate-500 uppercase font-medium">Total</p>
+                  </div>
+                </div>
+              </div>
             </Card>
           </div>
+        </TabsContent>
 
-        {/* MATRIZ DE DADOS (AGORA COM DEEP CROSS-FILTERING ON CLICK) */}
-        <Card className="shadow-sm border-slate-200 mb-12 overflow-hidden">
-          <CardHeader className="flex flex-row justify-between items-center bg-slate-50 border-b">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <TableIcon className="h-5 w-5 text-slate-500" />
-                Matriz Analítica Interativa (Clique na Linha)
-                {crossFilterGerencia && <Badge variant="destructive" className="ml-3 animate-pulse">{crossFilterGerencia.split(" - ")[0]}</Badge>}
-                {crossFilterSubcat && <Badge variant="secondary" className="ml-2 animate-pulse">{crossFilterSubcat}</Badge>}
-                {crossFilterMes && <Badge variant="outline" className="ml-2 animate-pulse bg-indigo-50">{crossFilterMes}</Badge>}
-              </CardTitle>
-              <CardDescription>
-                Exibindo {filteredMatrix.length} registros. Clique em qualquer linha para aplicar Filtro Cruzado no Dashboard inteiro.
-              </CardDescription>
+        <TabsContent value="solicitacoes" className="space-y-4">
+          <Card className="p-4 flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input 
+                placeholder="Buscar por ID ou Descrição..." 
+                className="pl-9"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
             </div>
-            <Button variant="outline" size="sm" onClick={handleExportExcel} className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50">
-              <FileText className="h-4 w-4" /> Exportar Visão Cruzada
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0">
-            {filteredMatrix.length === 0 ? (
-               <div className="p-12 text-center text-slate-500 flex flex-col items-center">
-                 <Filter className="h-10 w-10 text-slate-300 mb-3" />
-                 <p className="text-lg">Nenhum dado encontrado para a combinação atual.</p>
-                 <Button variant="link" onClick={limparFiltros} className="mt-2 text-indigo-600">Remover Filtros</Button>
-               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-100 text-slate-600 font-semibold border-b text-xs">
-                    <tr>
-                      <th className="px-4 py-3">Código / ID</th>
-                      <th className="px-4 py-3">Gerência</th>
-                      <th className="px-4 py-3">Subcategoria</th>
-                      <th className="px-4 py-3">Progresso de Execução (KPI)</th>
-                      <th className="px-4 py-3 text-right">Planejado</th>
-                      <th className="px-4 py-3 text-right">Executado</th>
-                      <th className="px-4 py-3 text-right">Variação Financeira</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {filteredMatrix.map((row, idx) => (
-                      <tr 
-                        key={idx} 
-                        onClick={() => onTableRowClick(row)}
-                        className={`transition-colors group cursor-pointer hover:shadow-inner ${
-                          crossFilterGerencia === row.gerencia || crossFilterSubcat === row.subcategoria 
-                            ? 'bg-amber-50/50 hover:bg-amber-100/50 border-l-2 border-l-amber-400' 
-                            : 'hover:bg-slate-100 border-l-2 border-l-transparent'
-                        }`}
-                        title="Clique na linha para aplicar Filtro Cruzado Global!"
-                      >
-                        <td className="px-4 py-3 font-mono text-slate-600 group-hover:text-indigo-600 transition-colors text-xs">{row.id}</td>
-                        <td className="px-4 py-3 font-medium text-xs" title={row.gerencia}>
-                          {row.gerencia.split(" - ")[0]}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <span className="font-medium text-slate-700 text-xs">{row.subcategoria}</span>
-                            <Badge variant="outline" className={`w-fit text-[10px] px-1 py-0 ${row.tipo === 'Aquisição' ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                              {row.tipo}
-                            </Badge>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1.5 w-[140px]">
-                            <div className="flex justify-between items-center text-xs">
-                               <span className={`font-medium ${row.progresso === 100 ? 'text-green-600' : row.progresso > 30 ? 'text-amber-600' : 'text-rose-600'}`}>
-                                 {row.status}
-                               </span>
-                               <span className="text-slate-500 font-mono">{row.progresso}%</span>
-                            </div>
-                            <Progress 
-                               value={row.progresso} 
-                               className={`h-2 ${row.progresso === 100 ? '[&>div]:bg-green-500 bg-green-100' : row.progresso > 30 ? '[&>div]:bg-amber-500 bg-amber-100' : '[&>div]:bg-rose-500 bg-rose-100'}`} 
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-500 text-xs">
-                          {formatCurrency(row.orcamentoPlanejado)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-800 text-xs">
-                          {formatCurrency(row.orcamentoExecutado)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold text-xs">
-                          <div className={`flex items-center justify-end gap-1 ${row.tendencia === "up" ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {row.tendencia === "up" ? (
-                              <span title="Estouro Orçamentário"><TrendingUp className="h-3 w-3" /></span>
-                            ) : (
-                              <span title="Economia Orçamentária"><TrendingUp className="h-3 w-3 rotate-180" /></span>
-                            )}
-                            {formatCurrency(Math.abs(row.variacao))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            <UISelect value={filterTipo} onValueChange={setFilterTipo}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os Tipos</SelectItem>
+                <SelectItem value="Aquisição">Aquisição</SelectItem>
+                <SelectItem value="Serviço Existente">Serviço Existente</SelectItem>
+                <SelectItem value="Serviço Novo">Serviço Novo</SelectItem>
+              </SelectContent>
+            </UISelect>
+            <UISelect value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os Status</SelectItem>
+                <SelectItem value="aprovado">Aprovados</SelectItem>
+                <SelectItem value="pendente">Pendentes</SelectItem>
+                <SelectItem value="reprovado">Reprovados</SelectItem>
+              </SelectContent>
+            </UISelect>
+          </Card>
 
-      </div>
+          <Card className="overflow-hidden">
+            <div className="overflow-auto max-h-[500px]">
+              <table className="w-full text-sm text-left relative">
+                <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-100 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('id')}>
+                      <div className="flex items-center gap-1">ID <SortIcon columnKey="id" /></div>
+                    </th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('tipo')}>
+                      <div className="flex items-center gap-1">Tipo <SortIcon columnKey="tipo" /></div>
+                    </th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('descricao')}>
+                      <div className="flex items-center gap-1">Descrição / Objeto <SortIcon columnKey="descricao" /></div>
+                    </th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('gerencia')}>
+                      <div className="flex items-center gap-1">Gerência <SortIcon columnKey="gerencia" /></div>
+                    </th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('status')}>
+                      <div className="flex items-center gap-1">Status <SortIcon columnKey="status" /></div>
+                    </th>
+                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('valor')}>
+                      <div className="flex items-center justify-end gap-1">Valor Est. <SortIcon columnKey="valor" /></div>
+                    </th>
+                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('percentual')}>
+                      <div className="flex items-center justify-end gap-1">% do Orç. <SortIcon columnKey="percentual" /></div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredList.map((item, i) => (
+                    <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-medium text-slate-700">{item.id}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={
+                          item.tipo === "Aquisição" ? "bg-blue-50 text-blue-700" :
+                          item.tipo === "Serviço Novo" ? "bg-purple-50 text-purple-700" :
+                          "bg-indigo-50 text-indigo-700"
+                        }>
+                          {item.tipo}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 truncate max-w-xs" title={item.descricao}>
+                        {item.descricao || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{item.gerencia}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.statusGroup === "aprovado" ? "bg-green-100 text-green-700" :
+                          item.statusGroup === "reprovado" ? "bg-red-100 text-red-700" :
+                          "bg-amber-100 text-amber-700"
+                        }`}>
+                          {item.status.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-700">
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valor)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, item.percentual)}%` }}></div>
+                          </div>
+                          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{item.percentual.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredList.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                        Nenhum item encontrado com os filtros atuais.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
-
 export default AdminDiretoriaDashboard;

@@ -549,6 +549,39 @@ export async function getServicosByPeriodo({
   return data;
 }
 
+export async function getSolicitacoesResumoByPeriodo({
+  periodoId,
+}: {
+  periodoId: string;
+}): Promise<any[]> {
+  const data = await fetchAllPages<any>((from, to) =>
+    supabase
+      .from("solicitacoes")
+      .select("id, status, gerencia_id, diretoria_id, valor_unitario, qtd_estimada, categoria, created_at")
+      .eq("periodo_id", periodoId)
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
+  );
+
+  return data;
+}
+
+export async function getServicosResumoByPeriodo({
+  periodoId,
+}: {
+  periodoId: string;
+}): Promise<any[]> {
+  const data = await fetchAllPages<any>((from, to) =>
+    supabase
+      .from("servicos")
+      .select("id, status, gerencia_id, diretoria_id, tipo_contratacao, estimativa_valor, categoria, created_at")
+      .eq("periodo_id", periodoId)
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
+  );
+
+  return data;
+}
+
+
 export async function getSolicitacoesCompras(
   periodoId: string
 ): Promise<unknown[]> {
@@ -1315,8 +1348,8 @@ export async function createSolicitacoesFromCatalogo(
   });
 
   const { data, error } = await supabase
-    .from("itens_catalogo")
-    .insert(itens_catalogo)
+    .from("solicitacoes")
+    .insert(solicitacoes)
     .select();
 
   if (error) throw error;
@@ -1784,38 +1817,6 @@ export async function deletarOrcamento(
   await registrarLogAtividade("CRIAR", "orcamento_global", "novo_orcamento", { acao: "criarOrcamento" });
 
   return data;
-}
-
-// ============ DADOS 2026 (EXCEL via Edge Function c/ Fallback) ============
-export async function getDadosExcel2026() {
-  try {
-    const { data, error } = await supabase.functions.invoke("get-excel-2026");
-    if (!error && data && !data.error) {
-      return {
-        previstoData: data.previstoData || [],
-        realizadoData: data.realizadoData || [],
-        orcamentoData: data.orcamentoData || []
-      };
-    }
-    console.warn("Edge Function falhou ou não foi implantada. Usando fallback no lado do cliente...");
-  } catch (err) {
-    console.warn("Erro ao invocar Edge Function, usando fallback no lado do cliente...", err);
-  }
-
-  // Fallback: faz o processamento no lado do cliente
-  const XLSX = await import("xlsx-js-style");
-  const res = await fetch("https://docs.google.com/spreadsheets/d/1seIaYVZ1D06jPZm9O7yzXbW8hi8tgV2OzBHguyNrfMY/export?format=xlsx");
-  if (!res.ok) throw new Error("Erro ao baixar planilha do Google Sheets (2026) via cliente");
-  
-  const blob = await res.blob();
-  const arrayBuffer = await blob.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  
-  const previstoData = workbook.Sheets['previsto'] ? XLSX.utils.sheet_to_json(workbook.Sheets['previsto']) : [];
-  const realizadoData = workbook.Sheets['realizado'] ? XLSX.utils.sheet_to_json(workbook.Sheets['realizado']) : [];
-  const orcamentoData = workbook.Sheets['orcamento'] ? XLSX.utils.sheet_to_json(workbook.Sheets['orcamento']) : [];
-  
-  return { previstoData, realizadoData, orcamentoData };
 }
 
 export async function getLogsAtividades() {

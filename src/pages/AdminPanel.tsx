@@ -23,6 +23,7 @@ import { AdminServicosControl } from "../components/features/admin/AdminServicos
 import { AdminLogsAtividades } from "../components/features/admin/AdminLogsAtividades.tsx";
 import { AdminLogsOrcamentarios } from "../components/features/admin/AdminLogsOrcamentarios.tsx";
 import { AdminImportCsv } from "../components/features/admin/AdminImportCsv.tsx";
+import { AdminVisaoGeral } from "../components/features/admin/AdminVisaoGeral.tsx";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -51,6 +52,7 @@ const AdminPanel = () => {
 
   const [activeTab, setActiveTab] = useState("periodos");
   const tabLabels: Record<string, string> = {
+    "visao-geral": "Visão Geral",
     periodos: "Períodos e Diretorias",
     orcamento: "Orçamentos",
     catalogo: "Aquisição",
@@ -227,6 +229,7 @@ const AdminPanel = () => {
         <div className="max-w-5xl mx-auto px-6 py-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="mb-5 flex flex-wrap h-auto gap-1">
+              <TabsTrigger value="visao-geral">Visão Geral</TabsTrigger>
               <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
               <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
               <TabsTrigger value="catalogo">Aquisição</TabsTrigger>
@@ -235,6 +238,10 @@ const AdminPanel = () => {
               <TabsTrigger value="logs">Logs de Atividades</TabsTrigger>
               <TabsTrigger value="logs-orcamentarios">Trilha Financeira</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="visao-geral">
+              <AdminVisaoGeral />
+            </TabsContent>
 
             <TabsContent value="periodos" className="space-y-6">
               <Card className="p-6 card-shadow">
@@ -421,49 +428,37 @@ const AdminPanel = () => {
                         <div 
                           className={`flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group ${expandedDir === dir.sigla ? 'ring-2 ring-primary border-primary' : ''}`}
                           onClick={() => setExpandedDir(expandedDir === dir.sigla ? null : dir.sigla)}
-                        >
-                          <span className="text-2xl group-hover:scale-110 transition-transform">📋</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
-                            <div className="flex gap-3 mt-2 text-xs font-medium">
-                              <span className="text-primary">{dir.totalItens} itens</span>
-                              <span className="text-blue-600">{dir.totalGerencias} gerências</span>
+                          >
+                            <span className="text-2xl group-hover:scale-110 transition-transform">📋</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs font-bold">{dir.sigla}</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground truncate mt-0.5">{dir.nome}</p>
+                              <div className="flex gap-3 mt-2 text-xs font-medium">
+                                <span className="text-primary">{dir.totalItens} itens</span>
+                                <span className="text-blue-600">{dir.totalGerencias} gerências</span>
+                              </div>
                             </div>
                           </div>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={(e) => { e.stopPropagation(); navigate(`/admin/diretoria/${dir.id}`); }}
-                            className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                          >
-                            Ir para Dashboard
-                          </Button>
-                        </div>
 
                         {expandedDir === dir.sigla && (
                           <div className="col-span-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-4 bg-slate-50/80 rounded-xl border border-slate-200 mt-2 animate-in fade-in slide-in-from-top-2">
                             <div className="col-span-full flex items-center justify-between mb-1">
                                <span className="text-sm font-semibold text-slate-700">
-                                 Selecione a Gerência (Visão Específica)
+                                 Gerências ({dir.sigla})
                                </span>
-                               <Button variant="link" size="sm" onClick={() => navigate(`/admin/diretoria/${dir.id}`)} className="text-xs text-indigo-600">
-                                 Acessar Visão Geral ({dir.sigla})
-                               </Button>
                             </div>
                             {(DIRETORIA_GERENCIAS[dir.sigla] || ["Geral"]).map(ger => (
                               <div 
                                 key={ger} 
-                                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border bg-white shadow-sm hover:shadow-md hover:border-indigo-400 transition-all cursor-pointer group text-center"
-                                onClick={() => navigate(`/admin/diretoria/${dir.id}?gerencia=${encodeURIComponent(ger)}`)}
+                                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border bg-white shadow-sm transition-all text-center"
                               >
-                                <Badge variant="outline" className="text-indigo-700 bg-indigo-50 border-indigo-200 text-sm font-bold group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                <Badge variant="outline" className="text-indigo-700 bg-indigo-50 border-indigo-200 text-sm font-bold transition-colors">
                                   {ger.split(" - ")[0]}
                                 </Badge>
-                                <span className="text-xs text-slate-500 font-medium line-clamp-2">
-                                  {ger.split(" - ")[1] || ger}
+                                <span className="text-[10px] text-slate-500 line-clamp-2">
+                                  {ger.includes(" - ") ? ger.split(" - ")[1] : "Gerência Geral"}
                                 </span>
                               </div>
                             ))}
