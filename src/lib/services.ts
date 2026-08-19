@@ -1408,7 +1408,9 @@ function mapServicoItemToDb(item: any): any {
   if (item.justificativa !== undefined) dbRow.justificativa = item.justificativa;
   
   const previsaoInicio = item.previsao_inicio ?? item.previsaoInicio;
-  if (previsaoInicio !== undefined) dbRow.previsao_inicio = previsaoInicio;
+  if (previsaoInicio !== undefined) {
+    dbRow.previsao_inicio = previsaoInicio === "" ? null : previsaoInicio;
+  }
   
   const estimativaValor = item.estimativa_valor ?? item.estimativaValor;
   if (estimativaValor !== undefined) dbRow.estimativa_valor = estimativaValor;

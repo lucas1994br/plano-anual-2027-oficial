@@ -11,6 +11,7 @@ import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Ge
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
 import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
+import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/ItemEditDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SummaryCards } from "@/components/common/SummaryCards";
 import { PlanFilters } from "@/components/forms/PlanFilters";
@@ -758,7 +759,8 @@ const DiretoriaAprovacao = () => {
         (s.objeto || "").toLowerCase().includes(term) ||
         (s.justificativa || "").toLowerCase().includes(term) ||
         String(s.item).toLowerCase().includes(term) ||
-        (s.contrato && s.contrato.toLowerCase().includes(term))
+        (s.contrato && s.contrato.toLowerCase().includes(term)) ||
+        (s.contratada && s.contratada.toLowerCase().includes(term))
       );
     }
     
@@ -1110,20 +1112,9 @@ const DiretoriaAprovacao = () => {
     setSolicitacaoEditOpen(true);
   };
 
-  const handleSaveSolicitacaoEdicao = async () => {
-    if (!solicitacaoEdicao?.codigo) return;
-
-    const updates: Partial<PlanItem> = {
-      descricao: solicitacaoEdicao.descricao,
-      categoria: solicitacaoEdicao.categoria,
-      unidade: solicitacaoEdicao.unidade,
-      qtdEstimada: solicitacaoEdicao.qtdEstimada,
-      prioridade: solicitacaoEdicao.prioridade,
-      observacao: solicitacaoEdicao.observacao,
-    };
-
+  const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
     try {
-      await ensureSolicitacaoDiretoria(solicitacaoEdicao.codigo, updates);
+      await ensureSolicitacaoDiretoria(codigo, updates);
       setSolicitacaoEditOpen(false);
       setSolicitacaoEdicao(null);
       toast({ title: "Solicitação atualizada", description: "Dados atualizados com sucesso." });
@@ -1657,7 +1648,7 @@ const DiretoriaAprovacao = () => {
   };
 
   const isServicoReadOnly = (servico: ServicoItem) =>
-    servico.status === "rejeitado" || servico.status === "em_compra" || servico.status === "concluido";
+    servico.status === "em_compra" || servico.status === "concluido";
 
   const handleUpdateServicoGrauPrioridade = async (servico: ServicoItem, grauPrioridade: GrauPrioridade) => {
     if (isServicoReadOnly(servico)) return;
@@ -2357,7 +2348,7 @@ const DiretoriaAprovacao = () => {
                 <div className="relative flex-1 max-w-md w-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Pesquisar por código, descrição e contrato"
+                    placeholder="Pesquisar por código, descrição, contrato e contratada"
                     value={ownServicosSearchTerm}
                     onChange={(e) => {
                       setOwnServicosSearchTerm(e.target.value);
@@ -3007,133 +2998,20 @@ const DiretoriaAprovacao = () => {
               </DialogContent>
             </Dialog>
 
-            {/* Editor de Serviço Individual */}
-            <Dialog open={servicoEditOpen} onOpenChange={(open) => !open && setServicoEditOpen(false)}>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>Editar Serviço</DialogTitle>
-                </DialogHeader>
-                {servicoEdicao && (
-                  <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
-                    <div>
-                      <label className="text-sm font-medium">Objeto <span className="text-destructive">*</span></label>
-                      <textarea
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                        value={servicoEdicao.objeto || ""}
-                        onChange={(e) => setServicoEdicao({ ...servicoEdicao, objeto: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Justificativa <span className="text-destructive">*</span></label>
-                      <textarea
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                        value={servicoEdicao.justificativa || ""}
-                        onChange={(e) => setServicoEdicao({ ...servicoEdicao, justificativa: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Contrato</label>
-                      <input
-                        type="text"
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        value={servicoEdicao.contrato || ""}
-                        onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: formatContratoMask(e.target.value) })}
-                        placeholder="Ex: 028/2021"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium">Tipo de Contratação</label>
-                        <select
-                          value={servicoEdicao.tipoContratacao || "Contínuo"}
-                          onChange={(e) => setServicoEdicao({ ...servicoEdicao, tipoContratacao: e.target.value })}
-                          className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                        >
-                          <option value="Contínuo">Contínuo</option>
-                          <option value="Renovação">Renovação</option>
-                          <option value="Outros">Outros</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium">Grau de Prioridade</label>
-                        <Select
-                          value={servicoEdicao.grauPrioridade || "Baixo"}
-                          onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, grauPrioridade: v })}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Baixo">Baixo</SelectItem>
-                            <SelectItem value="Médio">Médio</SelectItem>
-                            <SelectItem value="Alto">Alto</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium">Estimativa de Valor (R$) <span className="text-destructive">*</span></label>
-                        <CurrencyInput
-                          className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                          value={servicoEdicao.estimativaValor?.toString() || ""}
-                          onChange={(e) => setServicoEdicao({ ...servicoEdicao, estimativaValor: parseFloat(e.target.value) || 0 })}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium">Vinculação</label>
-                        <Select
-                          value={servicoEdicao.vinculacao || "Não"}
-                          onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, vinculacao: v })}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Sim">Sim</SelectItem>
-                            <SelectItem value="Não">Não</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Descrição da Vinculação</label>
-                      <textarea
-                        className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                        value={servicoEdicao.dependenciaDescricao || ""}
-                        onChange={(e) => setServicoEdicao({ ...servicoEdicao, dependenciaDescricao: e.target.value })}
-                        disabled={servicoEdicao.vinculacao !== "Sim"}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium">Diretoria <span className="text-destructive">*</span></label>
-                        <input
-                          type="text"
-                          value={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : ""}
-                          disabled
-                          className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium">Unid. Demandante <span className="text-destructive">*</span></label>
-                        <input
-                          type="text"
-                          value={servicoEdicao.gerencia || servicoEdicao.unidadeDemandante || siglaUpper || ""}
-                          disabled
-                          className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setServicoEditOpen(false)}>Cancelar</Button>
-                  <Button onClick={handleSaveServicoEdicao}>Salvar Alterações</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
 
+          <ServicoEditDialog
+            open={servicoEditOpen}
+            onOpenChange={setServicoEditOpen}
+            servico={servicoEdicao}
+            onSave={async (item, updates) => {
+              await ensureServicoDiretoria(item as number, updates);
+              setServicoEditOpen(false);
+              setServicoEdicao(null);
+              toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+            }}
+            diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
+          />
+          
           </div>
         </div>
       );
@@ -4135,204 +4013,45 @@ const DiretoriaAprovacao = () => {
         isUpdating={isBulkUpdating} 
       />
 
-      {/* Editor de Serviço Individual */}
-      <Dialog open={servicoEditOpen} onOpenChange={(open) => !open && setServicoEditOpen(false)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Editar Serviço</DialogTitle>
-          </DialogHeader>
-          {servicoEdicao && (
-            <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="text-sm font-medium">Objeto <span className="text-destructive">*</span></label>
-                <textarea
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                  value={servicoEdicao.objeto || ""}
-                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, objeto: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Justificativa <span className="text-destructive">*</span></label>
-                <textarea
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                  value={servicoEdicao.justificativa || ""}
-                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, justificativa: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Contrato</label>
-                  <input
-                    type="text"
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                    value={servicoEdicao.contrato || ""}
-                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, contrato: formatContratoMask(e.target.value) })}
-                    placeholder="Ex: 028/2021"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Contratada</label>
-                  <input
-                    type="text"
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                    value={servicoEdicao.contratada || ""}
-                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, contratada: e.target.value })}
-                    placeholder="Nome da empresa contratada"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Tipo de Contratação</label>
-                  <select
-                    value={servicoEdicao.tipoContratacao || "Contínuo"}
-                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, tipoContratacao: e.target.value })}
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                  >
-                    <option value="Contínuo">Contínuo</option>
-                    <option value="Renovação">Renovação</option>
-                    <option value="Outros">Outros</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Grau de Prioridade</label>
-                  <Select
-                    value={servicoEdicao.grauPrioridade || "Baixo"}
-                    onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, grauPrioridade: v })}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Baixo">Baixo</SelectItem>
-                      <SelectItem value="Médio">Médio</SelectItem>
-                      <SelectItem value="Alto">Alto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Estimativa de Valor (R$) <span className="text-destructive">*</span></label>
-                  <CurrencyInput
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                    value={servicoEdicao.estimativaValor?.toString() || ""}
-                    onChange={(e) => setServicoEdicao({ ...servicoEdicao, estimativaValor: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Vinculação</label>
-                  <Select
-                    value={servicoEdicao.vinculacao || "Não"}
-                    onValueChange={(v: any) => setServicoEdicao({ ...servicoEdicao, vinculacao: v })}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sim">Sim</SelectItem>
-                      <SelectItem value="Não">Não</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Descrição da Vinculação</label>
-                <textarea
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                  value={servicoEdicao.dependenciaDescricao || ""}
-                  onChange={(e) => setServicoEdicao({ ...servicoEdicao, dependenciaDescricao: e.target.value })}
-                  disabled={servicoEdicao.vinculacao !== "Sim"}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Diretoria <span className="text-destructive">*</span></label>
-                  <input
-                    type="text"
-                    value={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : ""}
-                    disabled
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Unid. Demandante <span className="text-destructive">*</span></label>
-                  <input
-                    type="text"
-                    value={servicoEdicao.gerencia || servicoEdicao.unidadeDemandante || siglaUpper || ""}
-                    disabled
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-muted text-muted-foreground cursor-not-allowed"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setServicoEditOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveServicoEdicao}>Salvar Alterações</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ServicoEditDialog
+        open={servicoEditOpen}
+        onOpenChange={setServicoEditOpen}
+        servico={servicoEdicao}
+        onSave={async (item, updates) => {
+          if (!servicoEdicao?.id) return;
+          try {
+            await updateServicosBulkData([servicoEdicao.id], updates);
+            setServicoEditOpen(false);
+            setServicoEdicao(null);
+            queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
+            toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+          } catch (error) {
+            console.error("Erro ao atualizar serviço:", error);
+            toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
+          }
+        }}
+        diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
+      />
 
-      {/* Editor de Solicitação de Aquisição Individual */}
-      <Dialog open={solicitacaoEditOpen} onOpenChange={(open) => !open && setSolicitacaoEditOpen(false)}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Editar Solicitação de Aquisição</DialogTitle>
-          </DialogHeader>
-          {solicitacaoEdicao && (
-            <div className="grid gap-4 py-4">
-              <div>
-                <label className="text-sm font-medium">Descrição</label>
-                <textarea
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                  value={solicitacaoEdicao.descricao}
-                  disabled
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Quantidade Estimada</label>
-                  <input
-                    type="number"
-                    className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background"
-                    value={solicitacaoEdicao.qtdEstimada}
-                    onChange={(e) => setSolicitacaoEdicao({ ...solicitacaoEdicao, qtdEstimada: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Prioridade</label>
-                  <Select
-                    value={solicitacaoEdicao.prioridade}
-                    onValueChange={(v: any) => setSolicitacaoEdicao({ ...solicitacaoEdicao, prioridade: v })}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Baixa">Baixa</SelectItem>
-                      <SelectItem value="Média">Média</SelectItem>
-                      <SelectItem value="Alta">Alta</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Observação</label>
-                <textarea
-                  className="w-full mt-1 text-sm border rounded px-3 py-2 bg-background min-h-[60px]"
-                  value={solicitacaoEdicao.observacao || ""}
-                  onChange={(e) => setSolicitacaoEdicao({ ...solicitacaoEdicao, observacao: e.target.value })}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSolicitacaoEditOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveSolicitacaoEdicao}>Salvar Alterações</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AquisicaoEditDialog
+        open={solicitacaoEditOpen}
+        onOpenChange={setSolicitacaoEditOpen}
+        aquisicao={solicitacaoEdicao}
+        onSave={async (codigo, updates) => {
+          if (!solicitacaoEdicao?.id) return;
+          try {
+            await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+            setSolicitacaoEditOpen(false);
+            setSolicitacaoEdicao(null);
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", diretoria?.id, periodAtivo?.id] });
+            toast({ title: "Aquisição atualizada", description: "Informações salvas." });
+          } catch (error) {
+            console.error("Erro ao atualizar aquisição:", error);
+            toast({ title: "Erro ao atualizar", description: "Falha ao salvar aquisição.", variant: "destructive" });
+          }
+        }}
+      />
     </div>
     </div>
   );

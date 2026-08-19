@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
+import { CurrencyInput } from "@/components/ui/currency-input.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import {
   Pagination,
@@ -38,6 +40,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs.tsx";
+import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/ItemEditDialogs.tsx";
 import { useToast } from "@/hooks/use-toast.ts";
 import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
@@ -63,6 +66,10 @@ const ComprasPanel = () => {
   
   // Single item editing logic
   const [singleEditId, setSingleEditId] = useState<string | null>(null);
+  const [servicoEditOpen, setServicoEditOpen] = useState(false);
+  const [servicoEdicao, setServicoEdicao] = useState<ServicoItem | null>(null);
+  const [solicitacaoEditOpen, setSolicitacaoEditOpen] = useState(false);
+  const [solicitacaoEdicao, setSolicitacaoEdicao] = useState<PlanItem | null>(null);
 
   // Buscar diretorias
   const { data: diretorias = [], isLoading: loadingDir } = useQuery({
@@ -180,7 +187,8 @@ const ComprasPanel = () => {
         servico.objeto.toLowerCase().includes(termo) ||
         (servico.justificativa || "").toLowerCase().includes(termo) ||
         String(servico.item).toLowerCase().includes(termo) ||
-        (servico.contrato && servico.contrato.toLowerCase().includes(termo));
+        (servico.contrato && servico.contrato.toLowerCase().includes(termo)) ||
+        (servico.contratada && servico.contratada.toLowerCase().includes(termo));
 
       return matchesDiretoria && matchesSearch;
     });
@@ -208,6 +216,59 @@ const ComprasPanel = () => {
 
   const getSelectedAquisicaoDbIds = () => {
     return Array.from(selectedItems) as string[];
+  };
+
+  const openSolicitacaoEditor = (item: PlanItem) => {
+    setSolicitacaoEdicao(item);
+    setSolicitacaoEditOpen(true);
+  };
+
+  const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
+    if (!solicitacaoEdicao?.id) return;
+    try {
+      await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+      setSolicitacaoEditOpen(false);
+      setSolicitacaoEdicao(null);
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras"] });
+      toast({ title: "Solicitação atualizada", description: "Dados atualizados com sucesso." });
+    } catch (error) {
+      console.error("Erro ao atualizar solicitação:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+    }
+  };
+
+  const openServicoEditor = (servico: ServicoItem) => {
+    setServicoEdicao(servico);
+    setServicoEditOpen(true);
+  };
+
+  const handleSaveServicoEdicao = async () => {
+    if (!servicoEdicao?.id) return;
+
+    const updates: Partial<ServicoItem> = {
+      objeto: servicoEdicao.objeto,
+      justificativa: servicoEdicao.justificativa,
+      observacao: servicoEdicao.observacao,
+      estimativaValor: servicoEdicao.estimativaValor,
+      dotacaoOrcamentaria: servicoEdicao.dotacaoOrcamentaria,
+      grauPrioridade: servicoEdicao.grauPrioridade,
+      vinculacao: servicoEdicao.vinculacao,
+      dependenciaDescricao: servicoEdicao.dependenciaDescricao,
+      contrato: servicoEdicao.contrato,
+      contratada: servicoEdicao.contratada,
+      tipoContratacao: servicoEdicao.tipoContratacao,
+    };
+
+    try {
+      await updateServicosBulkData([servicoEdicao.id], updates);
+      setServicoEditOpen(false);
+      setServicoEdicao(null);
+      queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
+      toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+    } catch (error) {
+      console.error("Erro ao atualizar serviço:", error);
+      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+    }
   };
 
   const handleBulkEditAquisicao = async (updates: any) => {
@@ -829,7 +890,7 @@ const ComprasPanel = () => {
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <Input
                     type="text"
-                    placeholder="Pesquisar por código, descrição e contrato"
+                    placeholder="Pesquisar por código, descrição, contrato e contratada"
                     className="pl-9 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm h-10"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -1020,7 +1081,7 @@ const ComprasPanel = () => {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1 transition-opacity">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => { setSingleEditId(servico.id!); setBulkEditServicosOpen(true); }} title="Editar">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => openServicoEditor(servico)} title="Editar">
                               <Pencil className="h-3 w-3" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverServicos(servico.id)} title="Devolver Rascunho">
@@ -1088,6 +1149,21 @@ const ComprasPanel = () => {
                 </div>
               </div>
             )}
+            
+            <ServicoEditDialog
+              open={servicoEditOpen}
+              onOpenChange={setServicoEditOpen}
+              servico={servicoEdicao}
+              onSave={async (item, updates) => {
+                if (!servicoEdicao?.id) return;
+                await updateServicosBulkData([servicoEdicao.id], updates);
+                setServicoEditOpen(false);
+                setServicoEdicao(null);
+                queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
+                toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+              }}
+            />
+            
           </div>
         </div>
       </div>
@@ -1379,7 +1455,7 @@ const ComprasPanel = () => {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => { setSingleEditId(item.id!); setBulkEditAquisicaoOpen(true); }} title="Editar">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:bg-primary/10" onClick={() => openSolicitacaoEditor(item)} title="Editar">
                           <Pencil className="h-3 w-3" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-600 hover:bg-orange-50" onClick={() => handleBulkDevolverAquisicao(item.id!)} title="Devolver Rascunho">
@@ -1471,6 +1547,44 @@ const ComprasPanel = () => {
         selectedCount={singleEditId ? 1 : selectedServicos.size} 
         onConfirm={handleBulkEditServicos} 
         isUpdating={isBulkUpdating} 
+      />
+
+      <ServicoEditDialog
+        open={servicoEditOpen}
+        onOpenChange={setServicoEditOpen}
+        servico={servicoEdicao}
+        onSave={async (item, updates) => {
+          if (!servicoEdicao?.id) return;
+          try {
+            await updateServicosBulkData([servicoEdicao.id], updates);
+            setServicoEditOpen(false);
+            setServicoEdicao(null);
+            queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
+            toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+          } catch (error) {
+            console.error("Erro ao atualizar serviço:", error);
+            toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
+          }
+        }}
+      />
+
+      <AquisicaoEditDialog
+        open={solicitacaoEditOpen}
+        onOpenChange={setSolicitacaoEditOpen}
+        aquisicao={solicitacaoEdicao}
+        onSave={async (codigo, updates) => {
+          if (!solicitacaoEdicao?.id) return;
+          try {
+            await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+            setSolicitacaoEditOpen(false);
+            setSolicitacaoEdicao(null);
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras"] });
+            toast({ title: "Aquisição atualizada", description: "Informações salvas." });
+          } catch (error) {
+            console.error("Erro ao atualizar aquisição:", error);
+            toast({ title: "Erro ao atualizar", description: "Falha ao salvar aquisição.", variant: "destructive" });
+          }
+        }}
       />
     </div>
   );

@@ -246,6 +246,7 @@ export function AdminServicosControl() {
       String(servico.item).toLowerCase().includes(term) ||
       servico.objeto.toLowerCase().includes(term) ||
       (servico.contrato && servico.contrato.toLowerCase().includes(term)) ||
+      (servico.contratada && servico.contratada.toLowerCase().includes(term)) ||
       servico.tipo_contratacao.toLowerCase().includes(term)
     );
   }, [servicos, searchTerm]);
@@ -638,7 +639,7 @@ export function AdminServicosControl() {
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Pesquisar por código, descrição e contrato"
+                placeholder="Pesquisar por código, descrição, contrato e contratada"
                 className="pl-8"
                 value={searchTerm}
                 onChange={(e) => {
