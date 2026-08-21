@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/table.tsx";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen.tsx";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade } from "@/types/plan.ts";
-import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, updateSolicitacaoStatusBulk, updateServicoStatusBulk, updateSolicitacoesBulkData, updateServicosBulkData, deleteSolicitacoesBulk, deleteServicosBulk, deleteSolicitacao, deleteServico, updateSolicitacao, updateServico } from "@/lib/services.ts";
+import { getDiretorias, getPeriodosAtivos, getSolicitacoesCompras, getServicosCompras, getServicosCatalogo, updateSolicitacaoStatusBulk, updateServicoStatusBulk, updateSolicitacoesBulkData, updateServicosBulkData, deleteSolicitacoesBulk, deleteServicosBulk, deleteSolicitacao, deleteServico, updateSolicitacao, updateServico } from "@/lib/services.ts";
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade.ts";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import jsPDF from "jspdf";
@@ -96,6 +96,12 @@ const ComprasPanel = () => {
     enabled: !!periodAtivo,
   });
 
+  const { data: servicosCatalogoData = [] } = useQuery<any[]>({
+    queryKey: ["servicos-catalogo"],
+    queryFn: () => getServicosCatalogo(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const isLoading = loadingDir || loadingPer || (!!periodAtivo && (loadingSol || loadingSer));
 
   const queryClient = useQueryClient();
@@ -103,6 +109,16 @@ const ComprasPanel = () => {
     const entries = diretorias.map((dir: any) => [dir.id, dir.sigla]);
     return new Map<string, string>(entries as any);
   }, [diretorias]);
+
+  const servicosCatalogoSet = useMemo(() => {
+    return new Set((servicosCatalogoData as any[]).map((c: any) => Number(c.item)));
+  }, [servicosCatalogoData]);
+
+  const getContratadaFallback = (contrato: string | undefined | null) => {
+    if (!contrato) return null;
+    const found = (servicosCatalogoData as any[]).find(c => c.contrato === contrato && c.contratada);
+    return found ? found.contratada : null;
+  };
 
   const allApprovedItems: PlanItem[] = useMemo(() => solicitacoesCompras.map((s: any) => ({
     id: s.id,
@@ -138,10 +154,22 @@ const ComprasPanel = () => {
     status: s.status as SolicitacaoStatus,
     observacao: s.observacao,
     contrato: s.contrato,
+    contratada: s.contratada || getContratadaFallback(s.contrato),
   });
 
-  const allServicosNovos: ServicoItem[] = useMemo(() => servicosCompras.filter((s: any) => s.tipo_contratacao === "Novo").map(mapServico), [servicosCompras, diretoriasById]);
-  const allServicosCatalogo: ServicoItem[] = useMemo(() => servicosCompras.filter((s: any) => s.tipo_contratacao !== "Novo").map(mapServico), [servicosCompras, diretoriasById]);
+  const isNovoServico = (s: any) => {
+    const itemNum = Number(s.item);
+    return !servicosCatalogoSet.has(itemNum) || itemNum >= 9000000 || s.tipo_contratacao === "Novo";
+  };
+
+  const allServicosNovos: ServicoItem[] = useMemo(
+    () => servicosCompras.filter(isNovoServico).map(mapServico),
+    [servicosCompras, diretoriasById, servicosCatalogoSet]
+  );
+  const allServicosCatalogo: ServicoItem[] = useMemo(
+    () => servicosCompras.filter((s: any) => !isNovoServico(s)).map(mapServico),
+    [servicosCompras, diretoriasById, servicosCatalogoSet]
+  );
 
   const normalizeFilterValue = (value?: string | null) =>
     (value || "").trim().toUpperCase();
@@ -580,6 +608,10 @@ const ComprasPanel = () => {
         servico.estimativaValor || 0,
       ]);
     });
+
+    const totalValor = filteredServicos.reduce((acc, s) => acc + (s.estimativaValor || 0), 0);
+    wsData.push([]);
+    wsData.push(["TOTAL:", "", "", "", "", "", "", totalValor]);
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     ws["!cols"] = [{ wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 18 }];
@@ -1020,7 +1052,7 @@ const ComprasPanel = () => {
                 <TableBody>
                   {filteredServicos.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-12 text-slate-500">
+                      <TableCell colSpan={12} className="text-center py-12 text-slate-500">
                         <div className="flex flex-col items-center">
                           <Search className="h-10 w-10 text-slate-300 mb-3" />
                           <p className="text-lg">Nenhum serviço encontrado com a configuração atual.</p>

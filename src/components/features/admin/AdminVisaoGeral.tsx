@@ -219,7 +219,7 @@ export const AdminVisaoGeral = () => {
     // 3. Process Servicos
     servicosFiltrados.forEach(srv => {
       const statusGroup = categorizeStatus(srv.status);
-      const isNovo = (srv.tipoContratacao || srv.tipo_contratacao) === "Novo";
+      const isNovo = (srv.tipoContratacao || srv.tipo_contratacao) === "Novo" || Number(srv.item) >= 9000000;
       const val = Number(srv.estimativa_valor) || 0;
       
       if (isNovo) {

@@ -64,7 +64,7 @@ serve(async (req: Request) => {
         .select("id, scope, ativo, expira_em")
         .eq("scope", "admin")
         .eq("ativo", true)
-        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash},codigo_hash.ilike.${accessCode}`)
         .limit(1);
 
       accessRow = accessRows && accessRows.length > 0 ? accessRows[0] : null;
@@ -93,12 +93,18 @@ serve(async (req: Request) => {
     // Como as solicitações dependem de itens_catalogo via Foreign Key, deletar pode causar erro 
     // se o ON DELETE não for CASCADE. Se tiver restrição, podemos capturar e avisar que o item está em uso.
     
-    // CORREÇÃO: Vamos deletar primeiro as solicitações dependentes deste item
-    const { error: solError } = await supabase
+    // Deletar dependências das solicitações vinculadas a este item
+    const { data: sols } = await supabase
       .from("solicitacoes")
-      .delete()
+      .select("id")
       .eq("item_id", itemId);
-    if (solError) console.warn("Erro ao deletar solicitacoes vinculadas:", solError);
+
+    if (sols && sols.length > 0) {
+      const solIds = sols.map((s: { id: string }) => s.id);
+      await supabase.from("aprovacao").delete().in("referencia_id", solIds);
+      await supabase.from("solicitacao_historico").delete().in("solicitacao_id", solIds);
+      await supabase.from("solicitacoes").delete().in("id", solIds);
+    }
 
     const { data: itemData, error: itemError } = await supabase
       .from("itens_catalogo")

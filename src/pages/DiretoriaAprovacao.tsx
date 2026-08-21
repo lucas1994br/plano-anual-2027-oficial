@@ -335,12 +335,14 @@ const DiretoriaAprovacao = () => {
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
       .map((s: any) => {
-        const mappedCategory = materialDescriptions[String(s.codigo)];
+        const codigo = Number(s.codigo || s.item?.codigo || 0);
+        const descricao = s.descricao || s.item?.descricao || "";
+        const mappedCategory = materialDescriptions[String(codigo)];
         const categoriaItem = mappedCategory
           ? mappedCategory
           : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
             ? s.categoria
-            : "diversos";
+            : (s.item?.categoria || "diversos");
         const trueRequesterDiretoriaId = globalGerenciaMap[s.gerencia_id]?.diretoria_id || s.diretoria_id;
         
         const diretoriaOrcamentariaIdRaw = getBudgetOwnerDiretoriaId(
@@ -355,32 +357,28 @@ const DiretoriaAprovacao = () => {
           : trueRequesterDiretoriaId;
         const diretoriaSolicitante = diretoriaMap[trueRequesterDiretoriaId];
         const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
-        const codigo = Number(s.codigo);
 
         return {
           id: s.id,
           codigo,
-          descricao: s.descricao,
+          descricao,
           categoria: categoriaItem,
-          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || "N/A",
+          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || s.gerencia || "N/A",
           prioridade: s.prioridade || "Média",
-          qtdEstimada: Number(s.qtd_estimada || 0),
-          unidade: s.unidade || "un",
-          valorUnitario: s.valor_unitario || 0,
+          qtdEstimada: Number(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0)),
+          unidade: s.unidade || s.item?.unidade || "un",
+          valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0),
           observacao: s.observacao || "",
           status: s.status as SolicitacaoStatus,
-          justificativaRejeicao: s.justificativa_rejeicao || "",
+          justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
           diretoriaSigla: diretoriaSolicitante?.sigla,
           diretoriaOrcamentariaId,
           diretoriaOrcamentariaSigla: diretoriaOrcamentaria?.sigla || diretoriaSolicitante?.sigla,
           isOrcamentoCompartilhado: diretoriaSolicitante?.id !== diretoriaOrcamentariaId,
           gerencia_id: s.gerencia_id,
         };
-      })
-      // Não filtramos por diretoriaOrcamentariaId aqui — todos os itens da diretoria
-      // devem aparecer no painel de aprovação, independentemente de regras de roteamento.
-      ;
-  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
+      });
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {
@@ -397,17 +395,18 @@ const DiretoriaAprovacao = () => {
     const latestByCodigo = new Map<number, PlanItem>();
 
     solicitacoesRascunho.forEach((s: any) => {
-      const codigo = Number(s.codigo);
+      const codigo = Number(s.codigo || s.item?.codigo || 0);
+      const descricao = s.descricao || s.item?.descricao || "";
       latestByCodigo.set(codigo, {
         id: s.id,
         codigo,
-        descricao: s.descricao,
-        categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0) ? s.categoria : "diversos",
-        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || "N/A",
+        descricao,
+        categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0) ? s.categoria : (s.item?.categoria || "diversos"),
+        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || s.gerencia || "N/A",
         prioridade: s.prioridade || "Média",
-        qtdEstimada: Number(s.qtd_estimada || 0),
-        unidade: s.unidade || "un",
-        valorUnitario: s.valor_unitario || 0,
+        qtdEstimada: Number(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0)),
+        unidade: s.unidade || s.item?.unidade || "un",
+        valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0),
         observacao: s.observacao || "",
         status: s.status as SolicitacaoStatus,
         justificativaRejeicao: "",
@@ -639,51 +638,30 @@ const DiretoriaAprovacao = () => {
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
   const gastoAquisicaoDiretoria = useMemo(
-    () => [...items, ...itensProprios].reduce((acc, item) => {
-      const isSelected = item.id ? (selectedItems.has(item.id) || selectedOwnItems.has(item.id)) : (item.codigo ? selectedOwnItems.has(item.codigo) : false);
-      const isApproved = item.status === "aprovado";
-      if (isSelected || isApproved) {
-        return acc + item.qtdEstimada * item.valorUnitario;
-      }
-      return acc;
-    }, 0),
-    [items, itensProprios, selectedItems, selectedOwnItems],
+    () =>
+      [...items, ...itensProprios]
+        .filter((item) => item.status !== "rejeitado" && item.qtdEstimada > 0)
+        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+    [items, itensProprios],
   );
-  const gastoServicosDiretoria = useMemo(() => {
-    const catalogSelected = Array.from(selectedServicos)
-      .filter(id => !String(id).includes("-"))
-      .map(itemCode => {
-        const catItem = (servicosCatalogoData as any[]).find(c => String(c.item) === String(itemCode));
-        if (!catItem) return null;
-        return {
-          id: undefined,
-          item: catItem.item,
-          estimativaValor: catItem.estimativa_valor || 0,
-          dotacaoOrcamentaria: catItem.dotacao_orcamentaria || 0,
-          status: "rascunho"
-        } as unknown as ServicoItem;
-      })
-      .filter(Boolean) as ServicoItem[];
 
-    let list = [...servicosData, ...catalogSelected];
-    
-    if (selectedOption === "servicos_novos") {
-      list = list.filter((s: ServicoItem) => !servicosCatalogoSet.has(s.item));
-    } else if (selectedOption === "servicos_existentes") {
-      list = list.filter((s: ServicoItem) => servicosCatalogoSet.has(s.item));
-    }
-    return list.reduce(
-      (acc: number, servico: ServicoItem) => {
-        const isSelected = servico.id ? selectedServicos.has(servico.id) : selectedServicos.has(String(servico.item));
-        const isApproved = servico.status === "aprovado";
-        if (isSelected || isApproved) {
-          return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || (servico as any).estimativa_valor || 0);
-        }
-        return acc;
-      },
-      0
-    );
-  }, [servicosData, selectedOption, servicosCatalogoSet, selectedServicos]);
+  const gastoServicosExistentesDiretoria = useMemo(() => {
+    return servicosData
+      .filter((s: ServicoItem) => s.status !== "rejeitado" && servicosCatalogoSet.has(s.item))
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+  }, [servicosData, servicosCatalogoSet]);
+
+  const gastoServicosNovosDiretoria = useMemo(() => {
+    return servicosData
+      .filter((s: ServicoItem) => s.status !== "rejeitado" && !servicosCatalogoSet.has(s.item))
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+  }, [servicosData, servicosCatalogoSet]);
+
+  const gastoServicosDiretoria = useMemo(() => {
+    return selectedOption === "servicos_existentes"
+      ? gastoServicosExistentesDiretoria
+      : gastoServicosNovosDiretoria;
+  }, [selectedOption, gastoServicosExistentesDiretoria, gastoServicosNovosDiretoria]);
 
   // Serviços da própria diretoria
   const servicosPropriosBase: ServicoItem[] = useMemo(() => {
@@ -1275,10 +1253,12 @@ const DiretoriaAprovacao = () => {
         const columnStyles = {
           0: { halign: "left" },
           1: { halign: "center" },
-          2: { halign: "center" },
-          3: { halign: "left" },
+          2: { halign: "left" },
+          3: { halign: "center" },
           4: { halign: "center" },
-          5: { halign: "right" }
+          5: { halign: "left" },
+          6: { halign: "center" },
+          7: { halign: "right" }
         };
 
         const isNovos = selectedOption === "servicos_novos";
@@ -1287,6 +1267,8 @@ const DiretoriaAprovacao = () => {
 
         const tableData = servicosFiltradasPorStatus.map((s: any) => [
           s.objeto,
+          s.contrato || "-",
+          s.contratada || "-",
           s.gerencia || "N/A",
           s.unidadeDemandante || "N/A",
           s.justificativa || "-",
@@ -1295,7 +1277,7 @@ const DiretoriaAprovacao = () => {
         ]);
 
         doc.autoTable({
-          head: [["Objeto", "Gerência", "Unid. Demandante", "Justificativa", "Prioridade", "Estimativa Valor"]],
+          head: [["Objeto", "Contrato", "Contratada", "Gerência", "Unid. Demandante", "Justificativa", "Prioridade", "Estimativa Valor"]],
           body: tableData,
           columnStyles,
           headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
@@ -1322,9 +1304,11 @@ const DiretoriaAprovacao = () => {
       const categoryFile = isNovos ? "Novos_Servicos" : "Servicos_Existentes";
 
       const worksheetData = [
-        ["Objeto", "Gerência", "Unidade Demandante", "Justificativa", "Prioridade", "Estimativa Valor"],
+        ["Objeto", "Contrato", "Contratada", "Gerência", "Unidade Demandante", "Justificativa", "Prioridade", "Estimativa Valor"],
         ...servicosFiltradasPorStatus.map((s: any) => [
           s.objeto,
+          s.contrato || "",
+          s.contratada || "",
           s.gerencia || "N/A",
           s.unidadeDemandante || "N/A",
           s.justificativa || "-",
@@ -1333,9 +1317,15 @@ const DiretoriaAprovacao = () => {
         ])
       ];
 
+      const totalValue = servicosFiltradasPorStatus.reduce((acc: number, s: any) => acc + (s.estimativaValor || 0), 0);
+      worksheetData.push([]);
+      worksheetData.push(["TOTAL:", "", "", "", "", "", "", totalValue]);
+
       const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
       worksheet['!cols'] = [
         { wch: 40 }, // Objeto
+        { wch: 15 }, // Contrato
+        { wch: 25 }, // Contratada
         { wch: 15 }, // Gerência
         { wch: 20 }, // Unidade Demandante
         { wch: 30 }, // Justificativa
@@ -1350,7 +1340,7 @@ const DiretoriaAprovacao = () => {
         alignment: { horizontal: "center", vertical: "center" }
       };
 
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 8; i++) {
         const cellRef = xlsx.utils.encode_cell({ r: 0, c: i });
         worksheet[cellRef].s = headerStyle;
       }

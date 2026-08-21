@@ -429,18 +429,39 @@ export async function getSolicitacoesByGerencia(
   gerenciaId: string,
   periodoId: string
 ): Promise<PlanItem[]> {
-  const data = await fetchAllPages<PlanItem>((from, to) =>
+  const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*")
+      .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario)")
       .eq("gerencia_id", gerenciaId)
       .eq("periodo_id", periodoId)
-      .order("codigo")
       .order("id")
-      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
   );
 
-  return data;
+  return data.map((s: any) => ({
+    id: s.id,
+    item_id: s.item_id,
+    codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
+    descricao: s.item?.descricao ?? s.descricao ?? "",
+    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
+    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    qtdEstimada: s.qtd_estimada ?? 0,
+    qtd_estimada: s.qtd_estimada ?? 0,
+    prioridade: s.prioridade || "Baixa",
+    observacao: s.observacao || "",
+    status: s.status as SolicitacaoStatus,
+    justificativaRejeicao: s.justificativa_rejeicao || "",
+    justificativa_rejeicao: s.justificativa_rejeicao || "",
+    gerencia: s.gerencias?.sigla || "",
+    gerencia_id: s.gerencia_id,
+    diretoria_id: s.diretoria_id,
+    periodo_id: s.periodo_id,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  } as unknown as PlanItem));
 }
 
 export async function deleteSolicitacao(itemId: string): Promise<boolean> {
@@ -448,7 +469,7 @@ export async function deleteSolicitacao(itemId: string): Promise<boolean> {
 
   // Primeiro remove as dependências para evitar erros de restrição de chave estrangeira
   await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", itemId);
-  await supabase.from("aprovacao").delete().eq("solicitacao_id", itemId);
+  await supabase.from("aprovacao").delete().eq("referencia_id", itemId);
   await supabase.from("log_orcamentario").delete().eq("referencia_id", itemId);
 
   const { error } = await supabase
@@ -471,7 +492,7 @@ export async function deleteSolicitacoesBulk(itemIds: string[]): Promise<boolean
 
   // Remove dependências em massa
   await supabase.from("solicitacao_historico").delete().in("solicitacao_id", itemIds);
-  await supabase.from("aprovacao").delete().in("solicitacao_id", itemIds);
+  await supabase.from("aprovacao").delete().in("referencia_id", itemIds);
   await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
 
   const { error } = await supabase
@@ -490,10 +511,10 @@ export async function getSolicitacoesByDiretoria(
   diretoriaId: string,
   periodoId: string
 ): Promise<PlanItem[]> {
-  const data = await fetchAllPages<PlanItem>((from, to) =>
+  const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*")
+      .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario), gerencias!fk_solicitacoes_gerencia(sigla, nome), diretorias!fk_solicitacoes_diretoria(sigla, nome)")
       .eq("diretoria_id", diretoriaId)
       .eq("periodo_id", periodoId)
       .in("status", [
@@ -505,12 +526,34 @@ export async function getSolicitacoesByDiretoria(
         "em_compra",
         "concluido",
       ])
-      .order("codigo")
       .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data;
+  return data.map((s: any) => ({
+    id: s.id,
+    item_id: s.item_id,
+    codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
+    descricao: s.item?.descricao ?? s.descricao ?? "",
+    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
+    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    qtdEstimada: s.qtd_estimada ?? 0,
+    qtd_estimada: s.qtd_estimada ?? 0,
+    prioridade: s.prioridade || "Média",
+    observacao: s.observacao || "",
+    status: s.status as SolicitacaoStatus,
+    justificativaRejeicao: s.justificativa_rejeicao || "",
+    justificativa_rejeicao: s.justificativa_rejeicao || "",
+    gerencia: s.gerencias?.sigla || "N/A",
+    gerencia_id: s.gerencia_id,
+    diretoria_id: s.diretoria_id,
+    diretoriaSigla: s.diretorias?.sigla,
+    periodo_id: s.periodo_id,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  } as PlanItem));
 }
 
 export async function getSolicitacoesByPeriodo({
@@ -518,17 +561,39 @@ export async function getSolicitacoesByPeriodo({
 }: {
   periodoId: string;
 }): Promise<PlanItem[]> {
-  const data = await fetchAllPages<PlanItem>((from, to) =>
+  const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*")
+      .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario), gerencias!fk_solicitacoes_gerencia(sigla, nome), diretorias!fk_solicitacoes_diretoria(sigla, nome)")
       .eq("periodo_id", periodoId)
-      .order("codigo")
       .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data;
+  return data.map((s: any) => ({
+    id: s.id,
+    item_id: s.item_id,
+    codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
+    descricao: s.item?.descricao ?? s.descricao ?? "",
+    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
+    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    qtdEstimada: s.qtd_estimada ?? 0,
+    qtd_estimada: s.qtd_estimada ?? 0,
+    prioridade: s.prioridade || "Média",
+    observacao: s.observacao || "",
+    status: s.status as SolicitacaoStatus,
+    justificativaRejeicao: s.justificativa_rejeicao || "",
+    justificativa_rejeicao: s.justificativa_rejeicao || "",
+    gerencia: s.gerencias?.sigla || "N/A",
+    gerencia_id: s.gerencia_id,
+    diretoria_id: s.diretoria_id,
+    diretoriaSigla: s.diretorias?.sigla,
+    periodo_id: s.periodo_id,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  } as PlanItem));
 }
 
 export async function getServicosByPeriodo({
@@ -585,16 +650,40 @@ export async function getServicosResumoByPeriodo({
 export async function getSolicitacoesCompras(
   periodoId: string
 ): Promise<unknown[]> {
-  return await fetchAllPages<unknown>((from, to) =>
+  const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
-      .select("*, diretorias!fk_solicitacoes_diretoria(sigla), gerencias!fk_solicitacoes_gerencia(sigla)")
+      .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario), diretorias!fk_solicitacoes_diretoria(sigla), gerencias!fk_solicitacoes_gerencia(sigla)")
       .eq("periodo_id", periodoId)
       .in("status", ["aprovado", "em_compra", "concluido"])
-      .order("codigo")
       .order("id")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
+
+  return data.map((s: any) => ({
+    id: s.id,
+    item_id: s.item_id,
+    codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
+    descricao: s.item?.descricao ?? s.descricao ?? "",
+    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
+    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
+    qtd_estimada: s.qtd_estimada ?? 0,
+    qtdEstimada: s.qtd_estimada ?? 0,
+    prioridade: s.prioridade || "Média",
+    observacao: s.observacao || "",
+    status: s.status as SolicitacaoStatus,
+    justificativa_rejeicao: s.justificativa_rejeicao || "",
+    justificativaRejeicao: s.justificativa_rejeicao || "",
+    gerencia_id: s.gerencia_id,
+    diretoria_id: s.diretoria_id,
+    periodo_id: s.periodo_id,
+    gerencias: s.gerencias,
+    diretorias: s.diretorias,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  }));
 }
 
 export async function getServicosCompras(periodoId: string): Promise<unknown[]> {
@@ -616,37 +705,61 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   gerencia_id: string;
   item_id?: string;
 }): Promise<PlanItem> {
+  let itemId = solicitacao.item_id;
+  if (!itemId && solicitacao.codigo) {
+    const { data: itemData } = await supabase
+      .from("itens_catalogo")
+      .select("id, valor_unitario")
+      .eq("codigo", solicitacao.codigo)
+      .maybeSingle();
+    if (itemData) {
+      itemId = itemData.id;
+    }
+  }
+
   const payload: Record<string, unknown> = {
     periodo_id: solicitacao.periodo_id,
     diretoria_id: solicitacao.diretoria_id,
     gerencia_id: solicitacao.gerencia_id,
-    item_id: solicitacao.item_id,
-    codigo: solicitacao.codigo,
-    descricao: solicitacao.descricao,
-    categoria: solicitacao.categoria,
-    unidade: solicitacao.unidade,
+    item_id: itemId,
     valor_unitario:
       solicitacao.valorUnitario ??
-      (solicitacao as unknown as { valor_unitario: number }).valor_unitario,
+      (solicitacao as unknown as { valor_unitario: number }).valor_unitario ?? 0,
     qtd_estimada:
       solicitacao.qtdEstimada ??
-      (solicitacao as unknown as { qtd_estimada: number }).qtd_estimada,
-    prioridade: solicitacao.prioridade,
-    observacao: solicitacao.observacao,
-    status: solicitacao.status,
+      (solicitacao as unknown as { qtd_estimada: number }).qtd_estimada ?? 0,
+    prioridade: solicitacao.prioridade || "Baixa",
+    observacao: solicitacao.observacao || null,
+    status: solicitacao.status || "rascunho",
   };
 
   const { data, error } = await supabase
     .from("solicitacoes")
     .insert([payload])
-    .select()
+    .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario)")
     .single();
 
   if (error) throw error;
   
   await registrarLogAtividade("CRIAR", "solicitacoes", data.id, payload);
 
-  return data as PlanItem;
+  return {
+    id: data.id,
+    item_id: data.item_id,
+    codigo: data.item?.codigo ?? solicitacao.codigo,
+    descricao: data.item?.descricao ?? solicitacao.descricao,
+    categoria: data.item?.categoria ?? solicitacao.categoria,
+    unidade: data.item?.unidade ?? solicitacao.unidade,
+    valorUnitario: data.valor_unitario ?? data.item?.valor_unitario,
+    qtdEstimada: data.qtd_estimada,
+    prioridade: data.prioridade,
+    observacao: data.observacao,
+    status: data.status,
+    gerencia: "",
+    gerencia_id: data.gerencia_id,
+    diretoria_id: data.diretoria_id,
+    periodo_id: data.periodo_id,
+  } as unknown as PlanItem;
 }
 
 export async function updateSolicitacao(
@@ -656,32 +769,51 @@ export async function updateSolicitacao(
   const dbUpdates: Record<string, unknown> = {};
 
   if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
-  if (updates.unidade !== undefined) dbUpdates.unidade = updates.unidade;
+  if (updates.qtd_estimada !== undefined) dbUpdates.qtd_estimada = updates.qtd_estimada;
   if (updates.observacao !== undefined) dbUpdates.observacao = updates.observacao;
   if (updates.prioridade !== undefined) dbUpdates.prioridade = updates.prioridade;
-  if (updates.valorUnitario !== undefined)
-    dbUpdates.valor_unitario = updates.valorUnitario;
-  if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
-  if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
+  if (updates.valorUnitario !== undefined) dbUpdates.valor_unitario = updates.valorUnitario;
+  if (updates.valor_unitario !== undefined) dbUpdates.valor_unitario = updates.valor_unitario;
   if (updates.status !== undefined) dbUpdates.status = updates.status;
   if (updates.justificativa_rejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativa_rejeicao;
+  if (updates.justificativaRejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativaRejeicao;
+  if (updates.item_id !== undefined) dbUpdates.item_id = updates.item_id;
 
   if (Object.keys(dbUpdates).length === 0) {
     return {} as PlanItem;
   }
 
+  dbUpdates.updated_at = new Date().toISOString();
+
   const { data, error } = await supabase
     .from("solicitacoes")
     .update(dbUpdates)
     .eq("id", id)
-    .select()
+    .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario)")
     .single();
 
   if (error) throw error;
   
   await registrarLogAtividade("EDITAR", "solicitacoes", id, dbUpdates);
   
-  return data as PlanItem;
+  return {
+    id: data.id,
+    item_id: data.item_id,
+    codigo: data.item?.codigo ?? (updates.codigo ? Number(updates.codigo) : 0),
+    descricao: data.item?.descricao ?? updates.descricao,
+    categoria: data.item?.categoria ?? updates.categoria,
+    unidade: data.item?.unidade ?? updates.unidade,
+    valorUnitario: data.valor_unitario ?? data.item?.valor_unitario,
+    qtdEstimada: data.qtd_estimada,
+    prioridade: data.prioridade,
+    observacao: data.observacao,
+    status: data.status,
+    justificativaRejeicao: data.justificativa_rejeicao,
+    gerencia: "",
+    gerencia_id: data.gerencia_id,
+    diretoria_id: data.diretoria_id,
+    periodo_id: data.periodo_id,
+  } as unknown as PlanItem;
 }
 
 export async function updateSolicitacaoStatus(
@@ -985,28 +1117,20 @@ export async function getAdminMiniErpConfigDb() {
     }
   );
 
-  const getExistentesId = (id: string) => {
-    const char = id.charAt(0);
-    const replacements: Record<string, string> = {
+  const invertChar = (c: string) => {
+    const map: Record<string, string> = {
       '0': 'f', '1': 'e', '2': 'd', '3': 'c', '4': 'b', '5': 'a', '6': '9', '7': '8',
       '8': '7', '9': '6', 'a': '5', 'b': '4', 'c': '3', 'd': '2', 'e': '1', 'f': '0'
     };
-    return replacements[char] + id.slice(1);
+    return map[c] || c;
   };
 
-  // Move fake UUIDs to Existentes
-  const allRealIds = new Set([
-    ...Object.keys(diretoriaBudgetsAquisicao),
-    ...Object.keys(gerenciaBudgetsAquisicao),
-    // Or we could just iterate over what's currently in Novos
-  ]);
-  
-  // A better way: iterate all keys in Novos. If getExistentesId(key) is also in Novos, or if the key itself looks like a fake of an existing real ID.
-  // Actually, we can just compute the fake ID for every key. If we find it, we move it to Existentes.
-  
+  const getExistentesId = (id: string) => invertChar(id.charAt(0)) + id.slice(1);
+  const getGeralId = (id: string) => id.charAt(0) + invertChar(id.charAt(1)) + id.slice(2);
+
+  // Move fake UUIDs to Existentes and Geral
   Object.keys(diretoriaBudgetsServicosNovos).forEach(id => {
     if (!validDiretoriaIds.has(id)) {
-      // É um ID falso (Existentes)
       const realId = getExistentesId(id);
       diretoriaBudgetsServicosExistentes[realId] = diretoriaBudgetsServicosNovos[id];
       delete diretoriaBudgetsServicosNovos[id];
@@ -1015,10 +1139,25 @@ export async function getAdminMiniErpConfigDb() {
 
   Object.keys(gerenciaBudgetsServicosNovos).forEach(id => {
     if (!validGerenciaIds.has(id)) {
-      // É um ID falso (Existentes)
       const realId = getExistentesId(id);
       gerenciaBudgetsServicosExistentes[realId] = gerenciaBudgetsServicosNovos[id];
       delete gerenciaBudgetsServicosNovos[id];
+    }
+  });
+
+  Object.keys(diretoriaBudgetsAquisicao).forEach(id => {
+    if (!validDiretoriaIds.has(id)) {
+      const realId = getGeralId(id);
+      diretoriaBudgetsOrcamentoGeral[realId] = diretoriaBudgetsAquisicao[id];
+      delete diretoriaBudgetsAquisicao[id];
+    }
+  });
+
+  Object.keys(gerenciaBudgetsAquisicao).forEach(id => {
+    if (!validGerenciaIds.has(id)) {
+      const realId = getGeralId(id);
+      gerenciaBudgetsOrcamentoGeral[realId] = gerenciaBudgetsAquisicao[id];
+      delete gerenciaBudgetsAquisicao[id];
     }
   });
 
@@ -1208,7 +1347,7 @@ export async function updateServicoCatalogoAdmin(
   if (data?.error) throw new Error(data.error);
 
   
-  await registrarLogAtividade("CRIAR", "servicos_catalogo", data?.id || "novo", { acao: "createServicoCatalogoAndDistribuir" });
+  await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, { acao: "updateServicoCatalogoAdmin", updates });
 
   return data;
 }
@@ -1235,8 +1374,7 @@ export async function deleteServicoCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
-  
-  await registrarLogAtividade("EDITAR", "servicos_catalogo", "bulk_update", { acao: "updateServicoCatalogoAdmin" });
+  await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId, { acao: "deleteServicoCatalogoAdmin" });
 
   return data;
 }
@@ -1271,8 +1409,7 @@ export async function saveCategoryBudgetOwnerRules(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
-  
-  await registrarLogAtividade("EXCLUIR", "servicos_catalogo", "bulk_delete", { acao: "deleteServicoCatalogoAdmin" });
+  await registrarLogAtividade("EDITAR", "configuracoes", "category_budget_owner_rules", { acao: "saveCategoryBudgetOwnerRules" });
 
   return data;
 }
@@ -1434,6 +1571,9 @@ function mapServicoItemToDb(item: any): any {
   if (item.contrato !== undefined) dbRow.contrato = item.contrato;
   if (item.contratada !== undefined) dbRow.contratada = item.contratada;
   
+  const justificativaRejeicao = item.justificativa_rejeicao ?? item.justificativaRejeicao;
+  if (justificativaRejeicao !== undefined) dbRow.justificativa_rejeicao = justificativaRejeicao;
+  
   if (item.created_at !== undefined) dbRow.created_at = item.created_at;
   if (item.updated_at !== undefined) dbRow.updated_at = item.updated_at;
   
@@ -1528,7 +1668,7 @@ export const deleteServico = async (id: string): Promise<boolean> => {
 
   // Remove dependências para evitar erros de restrição de chave estrangeira
   await supabase.from("log_orcamentario").delete().eq("referencia_id", id);
-  await supabase.from("aprovacao").delete().eq("solicitacao_id", id);
+  await supabase.from("aprovacao").delete().eq("referencia_id", id);
 
   const { error } = await supabase.from("servicos").delete().eq("id", id);
 
@@ -1544,7 +1684,7 @@ export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
 
   // Remove dependências em massa
   await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
-  await supabase.from("aprovacao").delete().in("solicitacao_id", itemIds);
+  await supabase.from("aprovacao").delete().in("referencia_id", itemIds);
 
   const { error } = await supabase
     .from("servicos")
@@ -1715,7 +1855,7 @@ export async function updateItemCatalogoAdmin(
   if (data?.error) throw new Error(data.error);
 
   
-  await registrarLogAtividade("EDITAR", "configuracoes", "category_budget_owner_rules", { acao: "saveCategoryBudgetOwnerRules" });
+  await registrarLogAtividade("EDITAR", "itens_catalogo", itemId, { acao: "updateItemCatalogoAdmin", updates });
 
   return data;
 }
@@ -1742,8 +1882,7 @@ export async function deleteItemCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
-  
-  await registrarLogAtividade("CRIAR", "itens_catalogo", data?.id || "novo", { acao: "createItemCatalogoAndDistribuir" });
+  await registrarLogAtividade("EXCLUIR", "itens_catalogo", itemId, { acao: "deleteItemCatalogoAdmin" });
 
   return data;
 }
@@ -1770,7 +1909,7 @@ export async function criarOrcamento(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   
-  await registrarLogAtividade("EDITAR", "itens_catalogo", "bulk_update", { acao: "updateItemCatalogoAdmin" });
+  await registrarLogAtividade("CRIAR", "admin_orcamento_config", diretoriaId, { acao: "criarOrcamento", tipo, retidoDiretoria });
 
   return data;
 }
@@ -1797,7 +1936,7 @@ export async function enviarOrcamento(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   
-  await registrarLogAtividade("EXCLUIR", "itens_catalogo", "bulk_delete", { acao: "deleteItemCatalogoAdmin" });
+  await registrarLogAtividade("EDITAR", "admin_orcamento_config", diretoriaId, { acao: "enviarOrcamento", tipo, retidoDiretoria });
 
   return data;
 }
@@ -1822,7 +1961,7 @@ export async function deletarOrcamento(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   
-  await registrarLogAtividade("CRIAR", "orcamento_global", "novo_orcamento", { acao: "criarOrcamento" });
+  await registrarLogAtividade("EXCLUIR", "admin_orcamento_config", diretoriaId, { acao: "deletarOrcamento", tipo, gerenciasIds });
 
   return data;
 }

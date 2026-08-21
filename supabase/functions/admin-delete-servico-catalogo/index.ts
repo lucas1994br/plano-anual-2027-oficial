@@ -64,7 +64,7 @@ serve(async (req: Request) => {
         .select("id, scope, ativo, expira_em")
         .eq("scope", "admin")
         .eq("ativo", true)
-        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash},codigo_hash.ilike.${accessCode}`)
         .limit(1);
 
       accessRow = accessRows && accessRows.length > 0 ? accessRows[0] : null;
@@ -93,7 +93,7 @@ serve(async (req: Request) => {
     // Verificar se o serviço existe
     const { data: servico, error: fetchError } = await supabase
       .from("servicos_catalogo")
-      .select("id")
+      .select("id, item")
       .eq("id", servicoId)
       .maybeSingle();
 
@@ -104,6 +104,20 @@ serve(async (req: Request) => {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Se houver serviços vinculados por item, remover aprovações e serviços antes
+    if (servico.item) {
+      const { data: srvs } = await supabase
+        .from("servicos")
+        .select("id")
+        .eq("item", servico.item);
+
+      if (srvs && srvs.length > 0) {
+        const srvIds = srvs.map((s: { id: string }) => s.id);
+        await supabase.from("aprovacao").delete().in("referencia_id", srvIds);
+        await supabase.from("servicos").delete().in("id", srvIds);
+      }
     }
 
     // Admin pode deletar qualquer serviço do catálogo

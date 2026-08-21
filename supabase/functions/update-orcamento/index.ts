@@ -27,8 +27,8 @@ serve(async (req: Request) => {
       !["admin", "gerencia"].includes(role)
     ) {
       return new Response(
-        JSON.stringify({ error: "Parâmetros inválidos ou permissão insuficiente" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, error: "Parâmetros inválidos ou permissão insuficiente" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -37,8 +37,8 @@ serve(async (req: Request) => {
 
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(
-        JSON.stringify({ error: "Missing environment variables" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, error: "Missing environment variables" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -79,8 +79,8 @@ serve(async (req: Request) => {
     const msg = error instanceof Error ? error.message : "Internal server error";
     console.error(msg);
     return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ success: false, error: msg }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

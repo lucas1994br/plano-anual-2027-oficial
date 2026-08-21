@@ -1,14 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+const envLocal = path.resolve(process.cwd(), '.env.local');
+const envDefault = path.resolve(process.cwd(), '.env');
+
+if (fs.existsSync(envLocal)) {
+  dotenv.config({ path: envLocal });
+} else {
+  dotenv.config({ path: envDefault });
+}
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('Missing Supabase credentials');
+  console.error('Error: Missing Supabase credentials. Ensure .env or .env.local exists and contains VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   process.exit(1);
 }
 

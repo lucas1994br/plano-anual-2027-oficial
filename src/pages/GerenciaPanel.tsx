@@ -168,40 +168,43 @@ import {
     
     // Mesclar catálogo base com solicitações existentes
     return catalogoData.map((c: any) => {
-      const existente = solicitacoes.find((s: any) => s.item_id === c.id || s.codigo === c.codigo);
+      const existente = solicitacoes.find((s: any) => s.item_id === c.id || Number(s.codigo) === Number(c.codigo));
       const s = existente || { ...c, qtd_estimada: 0, status: "rascunho" };
 
-      const mappedCategory = materialDescriptions[String(s.codigo)];
+      const mappedCategory = materialDescriptions[String(c.codigo)];
       const categoriaItem = mappedCategory
         ? mappedCategory
-        : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
-          ? s.categoria
-          : "diversos";
+        : (typeof c.categoria === "string" && c.categoria.trim().length > 0)
+          ? c.categoria
+          : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
+            ? s.categoria
+            : "diversos";
       const diretoriaOrcamentariaId = diretoria
         ? getBudgetOwnerDiretoriaId(orcamentoConfig, categoriaItem, diretoria.id, categoryBudgetOwnersFromDb)
-        : s.diretoria_id;
+        : (s.diretoria_id || diretoria?.id);
       const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
 
       return {
         id: existente ? s.id : undefined,
-        codigo: s.codigo,
-        descricao: s.descricao,
+        item_id: c.id,
+        codigo: c.codigo,
+        descricao: c.descricao,
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
         prioridade: s.prioridade || "Baixa",
-        qtdEstimada: s.qtd_estimada || 0,
+        qtdEstimada: s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0),
         unidade: s.unidade || c.unidade || "un",
-        valorUnitario: s.valor_unitario || c.valor_unitario || 0,
+        valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (c.valor_unitario || 0),
         observacao: s.observacao || "",
         status: (s.status as SolicitacaoStatus) || "rascunho",
-        justificativaRejeicao: s.justificativa_rejeicao || "",
+        justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
         diretoriaSigla: diretoria?.sigla,
         diretoriaOrcamentariaId,
         diretoriaOrcamentariaSigla: diretoriaOrcamentaria?.sigla || diretoria?.sigla,
         isOrcamentoCompartilhado: !!diretoria && diretoriaOrcamentariaId !== diretoria.id,
       };
     });
-  }, [solicitacoes, catalogoData, gerenciaUpper, diretoria, diretoriaMap, orcamentoConfig, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
+  }, [solicitacoes, catalogoData, materialDescriptions, isLoadingDescriptions, gerenciaUpper, diretoria, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -218,7 +221,7 @@ import {
       const matchesCategoria = !categoria || categoria === "" || item.categoria === categoria;
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || (item.qtdEstimada > 0 && item.status === "rascunho");
+      const matchesComQuantidade = !showOnlyComQuantidade || item.qtdEstimada > 0;
       const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
       return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
@@ -263,16 +266,9 @@ import {
   const gastoAquisicaoGerencia = useMemo(
     () =>
       items
-        .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id)
-        .reduce((acc, item) => {
-          const isSelected = item.id ? selectedAquisicaoIds.has(item.id) : false;
-          const isApproved = item.status === "aprovado";
-          if (isSelected || isApproved) {
-            return acc + item.qtdEstimada * item.valorUnitario;
-          }
-          return acc;
-        }, 0),
-    [items, diretoria?.id, selectedAquisicaoIds],
+        .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && item.qtdEstimada > 0)
+        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+    [items, diretoria?.id],
   );
   const summary = useMemo(
     () => ({
@@ -313,15 +309,19 @@ import {
       return Array.from(grupos.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
     }, [items, diretoria?.sigla, selectedAquisicaoIds]);
 
-  const gastoServicosGerencia = useMemo(
-    () =>
-      servicosData.reduce(
-        (acc: number, servico: ServicoItem) =>
-          acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0),
-        0,
-      ),
-    [servicosData],
-  );
+  const gastoServicosExistentes = useMemo(() => {
+    const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
+    return servicosData
+      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)))
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
+  }, [servicosData, servicosCatalogoData]);
+
+  const gastoServicosNovos = useMemo(() => {
+    const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
+    return servicosData
+      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)))
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
+  }, [servicosData, servicosCatalogoData]);
 
   const canSend = items.some((item) => item.qtdEstimada > 0 && item.status === "rascunho"); // Permite enviar se tiver pelo menos 1 item com quantidade em rascunho
   const isReadOnly = items.some((item) => item.status === "enviado" || item.status === "em_analise" || item.status === "aprovado");
@@ -799,10 +799,10 @@ import {
   const handleBulkEditServicos = async (updates: any) => {
     setIsBulkUpdating(true);
     try {
-      const idsToEdit = Array.from(selectedServicos)
-        .map(itemCode => servicosData.find((s: any) => s.item === itemCode)?.id)
-        .filter(Boolean) as string[];
-      await updateServicosBulkData(idsToEdit, updates);
+      const promises = Array.from(selectedServicos).map((itemCode) =>
+        ensureServico(itemCode, updates)
+      );
+      await Promise.all(promises);
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       toast({ title: "Serviços atualizados", description: "Os serviços selecionados foram atualizados com sucesso." });
       setBulkEditServicosOpen(false);
@@ -1415,7 +1415,7 @@ import {
               <tbody>
                 {paginatedLista.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-6 text-muted-foreground text-sm">
+                    <td colSpan={11} className="text-center py-6 text-muted-foreground text-sm">
                       Nenhum serviço nesta seção.
                     </td>
                   </tr>
@@ -1666,17 +1666,7 @@ import {
           <BudgetConsumptionCard
             titulo={`Orçamento da Diretoria ${diretoria?.sigla} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
-            gasto={displayedServicos.reduce(
-              (acc, servico) => {
-                const isSelected = selectedServicos.has(servico.item);
-                const isApproved = servico.status === "aprovado";
-                if (isSelected || isApproved) {
-                  return acc + (servico.dotacaoOrcamentaria || servico.estimativaValor || 0);
-                }
-                return acc;
-              },
-              0,
-            )}
+            gasto={selectedOption === "servicos_existentes" ? gastoServicosExistentes : gastoServicosNovos}
           />
 
           <div className="px-6 pb-2 pt-4 flex flex-wrap justify-between items-center gap-2">
@@ -1790,7 +1780,15 @@ import {
               </div>
             ) : filteredServicos.length === 0 ? (
               <div className="px-6 py-8 text-center text-muted-foreground">
-                {searchTerm ? `Nenhum serviço encontrado para "${searchTerm}".` : "Nenhum serviço encontrado para os filtros selecionados."}
+                {searchTerm.trim() !== ""
+                  ? `Nenhum serviço encontrado para "${searchTerm}".`
+                  : showOnlyComQuantidade
+                  ? "Nenhum serviço com valor estimado encontrado nesta gerência."
+                  : showOnlySent
+                  ? "Nenhum serviço enviado encontrado nesta gerência."
+                  : showOnlyZerados
+                  ? "Nenhum serviço zerado encontrado nesta gerência."
+                  : "Nenhum serviço encontrado para os filtros selecionados."}
               </div>
             ) : (
               <>
@@ -2246,7 +2244,15 @@ import {
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="px-6 py-8 text-center text-muted-foreground">
-          Nenhum item encontrado para &ldquo;{searchTerm}&rdquo;.
+          {searchTerm.trim() !== ""
+            ? `Nenhum item encontrado para "${searchTerm}".`
+            : showOnlyComQuantidade
+            ? "Nenhum item com quantidade preenchida encontrado nesta gerência."
+            : showOnlySent
+            ? "Nenhum item enviado encontrado nesta gerência."
+            : showOnlyZerados
+            ? "Nenhum item zerado encontrado para os filtros selecionados."
+            : "Nenhum item encontrado para os filtros selecionados."}
         </div>
       ) : (
         <div className="px-6 pb-6">

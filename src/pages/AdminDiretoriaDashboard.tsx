@@ -151,7 +151,9 @@ export const AdminDiretoriaDashboard = ({
         valor: (sol.qtdEstimada || sol.qtd_estimada || 0) * (sol.valorUnitario || sol.valor_unitario || 0),
         data: sol.created_at
       });
-      orcamentoPlanejado += (sol.qtdEstimada || sol.qtd_estimada || 0) * (sol.valorUnitario || sol.valor_unitario || 0);
+      if (statusGroup !== 'reprovado') {
+        orcamentoPlanejado += (sol.qtdEstimada || sol.qtd_estimada || 0) * (sol.valorUnitario || sol.valor_unitario || 0);
+      }
     });
 
     const totalServExistente = { aprovado: 0, reprovado: 0, pendente: 0, total: 0 };
@@ -159,7 +161,7 @@ export const AdminDiretoriaDashboard = ({
 
     serDir.forEach((srv: any) => {
       const statusGroup = categorizeStatus(srv.status);
-      const isNovo = (srv.tipoContratacao || srv.tipo_contratacao) === "Novo";
+      const isNovo = (srv.tipoContratacao || srv.tipo_contratacao) === "Novo" || Number(srv.item) >= 9000000;
       const tipoStr = isNovo ? "Serviço Novo" : "Serviço Existente";
 
       if (isNovo) {
@@ -193,7 +195,9 @@ export const AdminDiretoriaDashboard = ({
         valor: srv.estimativaValor || srv.estimativa_valor || 0,
         data: srv.created_at
       });
-      orcamentoPlanejado += Number(srv.estimativaValor || srv.estimativa_valor || 0);
+      if (statusGroup !== 'reprovado') {
+        orcamentoPlanejado += Number(srv.estimativaValor || srv.estimativa_valor || 0);
+      }
     });
 
     const chartGer = Array.from(gerenciaMap.values()).map(g => ({

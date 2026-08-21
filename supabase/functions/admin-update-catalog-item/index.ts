@@ -64,7 +64,7 @@ serve(async (req: Request) => {
         .select("id, scope, ativo, expira_em")
         .eq("scope", "admin")
         .eq("ativo", true)
-        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash},codigo_hash.ilike.${accessCode}`)
         .limit(1);
 
       accessRow = accessRows && accessRows.length > 0 ? accessRows[0] : null;
@@ -120,39 +120,15 @@ serve(async (req: Request) => {
       throw itemError;
     }
 
-    // Atualizar TODAS as solicitações dependentes com os novos dados base do item, 
-    // independentemente do status, para manter a sincronia completa. 
-    // Usamos o 'codigo' original para o match (útil caso 'item_id' não esteja preenchido 
-    // nas solicitações geradas pelas gerências ou se o código do item mudou).
-    if (oldItem && oldItem.codigo) {
+    // Se o valor unitário foi alterado, atualizar nas solicitações vinculadas
+    if (updateData.valor_unitario !== undefined) {
       const { error: solicitacoesError } = await supabase
         .from("solicitacoes")
-        .update({
-          codigo: updateData.codigo !== undefined ? updateData.codigo : oldItem.codigo,
-          descricao: updateData.descricao,
-          categoria: updateData.categoria,
-          unidade: updateData.unidade,
-          valor_unitario: updateData.valor_unitario
-        })
-        .eq("codigo", oldItem.codigo);
+        .update({ valor_unitario: updateData.valor_unitario })
+        .eq("item_id", itemId);
 
       if (solicitacoesError) {
-        console.warn("Erro ao atualizar solicitacoes dependentes por codigo:", solicitacoesError);
-      }
-    } else {
-      // Fallback para item_id se o código antigo não puder ser recuperado
-      const { error: solicitacoesErrorFallback } = await supabase
-        .from("solicitacoes")
-        .update({
-          codigo: updateData.codigo,
-          descricao: updateData.descricao,
-          categoria: updateData.categoria,
-          unidade: updateData.unidade,
-          valor_unitario: updateData.valor_unitario
-        })
-        .eq("item_id", itemId);
-      if (solicitacoesErrorFallback) {
-         console.warn("Erro ao atualizar solicitacoes dependentes por item_id:", solicitacoesErrorFallback);
+        console.warn("Erro ao atualizar valor unitario nas solicitacoes dependentes:", solicitacoesError);
       }
     }
 

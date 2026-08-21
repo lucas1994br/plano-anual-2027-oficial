@@ -97,8 +97,9 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
     const wb = XLSX.utils.book_new();
     const wsData: unknown[][] = [];
 
+    const diretoriaName = items[0]?.diretoriaSigla ? `Diretoria: ${items[0].diretoriaSigla}` : "CAEMA";
     wsData.push(["Plano Anual de Contratações - PAC 2027"]);
-    wsData.push(["Diretoria de Comercialização"]);
+    wsData.push([diretoriaName]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
 
@@ -299,7 +300,14 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedItems.map((item) => (
+              {sortedItems.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={onToggleSelectAll ? 10 : 9} className="text-center py-8 text-muted-foreground">
+                    Nenhum item encontrado.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                sortedItems.map((item) => (
                 <TableRow key={item.codigo} className="hover:bg-muted/30">
                   {onToggleSelect && (
                     <TableCell className="px-4 text-center">
@@ -434,8 +442,9 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
+              ))
+            )}
+          </TableBody>
           </Table>
         </div>
       </div>

@@ -211,8 +211,10 @@ export function processDashboardData(params: DashboardProcessParams) {
         }
       }
       
+      const itemNum = Number(s.item);
       const tipoCont = s.tipoContratacao || s.tipo_contratacao || "";
-      const tipo = tipoCont === "Novo" ? "Serviço Novo" : "Serviço Existente";
+      const isNovo = tipoCont === "Novo" || itemNum >= 9000000;
+      const tipo = isNovo ? "Serviço Novo" : "Serviço Existente";
       
       const obj = s.objeto || "";
       let subcat = obj.length > 25 ? obj.substring(0, 25) + "..." : obj;

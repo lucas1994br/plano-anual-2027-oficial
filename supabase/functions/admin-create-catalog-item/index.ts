@@ -64,7 +64,7 @@ serve(async (req: Request) => {
         .select("id, scope, ativo, expira_em")
         .eq("scope", "admin")
         .eq("ativo", true)
-        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash},codigo_hash.ilike.${accessCode}`)
         .limit(1);
 
       accessRow = accessRows && accessRows.length > 0 ? accessRows[0] : null;
@@ -136,10 +136,6 @@ serve(async (req: Request) => {
           diretoria_id: gerencia.diretoria_id,
           gerencia_id: gerencia.id,
           item_id: itemCatalogo.id,
-          codigo: itemCatalogo.codigo,
-          descricao: itemCatalogo.descricao,
-          categoria: itemCatalogo.categoria,
-          unidade: itemCatalogo.unidade,
           qtd_estimada: 0,
           valor_unitario: itemCatalogo.valor_unitario,
           prioridade: "Baixa",

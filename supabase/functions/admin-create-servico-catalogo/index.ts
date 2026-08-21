@@ -76,7 +76,7 @@ serve(async (req: Request) => {
         .select("id, scope, ativo, expira_em")
         .eq("scope", "admin")
         .eq("ativo", true)
-        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash}`)
+        .or(`codigo_hash.eq.${accessCode},codigo_hash.eq.${accessHash},codigo_hash.ilike.${accessCode}`)
         .limit(1);
 
       accessRow = accessRows && accessRows.length > 0 ? accessRows[0] : null;
