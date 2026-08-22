@@ -20,6 +20,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination.tsx";
+import { SmartPagination } from "@/components/common/SmartPagination.tsx";
 import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import {
   Dialog,
@@ -616,43 +617,13 @@ export function AdminLogsAtividades() {
       </div>
 
       {paginationData.totalPages > 1 && (
-        <div className="py-4 border-t mt-4 flex items-center justify-between">
-          <span className="text-sm text-muted-foreground ml-2">
-            Página {currentPage} de {paginationData.totalPages} • Exibindo {paginationData.totalFiltered} registros
-          </span>
-          <Pagination className="w-auto mx-0">
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                />
-              </PaginationItem>
-              {currentPage > 1 && (
-                <PaginationItem>
-                  <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
-                    {currentPage - 1}
-                  </PaginationLink>
-                </PaginationItem>
-              )}
-              <PaginationItem>
-                <PaginationLink isActive>{currentPage}</PaginationLink>
-              </PaginationItem>
-              {currentPage < paginationData.totalPages && (
-                <PaginationItem>
-                  <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
-                    {currentPage + 1}
-                  </PaginationLink>
-                </PaginationItem>
-              )}
-              <PaginationItem>
-                <PaginationNext
-                  onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
-                  className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+        <div className="py-4 border-t mt-4">
+          <SmartPagination
+            currentPage={currentPage}
+            totalPages={paginationData.totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={paginationData.totalFiltered}
+          />
         </div>
       )}
 

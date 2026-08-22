@@ -7,6 +7,7 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 
 import { Button } from "@/components/ui/button.tsx";
+import { SmartPagination } from "@/components/common/SmartPagination.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { CurrencyInput } from "@/components/ui/currency-input.tsx";
@@ -553,53 +554,13 @@ export function AdminCatalogItemControl() {
 
         {/* Controles de Paginação */}
         {paginationData.totalPages > 1 && (
-          <div className="py-6 border-t mt-4">
-            <Pagination>
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                  />
-                </PaginationItem>
-                {currentPage > 1 && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
-                      {currentPage - 1}
-                    </PaginationLink>
-                  </PaginationItem>
-                )}
-                <PaginationItem>
-                  <PaginationLink isActive>{currentPage}</PaginationLink>
-                </PaginationItem>
-                {currentPage < paginationData.totalPages && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
-                      {currentPage + 1}
-                    </PaginationLink>
-                  </PaginationItem>
-                )}
-                {currentPage < paginationData.totalPages - 1 && (
-                  <PaginationItem><PaginationEllipsis /></PaginationItem>
-                )}
-                {currentPage < paginationData.totalPages - 1 && (
-                  <PaginationItem>
-                    <PaginationLink onClick={() => setCurrentPage(paginationData.totalPages)} className="cursor-pointer">
-                      {paginationData.totalPages}
-                    </PaginationLink>
-                  </PaginationItem>
-                )}
-                <PaginationItem>
-                  <PaginationNext
-                    onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
-                    className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
-            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
-              Página {currentPage} de {paginationData.totalPages} • Exibindo {paginationData.totalFiltered} itens
-            </div>
+          <div className="py-4 border-t mt-4">
+            <SmartPagination
+              currentPage={currentPage}
+              totalPages={paginationData.totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={paginationData.totalFiltered}
+            />
           </div>
         )}
       </Card>

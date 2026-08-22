@@ -1,6 +1,6 @@
  
 import { useRef, useState } from "react";
-import { MessageSquare, FileDown, FileSpreadsheet, Undo2 } from "lucide-react";
+import { MessageSquare, FileDown, FileSpreadsheet, Undo2, Pencil } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -34,11 +34,13 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 interface PlanTableProps {
   items: PlanItem[];
+  totalItems?: number;
   onUpdateQtdEstimada: (codigo: number, qtdEstimada: number) => void;
   onUpdateUnidade: (codigo: number, unidade: string) => void;
   onUpdateObservacao: (codigo: number, observacao: string) => void;
   onUpdatePrioridade: (codigo: number, prioridade: PlanItem["prioridade"]) => void;
   onDeleteItem?: (itemId: string) => void;
+  onEditItem?: (item: PlanItem) => void;
   valorTotal?: number;
   selectedItems?: Set<string | number>;
   onToggleSelect?: (id: string | number) => void;
@@ -47,7 +49,7 @@ interface PlanTableProps {
 
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 
-export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
+export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, onEditItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
   const [editingCodigo, setEditingCodigo] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const _editInputRef = useRef<HTMLInputElement | null>(null);
@@ -258,21 +260,14 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
 
   return (
     <div className="px-6 pb-6">
-      <div className="bg-card rounded-lg card-shadow overflow-hidden">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border-b gap-4">
-          <h2 className="text-lg font-semibold text-foreground">
-            Itens do Plano ({items.length})
+      <div className="bg-card rounded-lg border overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="text-sm font-semibold text-foreground">
+            {totalItems !== undefined ? totalItems : items.length} item(ns) encontrado(s)
           </h2>
-          <div className="flex gap-2">
-            <Button variant="outline" className="gap-2" onClick={handleExportExcel}>
-              <FileSpreadsheet className="h-4 w-4" />
-              Exportar Excel
-            </Button>
-            <Button variant="outline" className="gap-2" onClick={handleExportPDF}>
-              <FileDown className="h-4 w-4" />
-              Exportar PDF
-            </Button>
-          </div>
+          <span className="text-xs text-muted-foreground">
+            Total: {formatCurrency(valorTotal || 0)}
+          </span>
         </div>
 
         <div className="overflow-x-auto">
@@ -393,8 +388,19 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
                   <TableCell className="text-center">
                     <Badge variant="outline">{item.gerencia}</Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="p-3">
                     <div className="flex items-center justify-center gap-1">
+                      {onEditItem && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Editar item"
+                          onClick={() => onEditItem(item)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Popover
                         open={observacaoOpen === item.codigo}
                         onOpenChange={(open) => {
@@ -403,7 +409,7 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
                         }}
                       >
                         <PopoverTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="Observação">
                             <MessageSquare className="h-4 w-4" />
                           </Button>
                         </PopoverTrigger>
@@ -427,17 +433,36 @@ export function PlanTable({ items, onUpdateQtdEstimada, onUpdateUnidade: _onUpda
                           </div>
                         </PopoverContent>
                       </Popover>
-                      {onDeleteItem && (
+                      {onDeleteItem && item.id && item.status !== "rascunho" && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                           title="Devolver para Rascunho"
-                          disabled={!item.id}
-                          onClick={() => item.id && onDeleteItem(item.id)}
+                          onClick={() => onDeleteItem(item.id!)}
                         >
                           <Undo2 className="h-4 w-4" />
                         </Button>
+                      )}
+                      {item.status && (
+                        <Badge
+                          variant={
+                            item.status === "enviado" || item.status === "em_analise"
+                              ? "secondary"
+                              : item.status === "aprovado"
+                              ? "success"
+                              : "outline"
+                          }
+                          className="text-xs"
+                        >
+                          {item.status === "rascunho"
+                            ? "Rascunho"
+                            : item.status === "enviado"
+                            ? "Enviado"
+                            : item.status === "aprovado"
+                            ? "Aprovado"
+                            : item.status}
+                        </Badge>
                       )}
                     </div>
                   </TableCell>

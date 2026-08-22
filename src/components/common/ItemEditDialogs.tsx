@@ -14,6 +14,7 @@ interface ServicoEditDialogProps {
   onSave: (servicoId: string | number, updates: Partial<ServicoItem>) => Promise<void>;
   diretoriaLabel?: string;
   gerenciaLabel?: string;
+  canEditStatus?: boolean;
 }
 
 export const ServicoEditDialog = ({
@@ -23,6 +24,7 @@ export const ServicoEditDialog = ({
   onSave,
   diretoriaLabel,
   gerenciaLabel,
+  canEditStatus = false,
 }: ServicoEditDialogProps) => {
   const [formData, setFormData] = useState<Partial<ServicoItem>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -51,7 +53,11 @@ export const ServicoEditDialog = ({
     if (!servico) return;
     setIsSaving(true);
     try {
-      await onSave(servico.item, formData);
+      const payload = { ...formData };
+      if (!canEditStatus) {
+        delete payload.status;
+      }
+      await onSave(servico.item, payload);
     } finally {
       setIsSaving(false);
     }
@@ -108,7 +114,7 @@ export const ServicoEditDialog = ({
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className={canEditStatus ? "grid grid-cols-3 gap-4" : "grid grid-cols-2 gap-4"}>
             <div>
               <label className="text-sm font-medium">Tipo de Contratação</label>
               <select
@@ -137,26 +143,28 @@ export const ServicoEditDialog = ({
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label className="text-sm font-medium">Status</label>
-              <Select
-                value={formData.status || "rascunho"}
-                onValueChange={(v: any) => handleChange("status", v)}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="rascunho">Rascunho</SelectItem>
-                  <SelectItem value="enviado">Enviado</SelectItem>
-                  <SelectItem value="em_analise">Em Análise</SelectItem>
-                  <SelectItem value="aprovado">Aprovado</SelectItem>
-                  <SelectItem value="rejeitado">Rejeitado</SelectItem>
-                  <SelectItem value="em_compra">Em Compra</SelectItem>
-                  <SelectItem value="concluido">Concluído</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {canEditStatus && (
+              <div>
+                <label className="text-sm font-medium">Status</label>
+                <Select
+                  value={formData.status || "rascunho"}
+                  onValueChange={(v: any) => handleChange("status", v)}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="rascunho">Rascunho</SelectItem>
+                    <SelectItem value="enviado">Enviado</SelectItem>
+                    <SelectItem value="em_analise">Em Análise</SelectItem>
+                    <SelectItem value="aprovado">Aprovado</SelectItem>
+                    <SelectItem value="rejeitado">Rejeitado</SelectItem>
+                    <SelectItem value="em_compra">Em Compra</SelectItem>
+                    <SelectItem value="concluido">Concluído</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -231,6 +239,7 @@ interface AquisicaoEditDialogProps {
   onOpenChange: (open: boolean) => void;
   aquisicao: PlanItem | null;
   onSave: (codigo: number, updates: Partial<PlanItem>) => Promise<void>;
+  canEditStatus?: boolean;
 }
 
 export const AquisicaoEditDialog = ({
@@ -238,6 +247,7 @@ export const AquisicaoEditDialog = ({
   onOpenChange,
   aquisicao,
   onSave,
+  canEditStatus = false,
 }: AquisicaoEditDialogProps) => {
   const [formData, setFormData] = useState<Partial<PlanItem>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -260,7 +270,11 @@ export const AquisicaoEditDialog = ({
     if (!aquisicao) return;
     setIsSaving(true);
     try {
-      await onSave(aquisicao.codigo, formData);
+      const payload = { ...formData };
+      if (!canEditStatus) {
+        delete payload.status;
+      }
+      await onSave(aquisicao.codigo, payload);
     } finally {
       setIsSaving(false);
     }
@@ -307,7 +321,7 @@ export const AquisicaoEditDialog = ({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className={canEditStatus ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
             <div>
               <label className="text-sm font-medium">Prioridade</label>
               <Select
@@ -324,26 +338,28 @@ export const AquisicaoEditDialog = ({
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label className="text-sm font-medium">Status</label>
-              <Select
-                value={formData.status || "rascunho"}
-                onValueChange={(v: any) => handleChange("status", v)}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="rascunho">Rascunho</SelectItem>
-                  <SelectItem value="enviado">Enviado</SelectItem>
-                  <SelectItem value="em_analise">Em Análise</SelectItem>
-                  <SelectItem value="aprovado">Aprovado</SelectItem>
-                  <SelectItem value="rejeitado">Rejeitado</SelectItem>
-                  <SelectItem value="em_compra">Em Compra</SelectItem>
-                  <SelectItem value="concluido">Concluído</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {canEditStatus && (
+              <div>
+                <label className="text-sm font-medium">Status</label>
+                <Select
+                  value={formData.status || "rascunho"}
+                  onValueChange={(v: any) => handleChange("status", v)}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="rascunho">Rascunho</SelectItem>
+                    <SelectItem value="enviado">Enviado</SelectItem>
+                    <SelectItem value="em_analise">Em Análise</SelectItem>
+                    <SelectItem value="aprovado">Aprovado</SelectItem>
+                    <SelectItem value="rejeitado">Rejeitado</SelectItem>
+                    <SelectItem value="em_compra">Em Compra</SelectItem>
+                    <SelectItem value="concluido">Concluído</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div>
             <label className="text-sm font-medium">Observação</label>

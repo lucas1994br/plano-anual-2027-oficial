@@ -29,6 +29,7 @@ import { getBudgetOwnerDiretoriaId, getDiretoriaBudget, loadAdminBudgetConfig } 
 import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
 import { formatContratoMask } from "@/lib/utils";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import { SmartPagination } from "@/components/common/SmartPagination";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDebounce } from "@/hooks/useDebounce";
 
@@ -637,25 +638,64 @@ const DiretoriaAprovacao = () => {
   const orcamentoDiretoriaServicosExistentes = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
-  const gastoAquisicaoDiretoria = useMemo(
-    () =>
-      [...items, ...itensProprios]
-        .filter((item) => item.status !== "rejeitado" && item.qtdEstimada > 0)
-        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [items, itensProprios],
-  );
+  const isAprovado = (status?: SolicitacaoStatus) =>
+    status === "aprovado" || status === "em_compra" || status === "concluido";
+
+  const gastoAquisicaoDiretoria = useMemo(() => {
+    if (selectedOwnItems.size > 0 || selectedItems.size > 0) {
+      let totalSelected = 0;
+      if (selectedOwnItems.size > 0) {
+        filteredOwnItems.forEach((item) => {
+          const matchId = item.id && selectedOwnItems.has(item.id);
+          const matchCodigo = selectedOwnItems.has(item.codigo as any) || selectedOwnItems.has(String(item.codigo) as any);
+          if ((matchId || matchCodigo) && item.qtdEstimada > 0) {
+            totalSelected += item.qtdEstimada * item.valorUnitario;
+          }
+        });
+      }
+      if (selectedItems.size > 0) {
+        items.forEach((item) => {
+          if (item.id && selectedItems.has(item.id) && item.qtdEstimada > 0) {
+            totalSelected += item.qtdEstimada * item.valorUnitario;
+          }
+        });
+      }
+      return totalSelected;
+    }
+    return [...items, ...itensProprios]
+      .filter((item) => isAprovado(item.status) && item.qtdEstimada > 0)
+      .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
+  }, [items, itensProprios, filteredOwnItems, selectedOwnItems, selectedItems]);
 
   const gastoServicosExistentesDiretoria = useMemo(() => {
+    if (selectedServicos.size > 0) {
+      return servicosData
+        .filter((s: ServicoItem) => {
+          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(String(s.item));
+          const matchId = s.id && selectedServicos.has(s.id as any);
+          return servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
+        })
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+    }
     return servicosData
-      .filter((s: ServicoItem) => s.status !== "rejeitado" && servicosCatalogoSet.has(s.item))
+      .filter((s: ServicoItem) => isAprovado(s.status) && servicosCatalogoSet.has(s.item as any))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
-  }, [servicosData, servicosCatalogoSet]);
+  }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
   const gastoServicosNovosDiretoria = useMemo(() => {
+    if (selectedServicos.size > 0) {
+      return servicosData
+        .filter((s: ServicoItem) => {
+          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(String(s.item));
+          const matchId = s.id && selectedServicos.has(s.id as any);
+          return !servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
+        })
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+    }
     return servicosData
-      .filter((s: ServicoItem) => s.status !== "rejeitado" && !servicosCatalogoSet.has(s.item))
+      .filter((s: ServicoItem) => isAprovado(s.status) && !servicosCatalogoSet.has(s.item as any))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
-  }, [servicosData, servicosCatalogoSet]);
+  }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
   const gastoServicosDiretoria = useMemo(() => {
     return selectedOption === "servicos_existentes"
@@ -1741,7 +1781,18 @@ const DiretoriaAprovacao = () => {
     };
 
     const newStatus = actionMap[actionServicosDialog.action];
-    const servicosSelecionados = servicosFiltradasPorStatus.filter((s: any) => s.id && selectedServicos.has(s.id));
+    const todosServicosVisiveis = [
+      ...servicosFiltradasPorStatus,
+      ...servicosProprios,
+      ...servicosData,
+    ];
+    const mapUnicos = new Map<string, any>();
+    todosServicosVisiveis.forEach((s: any) => {
+      if (s.id && (selectedServicos.has(s.id) || selectedServicos.has(String(s.item)))) {
+        mapUnicos.set(s.id, s);
+      }
+    });
+    const servicosSelecionados = Array.from(mapUnicos.values());
     const servicosToUpdate = actionServicosDialog.action === "enviar_compras"
       ? servicosSelecionados.filter((s: any) => s.status === "aprovado")
       : servicosSelecionados;
@@ -2235,38 +2286,46 @@ const DiretoriaAprovacao = () => {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
-                      {servico.id && (
-                        <>
-                          {!isServicoReadOnly(servico) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              title="Editar"
-                              onClick={() => openServicoEditor(servico)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
+                      {/* Botão Editar (lápis): visível em todos os itens não somente-leitura */}
+                      {!isServicoReadOnly(servico) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Editar"
+                          onClick={() => openServicoEditor(servico)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+
+                      {/* Botão Devolver para Rascunho (seta curvada): visível no filtro de aprovados ou para serviços aprovados */}
+                      {(ownServicosShowOnlyAprovados || servico.status === "aprovado") &&
+                        !ownServicosShowOnlyZerados &&
+                        !ownServicosShowOnlyComValor &&
+                        servico.id && (
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-orange-600 hover:text-orange-700"
+                            className="h-7 w-7 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                             title="Devolver para Rascunho"
                             onClick={() => handleDevolverServicoDiretoria(servico.id!)}
                           >
                             <Undo2 className="h-3.5 w-3.5" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive"
-                            title="Excluir"
-                            onClick={() => handleDeleteServicoDiretoria(servico.id!)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </>
+                      )}
+
+                      {/* Botão Excluir (lixeira): visível apenas para novos serviços criados pela diretoria */}
+                      {selectedOption === "servicos_novos" && servico.id && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                          title="Excluir"
+                          onClick={() => handleDeleteServicoDiretoria(servico.id!)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       )}
                     </div>
                   </td>
@@ -2451,37 +2510,12 @@ const DiretoriaAprovacao = () => {
                 <>
                   {renderServicosTable(selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", ownServicosPaginationData.paginatedItems)}
                   {ownServicosPaginationData.totalPages > 1 && (
-                    <div className="mt-4">
-                      <Pagination>
-                        <PaginationContent>
-                          <PaginationItem>
-                            <PaginationPrevious 
-                              onClick={() => setOwnServicosCurrentPage(Math.max(1, ownServicosCurrentPage - 1))}
-                              className={ownServicosCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                          </PaginationItem>
-                          
-                          {Array.from({ length: ownServicosPaginationData.totalPages }, (_, i) => i + 1).map((page) => (
-                            <PaginationItem key={`own-svc-${page}`}>
-                              <PaginationLink 
-                                onClick={() => setOwnServicosCurrentPage(page)}
-                                isActive={ownServicosCurrentPage === page}
-                                className="cursor-pointer"
-                              >
-                                {page}
-                              </PaginationLink>
-                            </PaginationItem>
-                          ))}
-                          
-                          <PaginationItem>
-                            <PaginationNext 
-                              onClick={() => setOwnServicosCurrentPage(Math.min(ownServicosPaginationData.totalPages, ownServicosCurrentPage + 1))}
-                              className={ownServicosCurrentPage === ownServicosPaginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                          </PaginationItem>
-                        </PaginationContent>
-                      </Pagination>
-                    </div>
+                    <SmartPagination
+                      currentPage={ownServicosCurrentPage}
+                      totalPages={ownServicosPaginationData.totalPages}
+                      onPageChange={setOwnServicosCurrentPage}
+                      totalItems={ownServicosPaginationData.totalItems}
+                    />
                   )}
                 </>
               )}
@@ -2743,37 +2777,12 @@ const DiretoriaAprovacao = () => {
 
                   {/* Paginação Serviços */}
                   {totalPagesServicos > 1 && (
-                    <div className="mt-4 flex justify-center">
-                      <Pagination>
-                        <PaginationContent>
-                          <PaginationItem>
-                            <PaginationPrevious 
-                              onClick={() => setServicosCurrentPage(Math.max(1, servicosCurrentPage - 1))}
-                              className={servicosCurrentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                            />
-                          </PaginationItem>
-
-                          {Array.from({ length: totalPagesServicos }, (_, i) => i + 1).map((page) => (
-                            <PaginationItem key={page}>
-                              <PaginationLink 
-                                onClick={() => setServicosCurrentPage(page)}
-                                isActive={page === servicosCurrentPage}
-                                className="cursor-pointer"
-                              >
-                                {page}
-                              </PaginationLink>
-                            </PaginationItem>
-                          ))}
-
-                          <PaginationItem>
-                            <PaginationNext 
-                              onClick={() => setServicosCurrentPage(Math.min(totalPagesServicos, servicosCurrentPage + 1))}
-                              className={servicosCurrentPage === totalPagesServicos ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                            />
-                          </PaginationItem>
-                        </PaginationContent>
-                      </Pagination>
-                    </div>
+                    <SmartPagination
+                      currentPage={servicosCurrentPage}
+                      totalPages={totalPagesServicos}
+                      onPageChange={setServicosCurrentPage}
+                      totalItems={servicosFiltradasPorStatus.length}
+                    />
                   )}
                 </div>
               </>
@@ -3000,6 +3009,7 @@ const DiretoriaAprovacao = () => {
               toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
             }}
             diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
+            canEditStatus={true}
           />
           
           </div>
@@ -3211,12 +3221,14 @@ const DiretoriaAprovacao = () => {
           <>
             <PlanTable
               items={ownPaginationData.paginatedItems}
+              totalItems={filteredOwnItems.length}
               onUpdateQtdEstimada={handleUpdateQtdEstimadaDiretoria}
               onUpdateUnidade={handleUpdateUnidadeDiretoria}
               onUpdateObservacao={handleUpdateObservacaoDiretoria}
               onUpdatePrioridade={handleUpdatePrioridadeDiretoria}
               onDeleteItem={handleOwnDevolverIndividual}
-              valorTotal={Array.from(itensPropriosMap.values()).reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
+              onEditItem={openSolicitacaoEditor}
+              valorTotal={filteredOwnItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
               selectedItems={selectedOwnItems}
               onToggleSelect={(id) => {
                 const newSet = new Set(selectedOwnItems);
@@ -3235,37 +3247,12 @@ const DiretoriaAprovacao = () => {
             />
 
             {ownPaginationData.totalPages > 1 && (
-              <div className="mt-4 flex justify-center">
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        onClick={() => setOwnCurrentPage(Math.max(1, ownCurrentPage - 1))}
-                        className={ownCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-
-                    {Array.from({ length: ownPaginationData.totalPages }, (_, i) => i + 1).map((page) => (
-                      <PaginationItem key={`own-${page}`}>
-                        <PaginationLink
-                          onClick={() => setOwnCurrentPage(page)}
-                          isActive={page === ownCurrentPage}
-                          className="cursor-pointer"
-                        >
-                          {page}
-                        </PaginationLink>
-                      </PaginationItem>
-                    ))}
-
-                    <PaginationItem>
-                      <PaginationNext
-                        onClick={() => setOwnCurrentPage(Math.min(ownPaginationData.totalPages, ownCurrentPage + 1))}
-                        className={ownCurrentPage === ownPaginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              </div>
+              <SmartPagination
+                currentPage={ownCurrentPage}
+                totalPages={ownPaginationData.totalPages}
+                onPageChange={setOwnCurrentPage}
+                totalItems={filteredOwnItems.length}
+              />
             )}
           </>
         )}
@@ -3706,37 +3693,12 @@ const DiretoriaAprovacao = () => {
 
             {/* Paginação */}
             {totalPages > 1 && (
-              <div className="mt-4 flex justify-center">
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious 
-                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                        className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                      />
-                    </PaginationItem>
-
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                      <PaginationItem key={page}>
-                        <PaginationLink 
-                          onClick={() => setCurrentPage(page)}
-                          isActive={page === currentPage}
-                          className="cursor-pointer"
-                        >
-                          {page}
-                        </PaginationLink>
-                      </PaginationItem>
-                    ))}
-
-                    <PaginationItem>
-                      <PaginationNext 
-                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                        className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              </div>
+              <SmartPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                totalItems={recebidosTableItems.length}
+              />
             )}
           </div>
         </>
@@ -4021,6 +3983,7 @@ const DiretoriaAprovacao = () => {
           }
         }}
         diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
+        canEditStatus={true}
       />
 
       <AquisicaoEditDialog
@@ -4028,9 +3991,8 @@ const DiretoriaAprovacao = () => {
         onOpenChange={setSolicitacaoEditOpen}
         aquisicao={solicitacaoEdicao}
         onSave={async (codigo, updates) => {
-          if (!solicitacaoEdicao?.id) return;
           try {
-            await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+            await ensureSolicitacaoDiretoria(Number(codigo), updates);
             setSolicitacaoEditOpen(false);
             setSolicitacaoEdicao(null);
             queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
@@ -4041,6 +4003,7 @@ const DiretoriaAprovacao = () => {
             toast({ title: "Erro ao atualizar", description: "Falha ao salvar aquisição.", variant: "destructive" });
           }
         }}
+        canEditStatus={true}
       />
     </div>
     </div>

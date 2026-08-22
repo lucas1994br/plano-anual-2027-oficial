@@ -17,6 +17,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination.tsx";
+import { SmartPagination } from "@/components/common/SmartPagination.tsx";
 import {
   Select,
   SelectContent,
@@ -1148,36 +1149,13 @@ const ComprasPanel = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2 justify-end">
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious 
-                          onClick={() => setServicosPage(Math.max(1, servicosPage - 1))}
-                          className={servicosPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-
-                      {Array.from({ length: totalServicosPages }, (_, i) => i + 1).map((page) => (
-                        <PaginationItem key={page}>
-                          <PaginationLink 
-                            onClick={() => setServicosPage(page)}
-                            isActive={page === servicosPage}
-                            className="cursor-pointer"
-                          >
-                            {page}
-                          </PaginationLink>
-                        </PaginationItem>
-                      ))}
-
-                      <PaginationItem>
-                        <PaginationNext 
-                          onClick={() => setServicosPage(Math.min(totalServicosPages, servicosPage + 1))}
-                          className={servicosPage === totalServicosPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
+                <div className="flex-1">
+                  <SmartPagination
+                    currentPage={servicosPage}
+                    totalPages={totalServicosPages}
+                    onPageChange={setServicosPage}
+                    totalItems={filteredServicos.length}
+                  />
                 </div>
               </div>
             )}
@@ -1194,6 +1172,7 @@ const ComprasPanel = () => {
                 queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
                 toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
               }}
+              canEditStatus={true}
             />
             
           </div>
@@ -1520,36 +1499,13 @@ const ComprasPanel = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2 justify-end">
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious 
-                      onClick={() => setItemsPage(Math.max(1, itemsPage - 1))}
-                      className={itemsPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-
-                  {Array.from({ length: totalItemsPages }, (_, i) => i + 1).map((page) => (
-                    <PaginationItem key={page}>
-                      <PaginationLink 
-                        onClick={() => setItemsPage(page)}
-                        isActive={page === itemsPage}
-                        className="cursor-pointer"
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-
-                  <PaginationItem>
-                    <PaginationNext 
-                      onClick={() => setItemsPage(Math.min(totalItemsPages, itemsPage + 1))}
-                      className={itemsPage === totalItemsPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
+            <div className="flex-1">
+              <SmartPagination
+                currentPage={itemsPage}
+                totalPages={totalItemsPages}
+                onPageChange={setItemsPage}
+                totalItems={filteredItems.length}
+              />
             </div>
             <div className="flex gap-2 md:ml-auto">
               <Button variant="outline" className="gap-2" onClick={handleExportExcel}>
@@ -1598,6 +1554,7 @@ const ComprasPanel = () => {
             toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
           }
         }}
+        canEditStatus={true}
       />
 
       <AquisicaoEditDialog
@@ -1617,6 +1574,7 @@ const ComprasPanel = () => {
             toast({ title: "Erro ao atualizar", description: "Falha ao salvar aquisição.", variant: "destructive" });
           }
         }}
+        canEditStatus={true}
       />
     </div>
   );

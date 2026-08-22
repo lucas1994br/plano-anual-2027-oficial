@@ -42,6 +42,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { SmartPagination } from "@/components/common/SmartPagination";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import {
@@ -263,13 +264,24 @@ import {
   const orcamentoDiretoriaServicosExistentes = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "servicos_existentes")
     : 0;
-  const gastoAquisicaoGerencia = useMemo(
-    () =>
-      items
-        .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && item.qtdEstimada > 0)
-        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-    [items, diretoria?.id],
-  );
+  const isAprovado = (status?: SolicitacaoStatus) =>
+    status === "aprovado" || status === "em_compra" || status === "concluido";
+
+  const gastoAquisicaoGerencia = useMemo(() => {
+    if (selectedAquisicaoIds.size > 0) {
+      return items
+        .filter((item) => {
+          const matchId = item.id && selectedAquisicaoIds.has(item.id);
+          const matchCodigo = selectedAquisicaoIds.has(item.codigo as any) || selectedAquisicaoIds.has(String(item.codigo) as any);
+          return (matchId || matchCodigo) && item.qtdEstimada > 0;
+        })
+        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
+    }
+    return items
+      .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && isAprovado(item.status) && item.qtdEstimada > 0)
+      .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
+  }, [items, diretoria?.id, selectedAquisicaoIds]);
+
   const summary = useMemo(
     () => ({
       totalItens: filteredItems.length,
@@ -311,17 +323,35 @@ import {
 
   const gastoServicosExistentes = useMemo(() => {
     const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
+    if (selectedServicos.size > 0) {
+      return servicosData
+        .filter((s: ServicoItem) => {
+          const matchItem = selectedServicos.has(s.item) || selectedServicos.has(String(s.item) as any) || selectedServicos.has(Number(s.item) as any);
+          const matchId = s.id && selectedServicos.has(s.id as any);
+          return catalogoSet.has(String(s.item)) && (matchItem || matchId);
+        })
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
+    }
     return servicosData
-      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)))
+      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)) && isAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
-  }, [servicosData, servicosCatalogoData]);
+  }, [servicosData, servicosCatalogoData, selectedServicos]);
 
   const gastoServicosNovos = useMemo(() => {
     const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
+    if (selectedServicos.size > 0) {
+      return servicosData
+        .filter((s: ServicoItem) => {
+          const matchItem = selectedServicos.has(s.item) || selectedServicos.has(String(s.item) as any) || selectedServicos.has(Number(s.item) as any);
+          const matchId = s.id && selectedServicos.has(s.id as any);
+          return !catalogoSet.has(String(s.item)) && (matchItem || matchId);
+        })
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
+    }
     return servicosData
-      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)))
+      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)) && isAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
-  }, [servicosData, servicosCatalogoData]);
+  }, [servicosData, servicosCatalogoData, selectedServicos]);
 
   const canSend = items.some((item) => item.qtdEstimada > 0 && item.status === "rascunho"); // Permite enviar se tiver pelo menos 1 item com quantidade em rascunho
   const isReadOnly = items.some((item) => item.status === "enviado" || item.status === "em_analise" || item.status === "aprovado");
@@ -340,10 +370,19 @@ import {
   );
 
   const ensureSolicitacao = async (itemCode: number, updates: any) => {
+    const safeUpdates = { ...updates };
+    if (safeUpdates.status !== undefined && safeUpdates.status !== "enviado") {
+      delete safeUpdates.status;
+    }
+
     const existente = items.find((i) => String(i.codigo) === String(itemCode));
     if (existente?.id) {
       if (existente.status !== "rascunho" && existente.status !== "rejeitado") return;
-      await updateSolicitacao(existente.id, updates);
+      if (existente.status === "rejeitado" && !safeUpdates.status) {
+        safeUpdates.status = "rascunho";
+        safeUpdates.justificativa_rejeicao = null;
+      }
+      await updateSolicitacao(existente.id, safeUpdates);
       queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
       return;
     }
@@ -361,12 +400,12 @@ import {
       codigo: catalogoItem.codigo,
       descricao: catalogoItem.descricao,
       categoria: catalogoItem.categoria,
-      unidade: updates.unidade !== undefined ? updates.unidade : (catalogoItem.unidade || "un"),
-      qtdEstimada: updates.qtdEstimada !== undefined ? updates.qtdEstimada : 0,
+      unidade: safeUpdates.unidade !== undefined ? safeUpdates.unidade : (catalogoItem.unidade || "un"),
+      qtdEstimada: safeUpdates.qtdEstimada !== undefined ? safeUpdates.qtdEstimada : 0,
       valorUnitario: catalogoItem.valor_unitario || 0,
-      prioridade: updates.prioridade !== undefined ? updates.prioridade : "Baixa",
-      observacao: updates.observacao !== undefined ? updates.observacao : null,
-      status: updates.status || "rascunho",
+      prioridade: safeUpdates.prioridade !== undefined ? safeUpdates.prioridade : "Baixa",
+      observacao: safeUpdates.observacao !== undefined ? safeUpdates.observacao : null,
+      status: safeUpdates.status || "rascunho",
     });
     queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
   };
@@ -536,11 +575,20 @@ import {
   };
 
   const ensureServico = async (itemCode: number | string, updates: any) => {
+    const safeUpdates = { ...updates };
+    if (safeUpdates.status !== undefined && safeUpdates.status !== "enviado") {
+      delete safeUpdates.status;
+    }
+
     const servicoExistente = servicosData.find((s: ServicoItem) => String(s.item) === String(itemCode));
     
     if (servicoExistente?.id) {
       if (servicoExistente.status !== "rascunho" && servicoExistente.status !== "rejeitado") return;
-      await updateServico(servicoExistente.id, updates);
+      if (servicoExistente.status === "rejeitado" && !safeUpdates.status) {
+        safeUpdates.status = "rascunho";
+        safeUpdates.justificativa_rejeicao = null;
+      }
+      await updateServico(servicoExistente.id, safeUpdates);
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
       return;
     }
@@ -553,20 +601,20 @@ import {
       diretoria_id: diretoria?.id,
       gerencia_id: gerenciaAtual?.id,
       item: catalogoItem.item,
-      tipo_contratacao: updates.tipoContratacao !== undefined ? updates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
-      unidade_demandante: updates.unidadeDemandante !== undefined ? updates.unidadeDemandante : (catalogoItem.unidade_demandante || ""),
-      objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
-      justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || ""),
-      previsao_inicio: updates.previsaoInicio !== undefined ? updates.previsaoInicio : (catalogoItem.previsao_inicio || ""),
-      estimativa_valor: updates.estimativaValor !== undefined ? updates.estimativaValor : (catalogoItem.estimativa_valor || 0),
-      dotacao_orcamentaria: updates.dotacaoOrcamentaria !== undefined ? updates.dotacaoOrcamentaria : (catalogoItem.dotacao_orcamentaria || 0),
-      grau_prioridade: updates.grauPrioridade !== undefined ? updates.grauPrioridade : (catalogoItem.grau_prioridade || ""),
-      vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : (catalogoItem.vinculacao || "Não"),
-      dependencia_descricao: updates.dependenciaDescricao !== undefined ? updates.dependenciaDescricao : (catalogoItem.dependencia_descricao || ""),
-      status: updates.status !== undefined ? updates.status : "rascunho",
-      observacao: updates.observacao !== undefined ? updates.observacao : "",
-      contrato: updates.contrato !== undefined ? updates.contrato : "",
-      contratada: updates.contratada !== undefined ? updates.contratada : "",
+      tipo_contratacao: safeUpdates.tipoContratacao !== undefined ? safeUpdates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
+      unidade_demandante: safeUpdates.unidadeDemandante !== undefined ? safeUpdates.unidadeDemandante : (catalogoItem.unidade_demandante || ""),
+      objeto: safeUpdates.objeto !== undefined ? safeUpdates.objeto : (catalogoItem.objeto || ""),
+      justificativa: safeUpdates.justificativa !== undefined ? safeUpdates.justificativa : (catalogoItem.justificativa || ""),
+      previsao_inicio: safeUpdates.previsaoInicio !== undefined ? safeUpdates.previsaoInicio : (catalogoItem.previsao_inicio || ""),
+      estimativa_valor: safeUpdates.estimativaValor !== undefined ? safeUpdates.estimativaValor : (catalogoItem.estimativa_valor || 0),
+      dotacao_orcamentaria: safeUpdates.dotacaoOrcamentaria !== undefined ? safeUpdates.dotacaoOrcamentaria : (catalogoItem.dotacao_orcamentaria || 0),
+      grau_prioridade: safeUpdates.grauPrioridade !== undefined ? safeUpdates.grauPrioridade : (catalogoItem.grau_prioridade || ""),
+      vinculacao: safeUpdates.vinculacao !== undefined ? safeUpdates.vinculacao : (catalogoItem.vinculacao || "Não"),
+      dependencia_descricao: safeUpdates.dependenciaDescricao !== undefined ? safeUpdates.dependenciaDescricao : (catalogoItem.dependencia_descricao || ""),
+      status: safeUpdates.status || "rascunho",
+      observacao: safeUpdates.observacao !== undefined ? safeUpdates.observacao : "",
+      contrato: safeUpdates.contrato !== undefined ? safeUpdates.contrato : "",
+      contratada: safeUpdates.contratada !== undefined ? safeUpdates.contratada : "",
     };
 
     await createServico(newServico);
@@ -1574,36 +1622,13 @@ import {
         </div>
         
         {totalPages > 1 && (
-          <div className="py-6">
-            <Pagination>
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    onClick={() => setCurrentPageServicos(Math.max(1, currentPageServicos - 1))}
-                    className={currentPageServicos === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                  />
-                </PaginationItem>
-                
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                  <PaginationItem key={page}>
-                    <PaginationLink 
-                      onClick={() => setCurrentPageServicos(page)}
-                      isActive={page === currentPageServicos}
-                      className="cursor-pointer"
-                    >
-                      {page}
-                    </PaginationLink>
-                  </PaginationItem>
-                ))}
-
-                <PaginationItem>
-                  <PaginationNext
-                    onClick={() => setCurrentPageServicos(Math.min(totalPages, currentPageServicos + 1))}
-                    className={currentPageServicos === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
+          <div className="py-4">
+            <SmartPagination
+              currentPage={currentPageServicos}
+              totalPages={totalPages}
+              onPageChange={setCurrentPageServicos}
+              totalItems={lista.length}
+            />
           </div>
         )}
       </div>
@@ -2448,36 +2473,13 @@ import {
           </div>
 
           {paginationData.totalPages > 1 && (
-            <div className="py-6">
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-                  
-                  {Array.from({ length: paginationData.totalPages }, (_, i) => i + 1).map((page) => (
-                    <PaginationItem key={page}>
-                      <PaginationLink 
-                        onClick={() => setCurrentPage(page)}
-                        isActive={page === currentPage}
-                        className="cursor-pointer"
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
-                      className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
+            <div className="py-4">
+              <SmartPagination
+                currentPage={currentPage}
+                totalPages={paginationData.totalPages}
+                onPageChange={setCurrentPage}
+                totalItems={filteredItems.length}
+              />
             </div>
           )}
         </div>
