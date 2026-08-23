@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2, Lock } from "lucide-react";
+import { ArrowLeft, Send, Eye, CheckCircle, Home, Plus, FileDown, FileSpreadsheet, Trash2, Pencil, Undo2, Lock, RotateCcw, Loader2 } from "lucide-react";
 import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -72,11 +72,11 @@ import {
   import { useQuery, useQueryClient } from "@tanstack/react-query";
   import { useToast } from "@/hooks/use-toast";
   import { supabase } from "@/lib/supabaseClient";
-  import { resolveGerenciaNome } from "@/data/gerencias";
-  import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
-  import { useGerenciaData } from "@/hooks/useGerenciaData";
   import { useSortableTable } from "@/hooks/useSortableTable";
   import { SortableTableHead } from "@/components/ui/sortable-table-head";
+  import { useGerenciaData } from "@/hooks/useGerenciaData";
+  import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
+  
   // Mapeamento de ícones por sigla
   const getIconPath = (sigla: string): string | null => {
     const iconMap: Record<string, string> = {
@@ -137,7 +137,7 @@ import {
     const ITEMS_PER_PAGE = 100;
     const queryClient = useQueryClient();
     const { toast } = useToast();
-    const { descriptions: materialDescriptions, isLoading: isLoadingDescriptions } = useMaterialDescriptions();
+    const { descriptions: materialDescriptions } = useMaterialDescriptions();
     const [selectedAquisicaoIds, setSelectedAquisicaoIds] = useState<Set<string>>(new Set());
     const {
       diretoria,
@@ -152,6 +152,8 @@ import {
       catalogoData,
       orcamentoConfig,
       categoryBudgetOwnersFromDb,
+      isAquisicaoLoading,
+      isServicosLoading,
     } = useGerenciaData(siglaUpper, gerenciaUpper);
 
   const isPeriodExpired = useMemo(() => {
@@ -165,8 +167,6 @@ import {
 
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
-    if (isLoadingDescriptions) return [];
-    
     // Mesclar catálogo base com solicitações existentes
     return catalogoData.map((c: any) => {
       const existente = solicitacoes.find((s: any) => s.item_id === c.id || Number(s.codigo) === Number(c.codigo));
@@ -205,7 +205,7 @@ import {
         isOrcamentoCompartilhado: !!diretoria && diretoriaOrcamentariaId !== diretoria.id,
       };
     });
-  }, [solicitacoes, catalogoData, materialDescriptions, isLoadingDescriptions, gerenciaUpper, diretoria, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
+  }, [solicitacoes, catalogoData, materialDescriptions, gerenciaUpper, diretoria, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -221,9 +221,10 @@ import {
 
       const matchesCategoria = !categoria || categoria === "" || item.categoria === categoria;
       const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
+      const isSentStatus = ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
       const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || item.qtdEstimada > 0;
-      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
+      const matchesComQuantidade = !showOnlyComQuantidade || (item.qtdEstimada > 0 && !isSentStatus);
+      const matchesSent = !showOnlySent || isSentStatus;
       return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
   }, [items, searchTerm, categoria, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
@@ -466,6 +467,34 @@ import {
     }
   };
 
+  const handleDevolverTodosAquisicao = async (itemIds: string[]) => {
+    if (itemIds.length === 0) {
+      toast({
+        title: "Nenhum item selecionado",
+        description: "Selecione pelo menos um item antes de utilizar a ação.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const msg = itemIds.length === 1
+      ? "Tem certeza que deseja devolver o item selecionado para rascunho?"
+      : `Tem certeza que deseja devolver os ${itemIds.length} item(ns) selecionados para rascunho?`;
+    if (!confirm(msg)) return;
+    try {
+      await updateSolicitacaoStatusBulk(itemIds, "rascunho");
+      toast({ title: "Itens devolvidos", description: `${itemIds.length} item(ns) voltaram para o status de Rascunho.` });
+      setSelectedAquisicaoIds((prev) => {
+        const next = new Set(prev);
+        itemIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+    } catch (error: any) {
+      console.error("Erro ao devolver itens:", error);
+      toast({ title: "Erro", description: "Não foi possível devolver os itens.", variant: "destructive" });
+    }
+  };
+
   const handleDeleteItem = async (itemId: string) => {
     if (!confirm("Excluir este item permanentemente?")) return;
 
@@ -656,6 +685,35 @@ import {
     }
   };
 
+  const handleDevolverTodosServico = async (servicoIds: string[]) => {
+    if (servicoIds.length === 0) {
+      toast({
+        title: "Nenhum serviço selecionado",
+        description: "Selecione pelo menos um item antes de utilizar a ação.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const msg = servicoIds.length === 1
+      ? "Tem certeza que deseja devolver o serviço selecionado para rascunho?"
+      : `Tem certeza que deseja devolver os ${servicoIds.length} serviço(s) selecionados para rascunho?`;
+    if (!confirm(msg)) return;
+    try {
+      await Promise.all(servicoIds.map((id) => updateServico(id, { status: "rascunho" })));
+      toast({ title: "Serviços devolvidos", description: `${servicoIds.length} serviço(s) voltaram para o status de Rascunho.` });
+      setSelectedServicos((prev) => {
+        const next = new Set(prev);
+        const itemsToRemove = servicosData.filter((s) => s.id && servicoIds.includes(s.id)).map((s) => s.item);
+        itemsToRemove.forEach((itemCode) => next.delete(itemCode));
+        return next;
+      });
+      queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    } catch (error: any) {
+      console.error("Erro ao devolver serviços:", error);
+      toast({ title: "Erro", description: "Não foi possível devolver os serviços.", variant: "destructive" });
+    }
+  };
+
   const handleDeleteServico = async (servicoId: string | undefined, itemCode: number) => {
     if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
 
@@ -697,10 +755,14 @@ import {
   };
 
   const toggleSelectAllServicos = (todos: ServicoItem[]) => {
-    if (selectedServicos.size === todos.length) {
-      setSelectedServicos(new Set());
+    if (todos.length > 0 && todos.every((s) => selectedServicos.has(s.item))) {
+      const newSet = new Set(selectedServicos);
+      todos.forEach((s) => newSet.delete(s.item));
+      setSelectedServicos(newSet);
     } else {
-      setSelectedServicos(new Set(todos.map(s => s.item)));
+      const newSet = new Set(selectedServicos);
+      todos.forEach((s) => newSet.add(s.item));
+      setSelectedServicos(newSet);
     }
   };
 
@@ -1307,9 +1369,10 @@ import {
 
       const matchesPrioridade = prioridade === "todas" || item.grauPrioridade === prioridade;
       const val = item.estimativaValor || item.dotacaoOrcamentaria || 0;
+      const isServicoSentStatus = ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
       const matchesZerado = !showOnlyZerados || val === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || val > 0;
-      const matchesSent = !showOnlySent || ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
+      const matchesComQuantidade = !showOnlyComQuantidade || (val > 0 && !isServicoSentStatus);
+      const matchesSent = !showOnlySent || isServicoSentStatus;
       return matchesSearch && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
     });
 
@@ -1413,22 +1476,27 @@ import {
               <thead className="bg-muted/50 border-b">
                 <tr>
                   <th className="p-3 text-left w-10">
-                    <Checkbox
-                      checked={paginatedLista.filter(s => !isServicoReadOnly(s)).length > 0 && paginatedLista.filter(s => !isServicoReadOnly(s)).every(s => selectedServicos.has(s.item))}
-                      onCheckedChange={(checked) => {
-                        const editaveis = paginatedLista.filter(s => !isServicoReadOnly(s));
-                        if (checked) {
-                          const newSet = new Set(selectedServicos);
-                          editaveis.forEach(s => newSet.add(s.item));
-                          setSelectedServicos(newSet);
-                        } else {
-                          const newSet = new Set(selectedServicos);
-                          editaveis.forEach(s => newSet.delete(s.item));
-                          setSelectedServicos(newSet);
-                        }
-                      }}
-                      disabled={paginatedLista.filter(s => !isServicoReadOnly(s)).length === 0}
-                    />
+                    {(() => {
+                      const servicosSelecionaveis = showOnlySent
+                        ? paginatedLista.filter(s => Boolean(s.id))
+                        : paginatedLista.filter(s => !isServicoReadOnly(s));
+                      const allChecked = servicosSelecionaveis.length > 0 && servicosSelecionaveis.every(s => selectedServicos.has(s.item));
+                      return (
+                        <Checkbox
+                          checked={allChecked}
+                          onCheckedChange={(checked) => {
+                            const newSet = new Set(selectedServicos);
+                            if (checked) {
+                              servicosSelecionaveis.forEach(s => newSet.add(s.item));
+                            } else {
+                              servicosSelecionaveis.forEach(s => newSet.delete(s.item));
+                            }
+                            setSelectedServicos(newSet);
+                          }}
+                          disabled={servicosSelecionaveis.length === 0}
+                        />
+                      );
+                    })()}
                   </th>
                   <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-12 cursor-pointer hover:text-foreground" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>
                     Nº
@@ -1470,16 +1538,17 @@ import {
                 ) : (
                   paginatedLista.map((servico, index) => {
                     const readOnly = isServicoReadOnly(servico);
+                    const isSelectable = showOnlySent ? Boolean(servico.id) : !readOnly;
                     return (
                       <tr
                         key={servico.id || index}
-                        className={`border-b ${readOnly ? "opacity-80" : "hover:bg-muted/20"} ${index % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
+                        className={`border-b ${readOnly && !showOnlySent ? "opacity-80" : "hover:bg-muted/20"} ${index % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
                       >
                         <td className="p-3">
                           <Checkbox
                             checked={selectedServicos.has(servico.item)}
-                            onCheckedChange={() => !readOnly && toggleSelectServico(servico.item)}
-                            disabled={readOnly}
+                            onCheckedChange={() => isSelectable && toggleSelectServico(servico.item)}
+                            disabled={!isSelectable}
                           />
                         </td>
                         <td className="p-3 text-sm font-mono text-muted-foreground">{servico.item}</td>
@@ -1739,6 +1808,22 @@ import {
                 <Send className="h-4 w-4" />
                 {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
               </Button>
+              {showOnlySent && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 text-amber-600 border-amber-400 hover:bg-amber-50"
+                  onClick={() => {
+                    const ids = filteredServicos
+                      .filter(s => s.id && selectedServicos.has(s.item))
+                      .map(s => s.id!);
+                    handleDevolverTodosServico(ids);
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Devolver Todos ({filteredServicos.filter(s => s.id && selectedServicos.has(s.item)).length})
+                </Button>
+              )}
             </div>
             <div className="flex gap-2">
               <Button
@@ -1778,24 +1863,37 @@ import {
           {(searchTerm.trim() !== "" || showOnlyComQuantidade || showOnlyZerados || showOnlySent) && (
             <div className="px-6 py-3 border-b flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {!isAllSent && servicosEditaveis.length > 0 && (
-                  <>
-                    <Checkbox
-                      checked={servicosEditaveis.length > 0 && servicosEditaveis.every(s => selectedServicos.has(s.item))}
-                      onCheckedChange={() => toggleSelectAllServicos(servicosEditaveis)}
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      {selectedServicos.size > 0 ? `${selectedServicos.size} selecionado(s)` : "Selecionar todos"}
-                    </span>
-                  </>
-                )}
+                {(() => {
+                  const servicosSelecionaveisGeral = showOnlySent
+                    ? filteredServicos.filter(s => Boolean(s.id))
+                    : servicosEditaveis;
+                  if (servicosSelecionaveisGeral.length === 0) return null;
+                  return (
+                    <>
+                      <Checkbox
+                        checked={servicosSelecionaveisGeral.length > 0 && servicosSelecionaveisGeral.every(s => selectedServicos.has(s.item))}
+                        onCheckedChange={() => toggleSelectAllServicos(servicosSelecionaveisGeral)}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {selectedServicos.size > 0 ? `${selectedServicos.size} selecionado(s)` : "Selecionar todos"}
+                      </span>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
 
           {/* Tabelas */}
           <div className="px-6 py-6">
-            {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
+            {isServicosLoading && displayedServicos.length === 0 ? (
+              <div className="px-6 py-12 text-center text-muted-foreground">
+                <div className="inline-flex flex-col items-center gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-base font-medium">Carregando serviços...</p>
+                </div>
+              </div>
+            ) : searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
               <div className="px-6 py-12 text-center">
                 <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
                   <span className="text-5xl">🔍</span>
@@ -2225,6 +2323,22 @@ import {
             <Send className="h-4 w-4" />
             {showOnlySent ? "Mostrando apenas enviados" : "Filtrar enviados"}
           </Button>
+          {showOnlySent && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 text-amber-600 border-amber-400 hover:bg-amber-50"
+              onClick={() => {
+                const ids = filteredItems
+                  .filter(i => i.id && selectedAquisicaoIds.has(i.id))
+                  .map(i => i.id!);
+                handleDevolverTodosAquisicao(ids);
+              }}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Devolver Todos ({filteredItems.filter(i => i.id && selectedAquisicaoIds.has(i.id)).length})
+            </Button>
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -2259,7 +2373,14 @@ import {
         categorias={categoriasDisponiveis}
       />
       {/* Resultados da busca — só mostra quando o usuário digitar algo, ou se ativar um dos filtros específicos */}
-      {searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
+      {isAquisicaoLoading && items.length === 0 ? (
+        <div className="px-6 py-12 text-center text-muted-foreground">
+          <div className="inline-flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-base font-medium">Carregando itens do planejamento...</p>
+          </div>
+        </div>
+      ) : searchTerm.trim() === "" && !showOnlyComQuantidade && !showOnlyZerados && !showOnlySent ? (
         <div className="px-6 py-12 text-center">
           <div className="inline-flex flex-col items-center gap-3 text-muted-foreground">
             <span className="text-5xl">🔍</span>
@@ -2297,23 +2418,33 @@ import {
                 <thead className="bg-muted/50 border-b">
                   <tr>
                     <th className="p-3 text-left w-10">
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300"
-                        checked={paginationData.paginatedItems.filter(i => i.status === "rascunho").length > 0 && paginationData.paginatedItems.filter(i => i.status === "rascunho").every(i => selectedAquisicaoIds.has(i.id!))}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            const newSet = new Set(selectedAquisicaoIds);
-                            paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.add(i.id!));
-                            setSelectedAquisicaoIds(newSet);
-                          } else {
-                            const newSet = new Set(selectedAquisicaoIds);
-                            paginationData.paginatedItems.filter(i => i.status === "rascunho").forEach(i => newSet.delete(i.id!));
-                            setSelectedAquisicaoIds(newSet);
-                          }
-                        }}
-                        disabled={paginationData.paginatedItems.filter(i => i.status === "rascunho").length === 0}
-                      />
+                      {(() => {
+                        const selectableItems = showOnlySent
+                          ? paginationData.paginatedItems.filter(i => Boolean(i.id))
+                          : paginationData.paginatedItems.filter(i => (i.status === "rascunho" || i.status === "rejeitado") && Boolean(i.id));
+                        const allSelectableChecked = selectableItems.length > 0 && selectableItems.every(i => selectedAquisicaoIds.has(i.id!));
+                        return (
+                          <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={allSelectableChecked}
+                            onChange={(e) => {
+                              const newSet = new Set(selectedAquisicaoIds);
+                              if (e.target.checked) {
+                                selectableItems.forEach(i => {
+                                  if (i.id) newSet.add(i.id);
+                                });
+                              } else {
+                                selectableItems.forEach(i => {
+                                  if (i.id) newSet.delete(i.id);
+                                });
+                              }
+                              setSelectedAquisicaoIds(newSet);
+                            }}
+                            disabled={selectableItems.length === 0}
+                          />
+                        );
+                      })()}
                     </th>
                     <SortableTableHead className="p-3 text-left text-xs font-medium text-muted-foreground w-16 cursor-pointer hover:text-foreground" field="codigo" sortConfig={itemsSortConfig} onRequestSort={requestItemsSort}>
                       Código
@@ -2343,19 +2474,22 @@ import {
                 <tbody>
                   {paginationData.paginatedItems.map((item, idx) => {
                     const readOnly = item.status !== "rascunho" && item.status !== "rejeitado";
+                    const isSelectable = showOnlySent
+                      ? Boolean(item.id)
+                      : Boolean(item.id && (item.status === "rascunho" || item.status === "rejeitado"));
                     return (
                       <tr key={item.id ?? `item-${item.codigo}-${idx}`} className={`border-b hover:bg-muted/30 ${idx % 2 === 0 ? "bg-background" : "bg-muted/10"}`}>
                         <td className="p-3 text-center">
                           <input
                             type="checkbox"
                             className="rounded border-gray-300"
-                            checked={item.status === "rascunho" && selectedAquisicaoIds.has(item.id!)}
-                            disabled={(item.status !== "rascunho" && item.status !== "rejeitado") || !item.id}
+                            checked={Boolean(item.id && selectedAquisicaoIds.has(item.id))}
+                            disabled={!isSelectable}
                             onChange={(e) => {
-                              if ((item.status !== "rascunho" && item.status !== "rejeitado") || !item.id) return;
+                              if (!isSelectable || !item.id) return;
                               const newSet = new Set(selectedAquisicaoIds);
-                              if (e.target.checked) newSet.add(item.id!);
-                              else newSet.delete(item.id!);
+                              if (e.target.checked) newSet.add(item.id);
+                              else newSet.delete(item.id);
                               setSelectedAquisicaoIds(newSet);
                             }}
                           />

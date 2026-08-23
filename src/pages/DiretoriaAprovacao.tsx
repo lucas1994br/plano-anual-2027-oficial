@@ -327,7 +327,6 @@ const DiretoriaAprovacao = () => {
 
   // Converter solicitações para o formato de PlanItem (apenas itens enviados para fluxo de aprovação)
   const items: PlanItem[] = useMemo(() => {
-    if (isLoadingDescriptions) return [];
     if (!diretoria) return [];
 
     return solicitacoes
@@ -379,7 +378,7 @@ const DiretoriaAprovacao = () => {
           gerencia_id: s.gerencia_id,
         };
       });
-  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, isLoadingDescriptions]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {

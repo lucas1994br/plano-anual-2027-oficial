@@ -16,7 +16,7 @@ import { Gerencia } from "@/types/plan";
 import { resolveGerenciaNome } from "@/data/gerencias";
 
 export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
-  const { data: diretorias = [] } = useQuery<any[]>({
+  const { data: diretorias = [], isLoading: isLoadingDiretorias } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
     staleTime: 5 * 60 * 1000,
@@ -31,14 +31,14 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     return map;
   }, [diretorias]);
 
-  const { data: gerenciasData = [] } = useQuery<any[]>({
+  const { data: gerenciasData = [], isLoading: isLoadingGerencias } = useQuery<any[]>({
     queryKey: ["gerencias", diretoria?.id],
     queryFn: () => diretoria ? getGerenciasByDiretoria(diretoria.id) : Promise.resolve([]),
     enabled: !!diretoria,
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: periodos = [] } = useQuery<any[]>({
+  const { data: periodos = [], isLoading: isLoadingPeriodos } = useQuery<any[]>({
     queryKey: ["periodos"],
     queryFn: getPeriodosAtivos,
     staleTime: 5 * 60 * 1000,
@@ -62,28 +62,28 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
   const gerenciaAtual = gerenciasData.find((g: Gerencia) => g.sigla === gerenciaUpper) as Gerencia | undefined;
   const gerenciaNome = resolveGerenciaNome(gerenciaUpper, gerenciaAtual?.nome);
 
-  const { data: solicitacoes = [] } = useQuery({
+  const { data: solicitacoes = [], isLoading: isLoadingSolicitacoes } = useQuery({
     queryKey: ["solicitacoes", gerenciaAtual?.id, periodAtivo?.id],
     queryFn: () => (gerenciaAtual && periodAtivo) ? getSolicitacoesByGerencia(gerenciaAtual.id, periodAtivo.id) : [],
     enabled: !!periodAtivo && !!gerenciaAtual,
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 5000,
   });
 
-  const { data: servicosData = [] } = useQuery({
+  const { data: servicosData = [], isLoading: isLoadingServicos } = useQuery({
     queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id],
     queryFn: () =>
       (gerenciaAtual && periodAtivo)
         ? getServicosByGerencia(gerenciaAtual.id, periodAtivo.id)
         : [],
     enabled: !!periodAtivo && !!gerenciaAtual,
-    staleTime: 0,
+    staleTime: 2 * 60 * 1000,
     refetchOnMount: true,
   });
 
-  const { data: servicosCatalogoData = [] } = useQuery<any[]>({
+  const { data: servicosCatalogoData = [], isLoading: isLoadingServicosCatalogo } = useQuery<any[]>({
     queryKey: ["servicos-catalogo"],
     queryFn: () => getServicosCatalogo(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const orcamentoConfig = useMemo(() => {
@@ -100,11 +100,14 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     } as AdminBudgetConfig;
   }, [adminMiniConfigFromDb]);
 
-  const { data: catalogoData = [] } = useQuery<any[]>({
+  const { data: catalogoData = [], isLoading: isLoadingCatalogo } = useQuery<any[]>({
     queryKey: ["itens-catalogo"],
     queryFn: () => getItensCatalogo(),
     staleTime: 5 * 60 * 1000,
   });
+
+  const isAquisicaoLoading = isLoadingDiretorias || isLoadingGerencias || isLoadingPeriodos || isLoadingCatalogo || (!!gerenciaAtual && !!periodAtivo && isLoadingSolicitacoes);
+  const isServicosLoading = isLoadingDiretorias || isLoadingGerencias || isLoadingPeriodos || isLoadingServicos || isLoadingServicosCatalogo;
 
   return {
     diretoria,
@@ -119,6 +122,8 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
     catalogoData,
     orcamentoConfig,
     categoryBudgetOwnersFromDb,
+    isAquisicaoLoading,
+    isServicosLoading,
   };
 }
 
