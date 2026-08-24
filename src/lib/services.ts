@@ -864,7 +864,10 @@ export async function updateSolicitacaoStatusBulk(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
-  const updates: Record<string, unknown> = { status };
+  const updates: Record<string, unknown> = { 
+    status,
+    updated_at: new Date().toISOString()
+  };
 
   if (status === "enviado") {
     updates.enviado_em = new Date().toISOString();
@@ -887,7 +890,7 @@ export async function updateSolicitacaoStatusBulk(
 
   if (error) throw error;
 
-  // Registrar histórico e logs orçamentários em lote
+  // Registrar histórico e logs orçamentários em lote de forma resiliente
   if (originais) {
     const logsToInsert: {
       solicitacaoId: string;
@@ -909,25 +912,37 @@ export async function updateSolicitacaoStatusBulk(
     }
 
     if (logsToInsert.length > 0) {
-      await registrarLogsOrcamentariosBulk(logsToInsert);
+      try {
+        await registrarLogsOrcamentariosBulk(logsToInsert);
+      } catch (logErr) {
+        console.warn("Aviso ao registrar logs orçamentários em lote:", logErr);
+      }
     }
   }
 
-  const historicoRecords = ids.map((id) => ({
-    solicitacao_id: id,
-    status_novo: status,
-    acao: `Status alterado para ${status}`,
-    autor_tipo: "sistema",
-    justificativa: justificativa || null,
-  }));
+  try {
+    const historicoRecords = ids.map((id) => ({
+      solicitacao_id: id,
+      status_novo: status,
+      acao: `Status alterado para ${status}`,
+      autor_tipo: "sistema",
+      justificativa: justificativa || null,
+    }));
 
-  const { error: histError } = await supabase
-    .from("solicitacao_historico")
-    .insert(historicoRecords);
+    const { error: histError } = await supabase
+      .from("solicitacao_historico")
+      .insert(historicoRecords);
 
-  if (histError) console.error("Erro ao registrar histórico em lote:", histError);
+    if (histError) console.warn("Aviso ao registrar histórico em lote:", histError);
+  } catch (histErr) {
+    console.warn("Aviso ao registrar histórico:", histErr);
+  }
 
-  await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
+  try {
+    await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
+  } catch (actErr) {
+    console.warn("Aviso ao registrar log de atividade:", actErr);
+  }
 }
 
 export async function updateServicoStatusBulk(
@@ -958,15 +973,20 @@ async function logHistorico(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
-  await supabase.from("solicitacao_historico").insert([
-    {
-      solicitacao_id: solicitacaoId,
-      status_novo: status,
-      acao: `Status alterado para ${status}`,
-      autor_tipo: "sistema",
-      justificativa: justificativa,
-    },
-  ]);
+  try {
+    const { error } = await supabase.from("solicitacao_historico").insert([
+      {
+        solicitacao_id: solicitacaoId,
+        status_novo: status,
+        acao: `Status alterado para ${status}`,
+        autor_tipo: "sistema",
+        justificativa: justificativa,
+      },
+    ]);
+    if (error) console.warn("Aviso ao registrar histórico:", error);
+  } catch (err) {
+    console.warn("Falha ao registrar histórico:", err);
+  }
 }
 
 // ============ VALIDAÇÃO DE CÓDIGO ============
@@ -2095,11 +2115,12 @@ export async function registrarLogsOrcamentariosBulk(
         .from("log_orcamentario")
         .insert(recordsToInsert);
 
-      if (logError) throw logError;
-      console.log(`${recordsToInsert.length} logs orçamentários registrados em lote com sucesso.`);
+      if (logError) {
+        console.warn("Aviso ao inserir log_orcamentario:", logError);
+      }
     }
   } catch (err) {
-    console.error("Falha ao registrar logs orçamentários em lote:", err);
+    console.warn("Falha ao registrar logs orçamentários em lote:", err);
   }
 }
 

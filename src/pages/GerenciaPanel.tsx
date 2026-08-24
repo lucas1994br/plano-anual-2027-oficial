@@ -132,6 +132,8 @@ import {
     const [solicitacaoEditOpen, setSolicitacaoEditOpen] = useState(false);
     const [solicitacaoEdicao, setSolicitacaoEdicao] = useState<PlanItem | null>(null);
     const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+    const [isSendingAquisicao, setIsSendingAquisicao] = useState(false);
+    const [isSendingServicos, setIsSendingServicos] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [currentPageServicos, setCurrentPageServicos] = useState(1);
     const ITEMS_PER_PAGE = 100;
@@ -522,24 +524,25 @@ import {
   };
 
   const handleSendToDiretoria = async () => {
-    if (!gerenciaAtual || !periodAtivo) return;
+    if (!gerenciaAtual || !periodAtivo || isSendingAquisicao) return;
+
+    const idsParaEnviar = Array.from(selectedAquisicaoIds);
+    if (idsParaEnviar.length === 0) {
+      setConfirmSendOpen(false);
+      return;
+    }
+
+    setIsSendingAquisicao(true);
 
     try {
-      const idsParaEnviar = Array.from(selectedAquisicaoIds);
-
-      if (idsParaEnviar.length === 0) {
-        setConfirmSendOpen(false);
-        return;
-      }
-
-      // Executar update em massa sem aguardar refetch
+      // Executar update em massa
       await updateSolicitacaoStatusBulk(idsParaEnviar, "enviado");
       
-      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id;
+      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id || diretoria?.id;
 
-      // Atualização otimista no cache da diretoria para garantir reflexo imediato
+      // Atualização otimista no cache da gerência para reflexo imediato
       queryClient.setQueryData(
-        ["solicitacoes-diretoria", destinoId, periodAtivo.id],
+        solicitacoesQueryKey,
         (old: any) => {
           if (!Array.isArray(old)) return old;
           return old.map((item: any) => 
@@ -548,15 +551,43 @@ import {
         }
       );
 
-      // Invalidar query apenas uma vez após todos os updates
+      // Atualização otimista no cache da diretoria para garantir reflexo imediato
+      if (destinoId) {
+        queryClient.setQueryData(
+          ["solicitacoes-diretoria", destinoId, periodAtivo.id],
+          (old: any) => {
+            if (!Array.isArray(old)) return old;
+            return old.map((item: any) => 
+              idsParaEnviar.includes(item.id) ? { ...item, status: "enviado" } : item
+            );
+          }
+        );
+      }
+
+      // Invalidar queries
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
       await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
-      // Invalidar a query da diretoria para que os dados sejam consolidados pelo servidor em background
-      await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", destinoId, periodAtivo.id], exact: true });
-      
+      if (destinoId) {
+        await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", destinoId, periodAtivo.id], exact: true });
+      }
+
+      setSelectedAquisicaoIds(new Set());
       setConfirmSendOpen(false);
-    } catch (error) {
+
+      toast({
+        title: "Envio confirmado com sucesso",
+        description: `${idsParaEnviar.length} item(ns) enviado(s) para a diretoria com sucesso.`,
+      });
+    } catch (error: any) {
       console.error("Erro ao enviar para diretoria:", error);
+      toast({
+        title: "Erro ao confirmar envio",
+        description: error?.message || "Não foi possível enviar as solicitações para a diretoria.",
+        variant: "destructive",
+      });
       queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
+    } finally {
+      setIsSendingAquisicao(false);
     }
   };
 
@@ -822,33 +853,37 @@ import {
   };
 
   const handleSendServicosToDir = async () => {
-    if (!gerenciaAtual || !periodAtivo) return;
+    if (!gerenciaAtual || !periodAtivo || isSendingServicos) return;
     
-    try {
-      if (selectedServicos.size === 0) {
-        setConfirmSendServicosOpen(false);
-        return;
-      }
+    if (selectedServicos.size === 0) {
+      setConfirmSendServicosOpen(false);
+      return;
+    }
 
+    setIsSendingServicos(true);
+
+    try {
       const updates = Array.from(selectedServicos).map((itemCode: any) => 
         ensureServico(itemCode, { status: "enviado" })
       );
       
       await Promise.all(updates);
 
-      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id;
+      const destinoId = (orcamentoConfig as any)?.routingRules?.[gerenciaAtual.id]?.destinoId || gerenciaAtual.diretoria_id || diretoria?.id;
 
       // Atualização otimista no cache da diretoria para reflexo instantâneo
-      queryClient.setQueryData(
-        ["servicos-diretoria", destinoId, periodAtivo.id],
-        (old: any) => {
-          if (!Array.isArray(old)) return old;
-          const idsEnviados = new Set(Array.from(selectedServicos));
-          return old.map((item: any) => 
-            idsEnviados.has(item.id) || idsEnviados.has(item.codigo) ? { ...item, status: "enviado" } : item
-          );
-        }
-      );
+      if (destinoId) {
+        queryClient.setQueryData(
+          ["servicos-diretoria", destinoId, periodAtivo.id],
+          (old: any) => {
+            if (!Array.isArray(old)) return old;
+            const idsEnviados = new Set(Array.from(selectedServicos));
+            return old.map((item: any) => 
+              idsEnviados.has(item.id) || idsEnviados.has(item.codigo) ? { ...item, status: "enviado" } : item
+            );
+          }
+        );
+      }
 
       await queryClient.invalidateQueries({
         queryKey: ["servicos"]
@@ -860,16 +895,24 @@ import {
 
       await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual.id, periodAtivo.id] });
 
+      const count = selectedServicos.size;
       setSelectedServicos(new Set());
       setConfirmSendServicosOpen(false);
       
       toast({
         title: "Serviços enviados",
-        description: `${selectedServicos.size} serviço(s) enviado(s) para a diretoria com sucesso.`
+        description: `${count} serviço(s) enviado(s) para a diretoria com sucesso.`
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao enviar serviços para diretoria:", error);
+      toast({
+        title: "Erro ao enviar serviços",
+        description: error?.message || "Não foi possível enviar os serviços para a diretoria.",
+        variant: "destructive",
+      });
       queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    } finally {
+      setIsSendingServicos(false);
     }
   };
 
@@ -1723,28 +1766,6 @@ import {
               <Badge className="bg-info text-info-foreground text-sm gap-1 py-2 px-4">
                 <Eye className="h-4 w-4" /> Somente leitura
               </Badge>
-            ) : canSendServicos ? (
-              <div className="flex items-center gap-2">
-                {selectedOption === "servicos_novos" && (
-                  <Button
-                    variant="outline"
-                    className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
-                    onClick={handleBulkDeleteServicos}
-                    disabled={selectedServicos.size === 0}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Excluir Selecionados
-                  </Button>
-                )}
-                <Button
-                  className="gap-2"
-                  onClick={() => setConfirmSendServicosOpen(true)}
-                  disabled={selectedServicos.size === 0}
-                >
-                  <Send className="h-4 w-4" />
-                  Enviar para Diretoria ({selectedServicos.size})
-                </Button>
-              </div>
             ) : undefined}
           />
 
@@ -1823,6 +1844,31 @@ import {
                   <RotateCcw className="h-4 w-4" />
                   Devolver Todos ({filteredServicos.filter(s => s.id && selectedServicos.has(s.item)).length})
                 </Button>
+              )}
+              {canSendServicos && (
+                <>
+                  {selectedOption === "servicos_novos" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
+                      onClick={handleBulkDeleteServicos}
+                      disabled={selectedServicos.size === 0}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Excluir Selecionados
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setConfirmSendServicosOpen(true)}
+                    disabled={selectedServicos.size === 0}
+                  >
+                    <Send className="h-4 w-4" />
+                    Enviar para Diretoria ({selectedServicos.size})
+                  </Button>
+                </>
               )}
             </div>
             <div className="flex gap-2">
@@ -2119,7 +2165,7 @@ import {
                 <p><strong>{selectedServicos.size}</strong> serviço(s) serão enviado(s) para a <strong>{diretoria.sigla}</strong></p>
               </div>
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={() => setConfirmSendServicosOpen(false)}>Cancelar</Button>
+                <Button variant="outline" disabled={isSendingServicos} onClick={() => setConfirmSendServicosOpen(false)}>Cancelar</Button>
                 {servicosData.some((s: any) => 
                   (s.status === "enviado" || s.status === "em_analise") && 
                   (selectedOption === "servicos_novos" 
@@ -2130,9 +2176,9 @@ import {
                     Aguarde a diretoria aprovar/rejeitar os envios pendentes desta aba.
                   </p>
                 ) : (
-                  <Button onClick={handleSendServicosToDir} className="gap-2">
-                    <Send className="h-4 w-4" />
-                    Confirmar Envio
+                  <Button onClick={handleSendServicosToDir} disabled={isSendingServicos} className="gap-2">
+                    {isSendingServicos ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {isSendingServicos ? "Enviando..." : "Confirmar Envio"}
                   </Button>
                 )}
               </div>
@@ -2200,29 +2246,6 @@ import {
         ]}
         rightContent={
           <>
-            {hasRascunhoItems && !hasApprovedItems && (
-              <div className="flex flex-wrap items-center gap-2">
-                {/* 
-                <Button
-                  variant="outline"
-                  className="gap-2 text-destructive border-destructive hover:bg-destructive/10"
-                  onClick={handleBulkDeleteAquisicao}
-                  disabled={selectedAquisicaoIds.size === 0}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Excluir
-                </Button>
-                */}
-                <Button
-                  className="gap-2"
-                  disabled={!canSend || selectedAquisicaoIds.size === 0}
-                  onClick={() => setConfirmSendOpen(true)}
-                >
-                  <Send className="h-4 w-4" />
-                  Enviar ({selectedAquisicaoIds.size})
-                </Button>
-              </div>
-            )}
             {hasApprovedItems && (
               <Badge className="bg-success text-success-foreground text-sm gap-1 py-2 px-4">
                 <CheckCircle className="h-4 w-4" /> Aprovado pela Diretoria
@@ -2337,6 +2360,17 @@ import {
             >
               <RotateCcw className="h-4 w-4" />
               Devolver Todos ({filteredItems.filter(i => i.id && selectedAquisicaoIds.has(i.id)).length})
+            </Button>
+          )}
+          {hasRascunhoItems && !hasApprovedItems && (
+            <Button
+              size="sm"
+              className="gap-2"
+              disabled={!canSend || selectedAquisicaoIds.size === 0}
+              onClick={() => setConfirmSendOpen(true)}
+            >
+              <Send className="h-4 w-4" />
+              Enviar ({selectedAquisicaoIds.size})
             </Button>
           )}
         </div>
@@ -2649,15 +2683,15 @@ import {
             )}
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setConfirmSendOpen(false)}>Cancelar</Button>
+            <Button variant="outline" disabled={isSendingAquisicao} onClick={() => setConfirmSendOpen(false)}>Cancelar</Button>
             {items.some(i => i.status === "enviado" || i.status === "em_analise") ? (
               <p className="text-sm text-amber-600 font-medium py-2">
                 Aguarde a diretoria aprovar/rejeitar os itens já enviados.
               </p>
             ) : (
-              <Button onClick={handleSendToDiretoria} className="gap-2">
-                <Send className="h-4 w-4" />
-                Confirmar Envio
+              <Button onClick={handleSendToDiretoria} disabled={isSendingAquisicao} className="gap-2">
+                {isSendingAquisicao ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {isSendingAquisicao ? "Enviando..." : "Confirmar Envio"}
               </Button>
             )}
           </div>
