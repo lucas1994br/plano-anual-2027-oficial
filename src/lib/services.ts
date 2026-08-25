@@ -796,6 +796,50 @@ export async function validateAccessCode(
   }
 }
 
+// ============ RESUMO POR PERÍODO (compatibilidade admin) ============
+
+export async function getSolicitacoesResumoByPeriodo(periodoId: string): Promise<Array<{ status: string; total: number }>> {
+  try {
+    const { data, error } = await supabase
+      .from("solicitacoes")
+      .select("status")
+      .eq("periodo_id", periodoId);
+
+    if (error || !data) return [];
+
+    const totals = new Map<string, number>();
+    for (const row of data as Array<{ status?: string | null }>) {
+      const status = String(row?.status || "sem_status");
+      totals.set(status, (totals.get(status) || 0) + 1);
+    }
+
+    return Array.from(totals.entries()).map(([status, total]) => ({ status, total }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getServicosResumoByPeriodo(periodoId: string): Promise<Array<{ status: string; total: number }>> {
+  try {
+    const { data, error } = await supabase
+      .from("servicos")
+      .select("status")
+      .eq("periodo_id", periodoId);
+
+    if (error || !data) return [];
+
+    const totals = new Map<string, number>();
+    for (const row of data as Array<{ status?: string | null }>) {
+      const status = String(row?.status || "sem_status");
+      totals.set(status, (totals.get(status) || 0) + 1);
+    }
+
+    return Array.from(totals.entries()).map(([status, total]) => ({ status, total }));
+  } catch {
+    return [];
+  }
+}
+
 // ============ ITENS CATÁLOGO ============
 
 export default async function getItensCatalogo(): Promise<unknown[]> {
