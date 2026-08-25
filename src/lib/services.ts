@@ -1737,3 +1737,58 @@ export async function getDadosExcel2026() {
   
   return { previstoData, realizadoData, orcamentoData };
 }
+
+// ============ LOGS ORÇAMENTÁRIOS ============
+
+export async function getLogsOrcamentarios(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("log_orcamentario")
+    .select(`
+      *,
+      centro_custo:centro_custo_id(codigo, nome, diretoria_id)
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao buscar logs orçamentários:", error);
+    throw error;
+  }
+  return data || [];
+}
+
+export async function deleteLogOrcamentario(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao deletar log orçamentário:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function deleteLogsOrcamentarioBulk(ids: string[]): Promise<boolean> {
+  if (!ids.length) return true;
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .delete()
+    .in("id", ids);
+  if (error) {
+    console.error("Erro ao deletar logs orçamentários em massa:", error);
+    throw error;
+  }
+  return true;
+}
+
+export async function updateLogOrcamentario(id: string, updates: any): Promise<boolean> {
+  const { error } = await supabase
+    .from("log_orcamentario")
+    .update(updates)
+    .eq("id", id);
+  if (error) {
+    console.error("Erro ao atualizar log orçamentário:", error);
+    throw error;
+  }
+  return true;
+}
