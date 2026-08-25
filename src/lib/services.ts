@@ -577,6 +577,150 @@ export async function updateServicoStatusBulk(
   if (error) throw error;
 }
 
+// ============ LOGS DE ATIVIDADES (compatibilidade com admin) ============
+
+export async function getLogsAtividades(): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from("atividade_logs")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) return [];
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getLixeiraLogsAtividades(): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from("atividade_logs")
+      .select("*")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+
+    if (error) return [];
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getFuncionariosNomes(): Promise<string[]> {
+  try {
+    const { data, error } = await supabase
+      .from("funcionarios")
+      .select("nome")
+      .order("nome");
+
+    if (error) return [];
+    return (data || []).map((row: any) => row?.nome).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteLogAtividade(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteLogsAtividadeBulk(ids: string[]): Promise<boolean> {
+  if (!ids.length) return true;
+
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .update({ deleted_at: new Date().toISOString() })
+      .in("id", ids);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function restoreLogAtividade(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .update({ deleted_at: null })
+      .eq("id", id);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function restoreLogsAtividadeBulk(ids: string[]): Promise<boolean> {
+  if (!ids.length) return true;
+
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .update({ deleted_at: null })
+      .in("id", ids);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function hardDeleteLogAtividade(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .delete()
+      .eq("id", id);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function hardDeleteLogsAtividadeBulk(ids: string[]): Promise<boolean> {
+  if (!ids.length) return true;
+
+  try {
+    const { error } = await supabase
+      .from("atividade_logs")
+      .delete()
+      .in("id", ids);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function getRecordDetails(id: string): Promise<Record<string, unknown> | null> {
+  try {
+    const { data, error } = await supabase
+      .from("atividade_logs")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 // ============ HISTÓRICO ============
 
 async function logHistorico(
