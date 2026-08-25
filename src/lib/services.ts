@@ -443,9 +443,9 @@ export async function getSolicitacoesByGerencia(
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
-    descricao: s.item?.descricao ?? s.descricao ?? "",
-    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
-    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    descricao: s.descricao || s.item?.descricao || "",
+    categoria: s.categoria || s.item?.categoria || "diversos",
+    unidade: s.unidade || s.item?.unidade || "un",
     valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     qtdEstimada: s.qtd_estimada ?? 0,
@@ -464,46 +464,91 @@ export async function getSolicitacoesByGerencia(
   } as unknown as PlanItem));
 }
 
-export async function deleteSolicitacao(itemId: string): Promise<boolean> {
+export async function deleteSolicitacao(itemId: string | number): Promise<boolean> {
   if (!itemId) throw new Error("ID inválido para exclusão");
 
-  // Primeiro remove as dependências para evitar erros de restrição de chave estrangeira
-  await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", itemId);
-  await supabase.from("aprovacao").delete().eq("referencia_id", itemId);
-  await supabase.from("log_orcamentario").delete().eq("referencia_id", itemId);
+  const idStr = String(itemId);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr);
 
-  const { error } = await supabase
+  let targetId = idStr;
+  if (!isUuid) {
+    const { data } = await supabase
+      .from("solicitacoes")
+      .select("id")
+      .eq("codigo", Number(itemId))
+      .maybeSingle();
+    if (data?.id) {
+      targetId = data.id;
+    }
+  }
+
+  await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", targetId);
+  await supabase.from("aprovacao").delete().eq("referencia_id", targetId);
+  await supabase.from("log_orcamentario").delete().eq("referencia_id", targetId);
+
+  let { error } = await supabase
     .from("solicitacoes")
     .delete()
-    .eq("id", itemId);
+    .eq("id", targetId);
+
+  if (error && !isUuid) {
+    const res = await supabase.from("solicitacoes").delete().eq("codigo", Number(itemId));
+    error = res.error;
+  }
 
   if (error) {
     console.error("Erro ao deletar solicitacao:", error);
     throw error;
   }
   
-  await registrarLogAtividade("EXCLUIR", "solicitacoes", itemId);
+  await registrarLogAtividade("EXCLUIR", "solicitacoes", targetId);
   
   return true;
 }
 
-export async function deleteSolicitacoesBulk(itemIds: string[]): Promise<boolean> {
+export async function deleteSolicitacoesBulk(itemIds: (string | number)[]): Promise<boolean> {
   if (!itemIds || itemIds.length === 0) return false;
 
-  // Remove dependências em massa
-  await supabase.from("solicitacao_historico").delete().in("solicitacao_id", itemIds);
-  await supabase.from("aprovacao").delete().in("referencia_id", itemIds);
-  await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
+  const stringIds = itemIds.map(String);
+  const uuidIds = stringIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  const numericItems = itemIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))).map(Number);
 
-  const { error } = await supabase
-    .from("solicitacoes")
-    .delete()
-    .in("id", itemIds);
-
-  if (error) {
-    console.error("Erro ao deletar solicitacoes em massa:", error);
-    throw error;
+  if (numericItems.length > 0) {
+    const { data } = await supabase
+      .from("solicitacoes")
+      .select("id")
+      .in("codigo", numericItems);
+    if (data) {
+      data.forEach((r: any) => {
+        if (r?.id && !uuidIds.includes(r.id)) {
+          uuidIds.push(r.id);
+        }
+      });
+    }
   }
+
+  if (uuidIds.length > 0) {
+    await supabase.from("solicitacao_historico").delete().in("solicitacao_id", uuidIds);
+    await supabase.from("aprovacao").delete().in("referencia_id", uuidIds);
+    await supabase.from("log_orcamentario").delete().in("referencia_id", uuidIds);
+
+    const { error } = await supabase
+      .from("solicitacoes")
+      .delete()
+      .in("id", uuidIds);
+
+    if (error) {
+      console.error("Erro ao deletar solicitacoes em massa:", error);
+      throw error;
+    }
+  }
+
+  if (numericItems.length > 0) {
+    await supabase.from("solicitacoes").delete().in("codigo", numericItems);
+  }
+  
+  await registrarLogAtividade("EXCLUIR", "solicitacoes", "BULK", { ids: itemIds });
+  
   return true;
 }
 
@@ -534,9 +579,9 @@ export async function getSolicitacoesByDiretoria(
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
-    descricao: s.item?.descricao ?? s.descricao ?? "",
-    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
-    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    descricao: s.descricao || s.item?.descricao || "",
+    categoria: s.categoria || s.item?.categoria || "diversos",
+    unidade: s.unidade || s.item?.unidade || "un",
     valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     qtdEstimada: s.qtd_estimada ?? 0,
@@ -574,9 +619,9 @@ export async function getSolicitacoesByPeriodo({
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
-    descricao: s.item?.descricao ?? s.descricao ?? "",
-    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
-    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    descricao: s.descricao || s.item?.descricao || "",
+    categoria: s.categoria || s.item?.categoria || "diversos",
+    unidade: s.unidade || s.item?.unidade || "un",
     valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     qtdEstimada: s.qtd_estimada ?? 0,
@@ -664,9 +709,9 @@ export async function getSolicitacoesCompras(
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
-    descricao: s.item?.descricao ?? s.descricao ?? "",
-    categoria: s.item?.categoria ?? s.categoria ?? "diversos",
-    unidade: s.item?.unidade ?? s.unidade ?? "un",
+    descricao: s.descricao || s.item?.descricao || "",
+    categoria: s.categoria || s.item?.categoria || "diversos",
+    unidade: s.unidade || s.item?.unidade || "un",
     valor_unitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     valorUnitario: s.valor_unitario ?? s.item?.valor_unitario ?? 0,
     qtd_estimada: s.qtd_estimada ?? 0,
@@ -736,7 +781,7 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   const { data, error } = await supabase
     .from("solicitacoes")
     .insert([payload])
-    .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario)")
+    .select()
     .single();
 
   if (error) throw error;
@@ -746,11 +791,11 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   return {
     id: data.id,
     item_id: data.item_id,
-    codigo: data.item?.codigo ?? solicitacao.codigo,
-    descricao: data.item?.descricao ?? solicitacao.descricao,
-    categoria: data.item?.categoria ?? solicitacao.categoria,
-    unidade: data.item?.unidade ?? solicitacao.unidade,
-    valorUnitario: data.valor_unitario ?? data.item?.valor_unitario,
+    codigo: solicitacao.codigo ? Number(solicitacao.codigo) : 0,
+    descricao: solicitacao.descricao || "",
+    categoria: solicitacao.categoria || "diversos",
+    unidade: solicitacao.unidade || "un",
+    valorUnitario: data.valor_unitario ?? (solicitacao.valorUnitario || 0),
     qtdEstimada: data.qtd_estimada,
     prioridade: data.prioridade,
     observacao: data.observacao,
@@ -779,7 +824,7 @@ export async function updateSolicitacao(
   if (updates.justificativaRejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativaRejeicao;
   if (updates.item_id !== undefined) dbUpdates.item_id = updates.item_id;
 
-  if (Object.keys(dbUpdates).length === 0) {
+  if (Object.keys(dbUpdates).length === 0 && updates.descricao === undefined && updates.unidade === undefined) {
     return {} as PlanItem;
   }
 
@@ -789,21 +834,37 @@ export async function updateSolicitacao(
     .from("solicitacoes")
     .update(dbUpdates)
     .eq("id", id)
-    .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario)")
+    .select()
     .single();
 
   if (error) throw error;
+
+  if (updates.descricao !== undefined || updates.unidade !== undefined) {
+    try {
+      const catUpdates: Record<string, unknown> = {};
+      if (updates.descricao !== undefined) catUpdates.descricao = updates.descricao;
+      if (updates.unidade !== undefined) catUpdates.unidade = updates.unidade;
+
+      if (data.item_id) {
+        await supabase.from("itens_catalogo").update(catUpdates).eq("id", data.item_id);
+      } else if (updates.codigo) {
+        await supabase.from("itens_catalogo").update(catUpdates).eq("codigo", updates.codigo);
+      }
+    } catch (e) {
+      console.warn("Não foi possível atualizar itens_catalogo:", e);
+    }
+  }
   
   await registrarLogAtividade("EDITAR", "solicitacoes", id, dbUpdates);
   
   return {
     id: data.id,
     item_id: data.item_id,
-    codigo: data.item?.codigo ?? (updates.codigo ? Number(updates.codigo) : 0),
-    descricao: data.item?.descricao ?? updates.descricao,
-    categoria: data.item?.categoria ?? updates.categoria,
-    unidade: data.item?.unidade ?? updates.unidade,
-    valorUnitario: data.valor_unitario ?? data.item?.valor_unitario,
+    codigo: updates.codigo ? Number(updates.codigo) : 0,
+    descricao: updates.descricao || "",
+    categoria: updates.categoria || "diversos",
+    unidade: updates.unidade || "un",
+    valorUnitario: data.valor_unitario ?? 0,
     qtdEstimada: data.qtd_estimada,
     prioridade: data.prioridade,
     observacao: data.observacao,
@@ -1651,6 +1712,7 @@ export async function updateServico(
 ): Promise<ServicoItem | undefined> {
   const dbUpdates = mapServicoItemToDb(updates);
   dbUpdates.updated_at = new Date().toISOString();
+  delete dbUpdates.id;
 
   const { data, error } = await supabase
     .from("servicos")
@@ -1683,37 +1745,80 @@ export async function createServico(
   return data ? mapDbToServicoItem(data) : undefined;
 }
 
-export const deleteServico = async (id: string): Promise<boolean> => {
-  if (!id) throw new Error("ID inválido para exclusão");
+export const deleteServico = async (idOrItem: string | number): Promise<boolean> => {
+  if (!idOrItem) throw new Error("ID inválido para exclusão");
 
-  // Remove dependências para evitar erros de restrição de chave estrangeira
-  await supabase.from("log_orcamentario").delete().eq("referencia_id", id);
-  await supabase.from("aprovacao").delete().eq("referencia_id", id);
+  const idStr = String(idOrItem);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr);
 
-  const { error } = await supabase.from("servicos").delete().eq("id", id);
+  let targetId = idStr;
+  if (!isUuid) {
+    const { data } = await supabase
+      .from("servicos")
+      .select("id")
+      .eq("item", Number(idOrItem))
+      .maybeSingle();
+    if (data?.id) {
+      targetId = data.id;
+    }
+  }
+
+  await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", targetId);
+  await supabase.from("log_orcamentario").delete().eq("referencia_id", targetId);
+  await supabase.from("aprovacao").delete().eq("referencia_id", targetId);
+
+  let { error } = await supabase.from("servicos").delete().eq("id", targetId);
+  if (error && !isUuid) {
+    const res = await supabase.from("servicos").delete().eq("item", Number(idOrItem));
+    error = res.error;
+  }
 
   if (error) throw error;
   
-  await registrarLogAtividade("EXCLUIR", "servicos", id);
+  await registrarLogAtividade("EXCLUIR", "servicos", targetId);
   
   return true;
 };
 
-export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
+export async function deleteServicosBulk(itemIds: (string | number)[]): Promise<boolean> {
   if (!itemIds || itemIds.length === 0) return false;
 
-  // Remove dependências em massa
-  await supabase.from("log_orcamentario").delete().in("referencia_id", itemIds);
-  await supabase.from("aprovacao").delete().in("referencia_id", itemIds);
+  const stringIds = itemIds.map(String);
+  const uuidIds = stringIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  const numericItems = itemIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))).map(Number);
 
-  const { error } = await supabase
-    .from("servicos")
-    .delete()
-    .in("id", itemIds);
+  if (numericItems.length > 0) {
+    const { data } = await supabase
+      .from("servicos")
+      .select("id")
+      .in("item", numericItems);
+    if (data) {
+      data.forEach((r: any) => {
+        if (r?.id && !uuidIds.includes(r.id)) {
+          uuidIds.push(r.id);
+        }
+      });
+    }
+  }
 
-  if (error) {
-    console.error("Erro ao deletar servicos em massa:", error);
-    throw error;
+  if (uuidIds.length > 0) {
+    await supabase.from("solicitacao_historico").delete().in("solicitacao_id", uuidIds);
+    await supabase.from("log_orcamentario").delete().in("referencia_id", uuidIds);
+    await supabase.from("aprovacao").delete().in("referencia_id", uuidIds);
+
+    const { error } = await supabase
+      .from("servicos")
+      .delete()
+      .in("id", uuidIds);
+
+    if (error) {
+      console.error("Erro ao deletar servicos em massa:", error);
+      throw error;
+    }
+  }
+
+  if (numericItems.length > 0) {
+    await supabase.from("servicos").delete().in("item", numericItems);
   }
   
   await registrarLogAtividade("EXCLUIR", "servicos", "BULK", { ids: itemIds });
@@ -1723,26 +1828,33 @@ export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
 
 export async function updateSolicitacoesBulkData(
   ids: string[],
-  updates: Partial<PlanItem>
+  updates: Partial<PlanItem> | any
 ): Promise<void> {
   const dbUpdates: Record<string, unknown> = {};
 
   if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
-  if (updates.unidade !== undefined) dbUpdates.unidade = updates.unidade;
+  if (updates.qtd_estimada !== undefined) dbUpdates.qtd_estimada = updates.qtd_estimada;
   if (updates.observacao !== undefined) dbUpdates.observacao = updates.observacao;
   if (updates.prioridade !== undefined) dbUpdates.prioridade = updates.prioridade;
   if (updates.valorUnitario !== undefined) dbUpdates.valor_unitario = updates.valorUnitario;
-  if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
-  if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
+  if (updates.valor_unitario !== undefined) dbUpdates.valor_unitario = updates.valor_unitario;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.justificativa_rejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativa_rejeicao;
+  if (updates.justificativaRejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativaRejeicao;
 
   if (Object.keys(dbUpdates).length === 0) return;
+
+  dbUpdates.updated_at = new Date().toISOString();
 
   const { error } = await supabase
     .from("solicitacoes")
     .update(dbUpdates)
     .in("id", ids);
 
-  if (error) throw error;
+  if (error) {
+    console.error("Erro ao atualizar solicitacoes em massa:", error);
+    throw error;
+  }
 
   await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacoesBulkData", updates: dbUpdates });
 }

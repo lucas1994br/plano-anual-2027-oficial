@@ -1638,10 +1638,11 @@ const DiretoriaAprovacao = () => {
   const ensureServicoDiretoria = async (itemCode: number | string, updates: any) => {
     if (!diretoria || !periodAtivo) return;
     try {
-      const servicoDb = servicosData.find((s: any) => String(s.item) === String(itemCode) && s.unidadeDemandante === siglaUpper);
+      const servicoDb = servicosData.find((s: any) => String(s.item) === String(itemCode));
       if (servicoDb && servicoDb.id) {
         await updateServico(servicoDb.id, updates);
-        queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
         return servicoDb.id;
       }
       
@@ -1670,7 +1671,8 @@ const DiretoriaAprovacao = () => {
         observacao: updates.observacao !== undefined ? updates.observacao : "",
         status: updates.status || "rascunho",
       });
-      queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
     } catch (e) {
       console.error(e);
     }
@@ -3002,10 +3004,21 @@ const DiretoriaAprovacao = () => {
             onOpenChange={setServicoEditOpen}
             servico={servicoEdicao}
             onSave={async (item, updates) => {
-              await ensureServicoDiretoria(item as number, updates);
-              setServicoEditOpen(false);
-              setServicoEdicao(null);
-              toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+              try {
+                if (servicoEdicao?.id) {
+                  await updateServico(servicoEdicao.id, updates);
+                } else {
+                  await ensureServicoDiretoria(item as number, updates);
+                }
+                setServicoEditOpen(false);
+                setServicoEdicao(null);
+                queryClient.invalidateQueries({ queryKey: ["servicos"] });
+                queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
+                toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
+              } catch (error) {
+                console.error("Erro ao atualizar serviço:", error);
+                toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
+              }
             }}
             diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
             canEditStatus={true}
@@ -3969,11 +3982,15 @@ const DiretoriaAprovacao = () => {
         onOpenChange={setServicoEditOpen}
         servico={servicoEdicao}
         onSave={async (item, updates) => {
-          if (!servicoEdicao?.id) return;
           try {
-            await updateServicosBulkData([servicoEdicao.id], updates);
+            if (servicoEdicao?.id) {
+              await updateServico(servicoEdicao.id, updates);
+            } else {
+              await ensureServicoDiretoria(item as number, updates);
+            }
             setServicoEditOpen(false);
             setServicoEdicao(null);
+            queryClient.invalidateQueries({ queryKey: ["servicos"] });
             queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", diretoria?.id, periodAtivo?.id] });
             toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
           } catch (error) {
@@ -3991,7 +4008,11 @@ const DiretoriaAprovacao = () => {
         aquisicao={solicitacaoEdicao}
         onSave={async (codigo, updates) => {
           try {
-            await ensureSolicitacaoDiretoria(Number(codigo), updates);
+            if (solicitacaoEdicao?.id && !String(solicitacaoEdicao.id).startsWith("temp-")) {
+              await updateSolicitacao(solicitacaoEdicao.id, updates);
+            } else {
+              await ensureSolicitacaoDiretoria(Number(codigo), updates);
+            }
             setSolicitacaoEditOpen(false);
             setSolicitacaoEdicao(null);
             queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });

@@ -191,7 +191,7 @@ import {
         id: existente ? s.id : undefined,
         item_id: c.id,
         codigo: c.codigo,
-        descricao: c.descricao,
+        descricao: (existente && s.descricao) ? s.descricao : c.descricao,
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
         prioridade: s.prioridade || "Baixa",
@@ -401,8 +401,8 @@ import {
       gerencia_id: gerenciaAtual.id,
       item_id: catalogoItem.id,
       codigo: catalogoItem.codigo,
-      descricao: catalogoItem.descricao,
-      categoria: catalogoItem.categoria,
+      descricao: safeUpdates.descricao !== undefined ? safeUpdates.descricao : catalogoItem.descricao,
+      categoria: safeUpdates.categoria !== undefined ? safeUpdates.categoria : catalogoItem.categoria,
       unidade: safeUpdates.unidade !== undefined ? safeUpdates.unidade : (catalogoItem.unidade || "un"),
       qtdEstimada: safeUpdates.qtdEstimada !== undefined ? safeUpdates.qtdEstimada : 0,
       valorUnitario: catalogoItem.valor_unitario || 0,
@@ -410,7 +410,8 @@ import {
       observacao: safeUpdates.observacao !== undefined ? safeUpdates.observacao : null,
       status: safeUpdates.status || "rascunho",
     });
-    queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+    await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+    await queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
   };
 
   const handleUpdateQtdEstimada = async (codigo: number, qtdEstimada: number) => {
@@ -501,7 +502,6 @@ import {
     if (!confirm("Excluir este item permanentemente?")) return;
 
     try {
-      // Atualização otimista: remove do cache imediatamente
       queryClient.setQueryData(solicitacoesQueryKey, (current: any[] | undefined) => {
         if (!Array.isArray(current)) return current;
         return current.filter(s => s.id !== itemId);
@@ -514,6 +514,8 @@ import {
       });
       
       await deleteSolicitacao(itemId);
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      await queryClient.refetchQueries({ queryKey: ["solicitacoes"] });
       toast({ title: "Item excluído", description: "O item foi removido com sucesso." });
     } catch (error: any) {
       console.error("Erro no handleDeleteItem:", error);
@@ -598,13 +600,19 @@ import {
 
   const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
     try {
-      await ensureSolicitacao(codigo, updates);
+      if (solicitacaoEdicao?.id) {
+        await updateSolicitacao(solicitacaoEdicao.id, updates);
+      } else {
+        await ensureSolicitacao(codigo, updates);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      await queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       setSolicitacaoEditOpen(false);
       setSolicitacaoEdicao(null);
       toast({ title: "Solicitação atualizada", description: "Dados atualizados com sucesso." });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao atualizar solicitação:", error);
-      toast({ title: "Erro ao atualizar", description: "Não foi possível salvar as alterações.", variant: "destructive" });
+      toast({ title: "Erro ao atualizar", description: error?.message || "Não foi possível salvar as alterações.", variant: "destructive" });
     }
   };
 
@@ -625,10 +633,16 @@ import {
   const handleBulkDeleteAquisicao = async () => {
     if (!confirm("Excluir os itens selecionados permanentemente?")) return;
     try {
-      await deleteSolicitacoesBulk(Array.from(selectedAquisicaoIds));
+      const idsToDelete = Array.from(selectedAquisicaoIds);
+      queryClient.setQueryData(solicitacoesQueryKey, (current: any[] | undefined) => {
+        if (!Array.isArray(current)) return current;
+        return current.filter(s => !idsToDelete.includes(s.id));
+      });
+      await deleteSolicitacoesBulk(idsToDelete);
       setSelectedAquisicaoIds(new Set());
-      await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey, exact: true });
-      toast({ title: "Itens excluídos", description: "O itens foram removidos." });
+      await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      await queryClient.refetchQueries({ queryKey: ["solicitacoes"] });
+      toast({ title: "Itens excluídos", description: "Os itens foram removidos." });
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
@@ -649,7 +663,8 @@ import {
         safeUpdates.justificativa_rejeicao = null;
       }
       await updateServico(servicoExistente.id, safeUpdates);
-      queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       return;
     }
 
@@ -662,7 +677,7 @@ import {
       gerencia_id: gerenciaAtual?.id,
       item: catalogoItem.item,
       tipo_contratacao: safeUpdates.tipoContratacao !== undefined ? safeUpdates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
-      unidade_demandante: safeUpdates.unidadeDemandante !== undefined ? safeUpdates.unidadeDemandante : (catalogoItem.unidade_demandante || ""),
+      unidade_demandante: safeUpdates.unidadeDemandante !== undefined ? safeUpdates.unidadeDemandante : (catalogoItem.unidade_demandante || gerenciaUpper),
       objeto: safeUpdates.objeto !== undefined ? safeUpdates.objeto : (catalogoItem.objeto || ""),
       justificativa: safeUpdates.justificativa !== undefined ? safeUpdates.justificativa : (catalogoItem.justificativa || ""),
       previsao_inicio: safeUpdates.previsaoInicio !== undefined ? safeUpdates.previsaoInicio : (catalogoItem.previsao_inicio || ""),
@@ -678,7 +693,8 @@ import {
     };
 
     await createServico(newServico);
-    queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+    await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+    await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
   };
 
   const handleUpdateGrauPrioridade = async (item: number, grauPrioridade: GrauPrioridade) => {
@@ -749,27 +765,46 @@ import {
     if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
 
     try {
-      if (servicoId) {
-        await deleteServico(servicoId);
-      }
-      
-      // Tentativa de excluir do catálogo também (para removê-lo da lista de Serviços Existentes, caso seja um teste)
-      const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
-      if (catalogoItem?.id) {
-        await supabase.from("servicos_catalogo").delete().eq("id", catalogoItem.id);
-        queryClient.invalidateQueries({ queryKey: ["servicos-catalogo-gerencia", gerenciaAtual?.id] });
+      let targetId = servicoId;
+      if (!targetId) {
+        const found = servicosData.find((sd: ServicoItem) => sd.item === itemCode);
+        if (found?.id) targetId = found.id;
       }
 
-      await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+      // Optimistic update
+      queryClient.setQueryData(
+        ["servicos", gerenciaAtual?.id, periodAtivo?.id],
+        (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.filter((s: any) => (targetId ? s.id !== targetId : true) && s.item !== itemCode);
+        }
+      );
+
+      if (targetId) {
+        await deleteServico(targetId);
+      }
+      
+      const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
+      if (catalogoItem?.id) {
+        try {
+          await supabase.from("servicos_catalogo").delete().eq("id", catalogoItem.id);
+        } catch (catErr) {
+          console.warn("Could not delete from servicos_catalogo:", catErr);
+        }
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      await queryClient.refetchQueries({ queryKey: ["servicos"] });
       toast({
         title: "Serviço excluído",
         description: "O serviço foi removido com sucesso.",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao excluir serviço:", error);
       toast({
         title: "Não foi possível excluir o serviço",
-        description: "Tente novamente mais tarde.",
+        description: error?.message || "Tente novamente mais tarde.",
         variant: "destructive",
       });
     }
@@ -969,12 +1004,26 @@ import {
   const handleBulkDeleteServicos = async () => {
     if (!confirm("Excluir os serviços selecionados permanentemente?")) return;
     try {
-      const idsToDelete = Array.from(selectedServicos)
+      const selectedCodes = Array.from(selectedServicos);
+      const idsToDelete = selectedCodes
         .map(itemCode => servicosData.find((s: any) => s.item === itemCode)?.id)
         .filter(Boolean) as string[];
-      await deleteServicosBulk(idsToDelete);
+
+      queryClient.setQueryData(
+        ["servicos", gerenciaAtual?.id, periodAtivo?.id],
+        (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.filter((s: any) => !selectedCodes.includes(s.item) && (s.id ? !idsToDelete.includes(s.id) : true));
+        }
+      );
+
+      if (idsToDelete.length > 0) {
+        await deleteServicosBulk(idsToDelete);
+      }
       setSelectedServicos(new Set());
-      await queryClient.invalidateQueries({ queryKey: ["servicos", gerenciaAtual?.id, periodAtivo?.id] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      await queryClient.refetchQueries({ queryKey: ["servicos"] });
       toast({ title: "Serviços excluídos", description: "Os serviços foram removidos." });
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
@@ -1608,6 +1657,7 @@ import {
                             <p className="text-xs text-muted-foreground line-clamp-3">{servico.justificativa || "—"}</p>
                           ) : (
                             <textarea
+                              key={`${servico.item}-${servico.justificativa}`}
                               defaultValue={servico.justificativa || ""}
                               onBlur={(e) => {
                                 const justificativaLimpa = e.target.value.trim();
@@ -2191,13 +2241,19 @@ import {
             servico={servicoEdicao}
             onSave={async (item, updates) => {
               try {
-                await ensureServico(item, updates);
+                if (servicoEdicao?.id) {
+                  await updateServico(servicoEdicao.id, updates);
+                } else {
+                  await ensureServico(item, updates);
+                }
+                await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+                await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
                 setServicoEditOpen(false);
                 setServicoEdicao(null);
                 toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
-              } catch (error) {
+              } catch (error: any) {
                 console.error("Erro ao atualizar serviço:", error);
-                toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
+                toast({ title: "Erro ao atualizar", description: error?.message || "Falha ao salvar serviço.", variant: "destructive" });
               }
             }}
             diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}
@@ -2544,6 +2600,7 @@ import {
                             <span className="text-sm">{item.qtdEstimada}</span>
                           ) : (
                               <input
+                                key={`${item.codigo}-${item.qtdEstimada}`}
                                 type="number"
                                 min="0"
                                 defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
@@ -2718,13 +2775,19 @@ import {
         servico={servicoEdicao}
         onSave={async (item, updates) => {
           try {
-            await ensureServico(item, updates);
+            if (servicoEdicao?.id) {
+              await updateServico(servicoEdicao.id, updates);
+            } else {
+              await ensureServico(item, updates);
+            }
+            await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+            await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
             setServicoEditOpen(false);
             setServicoEdicao(null);
             toast({ title: "Serviço atualizado", description: "Informações do serviço salvas." });
-          } catch (error) {
+          } catch (error: any) {
             console.error("Erro ao atualizar serviço:", error);
-            toast({ title: "Erro ao atualizar", description: "Falha ao salvar serviço.", variant: "destructive" });
+            toast({ title: "Erro ao atualizar", description: error?.message || "Falha ao salvar serviço.", variant: "destructive" });
           }
         }}
         diretoriaLabel={diretoria?.sigla ? `${diretoria.sigla} - ${diretoria.nome}` : undefined}

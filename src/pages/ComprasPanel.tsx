@@ -255,7 +255,7 @@ const ComprasPanel = () => {
   const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
     if (!solicitacaoEdicao?.id) return;
     try {
-      await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+      await updateSolicitacao(solicitacaoEdicao.id, updates);
       setSolicitacaoEditOpen(false);
       setSolicitacaoEdicao(null);
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras"] });
@@ -1544,7 +1544,7 @@ const ComprasPanel = () => {
         onSave={async (item, updates) => {
           if (!servicoEdicao?.id) return;
           try {
-            await updateServicosBulkData([servicoEdicao.id], updates);
+            await updateServico(servicoEdicao.id, updates);
             setServicoEditOpen(false);
             setServicoEdicao(null);
             queryClient.invalidateQueries({ queryKey: ["servicos-compras"] });
@@ -1564,7 +1564,7 @@ const ComprasPanel = () => {
         onSave={async (codigo, updates) => {
           if (!solicitacaoEdicao?.id) return;
           try {
-            await updateSolicitacoesBulkData([solicitacaoEdicao.id], updates);
+            await updateSolicitacao(solicitacaoEdicao.id, updates);
             setSolicitacaoEditOpen(false);
             setSolicitacaoEdicao(null);
             queryClient.invalidateQueries({ queryKey: ["solicitacoes-compras"] });

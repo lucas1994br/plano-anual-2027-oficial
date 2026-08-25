@@ -342,6 +342,7 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                   </TableCell>
                   <TableCell className="text-center">
                     <Input
+                      key={`${item.codigo}-${item.qtdEstimada}`}
                       type="number"
                       min="0"
                       defaultValue={item.qtdEstimada || ""}

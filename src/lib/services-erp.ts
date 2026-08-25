@@ -169,7 +169,7 @@ export async function criarPlanoItem(dto: CreatePlanoItemDTO): Promise<PlanoItem
 
   if (!centroCustoId) {
     const { data: itemData } = await supabase
-      .from('item_catalogo')
+      .from('itens_catalogo')
       .select('categoria_id')
       .eq('id', dto.item_catalogo_id)
       .single();
@@ -177,7 +177,7 @@ export async function criarPlanoItem(dto: CreatePlanoItemDTO): Promise<PlanoItem
     if (itemData?.categoria_id) {
       // Chamar função PostgreSQL para obter centro padrão
       const { data: centroPadrao } = await supabase
-        .rpc('obter_centro_custo_categor', {
+        .rpc('obter_centro_custo_categoria', {
           p_categoria_id: itemData.categoria_id,
           p_data: new Date().toISOString().split('T')[0],
         });
