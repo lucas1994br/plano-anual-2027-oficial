@@ -1459,17 +1459,19 @@ export async function deleteServicosBulk(itemIds: string[]): Promise<boolean> {
 
 export async function updateSolicitacoesBulkData(
   ids: string[],
-  updates: Partial<PlanItem>
+  updates: Partial<PlanItem> | any
 ): Promise<void> {
   const dbUpdates: Record<string, unknown> = {};
 
   if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
-  if (updates.unidade !== undefined) dbUpdates.unidade = updates.unidade;
+  if (updates.qtd_estimada !== undefined) dbUpdates.qtd_estimada = updates.qtd_estimada;
   if (updates.observacao !== undefined) dbUpdates.observacao = updates.observacao;
   if (updates.prioridade !== undefined) dbUpdates.prioridade = updates.prioridade;
   if (updates.valorUnitario !== undefined) dbUpdates.valor_unitario = updates.valorUnitario;
-  if (updates.categoria !== undefined) dbUpdates.categoria = updates.categoria;
-  if (updates.descricao !== undefined) dbUpdates.descricao = updates.descricao;
+  if (updates.valor_unitario !== undefined) dbUpdates.valor_unitario = updates.valor_unitario;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.justificativa_rejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativa_rejeicao;
+  if (updates.justificativaRejeicao !== undefined) dbUpdates.justificativa_rejeicao = updates.justificativaRejeicao;
 
   if (Object.keys(dbUpdates).length === 0) return;
 
