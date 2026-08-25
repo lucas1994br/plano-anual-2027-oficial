@@ -169,7 +169,7 @@ export async function criarPlanoItem(dto: CreatePlanoItemDTO): Promise<PlanoItem
 
   if (!centroCustoId) {
     const { data: itemData } = await supabase
-      .from('itens_catalogo')
+      .from('item_catalogo')
       .select('categoria_id')
       .eq('id', dto.item_catalogo_id)
       .single();
