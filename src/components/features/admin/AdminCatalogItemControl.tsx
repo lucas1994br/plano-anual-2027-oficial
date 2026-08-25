@@ -4,10 +4,8 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx-js-style";
 
 import { Button } from "@/components/ui/button.tsx";
-import { SmartPagination } from "@/components/common/SmartPagination.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { CurrencyInput } from "@/components/ui/currency-input.tsx";
@@ -36,8 +34,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
-import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
-import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { Badge } from "@/components/ui/badge.tsx";
 import { CATEGORIAS_ITEM_PREDEFINIDAS, UNIDADES_ITEM_PREDEFINIDAS } from "@/lib/catalogMetadata.ts";
 import { 
@@ -131,15 +127,13 @@ export function AdminCatalogItemControl() {
     );
   }, [itens, searchTerm]);
 
-  const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredItens as ItemCatalogo[]);
-
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(filteredItens.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = sortedItems.slice(startIdx, endIdx);
-    return { totalPages, currentPage, paginatedItems, totalFiltered: sortedItems.length };
-  }, [sortedItems, currentPage]);
+    const paginatedItems = (filteredItens as ItemCatalogo[]).slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems, totalFiltered: filteredItens.length };
+  }, [filteredItens, currentPage]);
 
   const summary = useMemo(() => {
     const totalItens = itens.length;
@@ -287,7 +281,7 @@ export function AdminCatalogItemControl() {
 
     setIsUpdatingBulk(true);
     try {
-      const updates: Partial<ItemCatalogo> = {};
+      const updates: any = {};
       if (bulkEditField === "categoria") updates.categoria = bulkEditValue;
       if (bulkEditField === "unidade") updates.unidade = bulkEditValue;
       if (bulkEditField === "valorUnitario") updates.valor_unitario = Number(bulkEditValue);
@@ -312,7 +306,7 @@ export function AdminCatalogItemControl() {
     if (selectedIds.length === paginationData.paginatedItems.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(paginationData.paginatedItems.map((item: ItemCatalogo) => item.id));
+      setSelectedIds(paginationData.paginatedItems.map(item => item.id));
     }
   };
 
@@ -322,16 +316,19 @@ export function AdminCatalogItemControl() {
     );
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    // @ts-ignore
+    const xlsxModule = await import("xlsx-js-style/dist/xlsx.min.js");
+    const XLSX = xlsxModule.default ?? xlsxModule;
     const wb = XLSX.utils.book_new();
-    const wsData: (string | number | undefined)[][] = [];
+    const wsData: any[][] = [];
 
     wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Aquisições`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
     wsData.push(["Código", "Descrição", "Categoria", "Unidade", "Valor Unitário"]);
 
-    (filteredItens as ItemCatalogo[]).forEach((item) => {
+    (filteredItens as any[]).forEach((item) => {
       wsData.push([
         item.codigo,
         item.descricao,
@@ -361,13 +358,13 @@ export function AdminCatalogItemControl() {
 
     autoTable(doc, {
       head: [["Cód.", "Descrição", "Categoria", "Unid.", "Valor Unit."]],
-      body: (filteredItens as ItemCatalogo[]).map((item) => [
+      body: (filteredItens as any[]).map((item) => [
         item.codigo,
         item.descricao.length > 60 ? item.descricao.substring(0, 60) + "…" : item.descricao,
         item.categoria,
         item.unidade,
         formatCurrency(item.valor_unitario),
-      ]) as import("jspdf-autotable").RowInput[],
+      ]) as any,
       startY: 30,
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [37, 99, 235], textColor: 255 },
@@ -497,16 +494,16 @@ export function AdminCatalogItemControl() {
                       aria-label="Selecionar todos os itens da página"
                     />
                   </TableHead>
-                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>Código</SortableTableHead>
-                  <SortableTableHead className="cursor-pointer hover:text-slate-900" field="descricao" sortConfig={sortConfig} onRequestSort={requestSort}>Descrição</SortableTableHead>
-                  <SortableTableHead className="w-48 cursor-pointer hover:text-slate-900" field="categoria" sortConfig={sortConfig} onRequestSort={requestSort}>Categoria</SortableTableHead>
-                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="unidade" sortConfig={sortConfig} onRequestSort={requestSort}>Unidade</SortableTableHead>
-                  <SortableTableHead className="w-32 text-right cursor-pointer hover:text-slate-900" field="valor_unitario" sortConfig={sortConfig} onRequestSort={requestSort}>Valor Unitário</SortableTableHead>
+                  <TableHead className="w-24">Código</TableHead>
+                  <TableHead>Descrição</TableHead>
+                  <TableHead className="w-48">Categoria</TableHead>
+                  <TableHead className="w-32">Unidade</TableHead>
+                  <TableHead className="w-32 text-right">Valor Unitário</TableHead>
                   <TableHead className="w-20 text-center">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginationData.paginatedItems.map((item: ItemCatalogo) => (
+                {paginationData.paginatedItems.map((item) => (
                   <TableRow key={item.id} className={selectedIds.includes(item.id) ? "bg-muted/50" : ""}>
                     <TableCell className="text-center">
                       <Checkbox 
@@ -554,13 +551,53 @@ export function AdminCatalogItemControl() {
 
         {/* Controles de Paginação */}
         {paginationData.totalPages > 1 && (
-          <div className="py-4 border-t mt-4">
-            <SmartPagination
-              currentPage={currentPage}
-              totalPages={paginationData.totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={paginationData.totalFiltered}
-            />
+          <div className="py-6 border-t mt-4">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+                {currentPage > 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(currentPage - 1)} className="cursor-pointer">
+                      {currentPage - 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationLink isActive>{currentPage}</PaginationLink>
+                </PaginationItem>
+                {currentPage < paginationData.totalPages && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(currentPage + 1)} className="cursor-pointer">
+                      {currentPage + 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                {currentPage < paginationData.totalPages - 1 && (
+                  <PaginationItem><PaginationEllipsis /></PaginationItem>
+                )}
+                {currentPage < paginationData.totalPages - 1 && (
+                  <PaginationItem>
+                    <PaginationLink onClick={() => setCurrentPage(paginationData.totalPages)} className="cursor-pointer">
+                      {paginationData.totalPages}
+                    </PaginationLink>
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
+                    className={currentPage === paginationData.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
+              Página {currentPage} de {paginationData.totalPages} • Exibindo {paginationData.totalFiltered} itens
+            </div>
           </div>
         )}
       </Card>
@@ -570,7 +607,7 @@ export function AdminCatalogItemControl() {
         setCreateDialogOpen(open);
         if (!open) resetForm();
       }}>
-        <DialogContent className="w-[95vw] max-w-2xl">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Cadastrar Novo Item</DialogTitle>
             <DialogDescription>
@@ -661,7 +698,7 @@ export function AdminCatalogItemControl() {
           resetEditForm();
         }
       }}>
-        <DialogContent className="w-[95vw] max-w-2xl">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Editar Item</DialogTitle>
             <DialogDescription>
@@ -745,7 +782,7 @@ export function AdminCatalogItemControl() {
 
       {/* ==================== DIALOG EXCLUIR ITEM ==================== */}
       <Dialog open={!!deletingItem} onOpenChange={(open) => !open && setDeletingItem(null)}>
-        <DialogContent className="w-[95vw] sm:max-w-md">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>
@@ -773,7 +810,7 @@ export function AdminCatalogItemControl() {
           setBulkEditValue("");
         }
       }}>
-        <DialogContent className="w-[95vw] sm:max-w-md">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Editar {selectedIds.length} itens em lote</DialogTitle>
             <DialogDescription>
