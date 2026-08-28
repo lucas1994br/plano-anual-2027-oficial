@@ -303,10 +303,12 @@ export function AdminCatalogItemControl() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === paginationData.paginatedItems.length) {
-      setSelectedIds([]);
+    const pageIds = paginationData.paginatedItems.map(item => item.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id: string) => selectedIds.includes(id));
+    if (allPageSelected) {
+      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
     } else {
-      setSelectedIds(paginationData.paginatedItems.map(item => item.id));
+      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
     }
   };
 
@@ -429,7 +431,6 @@ export function AdminCatalogItemControl() {
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setCurrentPage(1);
-                  setSelectedIds([]);
                 }}
               />
             </div>
@@ -489,7 +490,7 @@ export function AdminCatalogItemControl() {
                 <TableRow>
                   <TableHead className="w-12 text-center">
                     <Checkbox 
-                      checked={selectedIds.length === paginationData.paginatedItems.length && paginationData.paginatedItems.length > 0}
+                      checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every(item => selectedIds.includes(item.id))}
                       onCheckedChange={toggleSelectAll}
                       aria-label="Selecionar todos os itens da página"
                     />

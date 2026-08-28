@@ -277,7 +277,10 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                 {onToggleSelectAll && (
                   <TableHead className="w-[40px] px-4 text-center">
                     <Checkbox
-                      checked={items.length > 0 && items.filter(i => i.id).length > 0 && selectedItems?.size === items.filter(i => i.id).length}
+                      checked={(() => {
+                        const selectable = items.filter(i => Boolean(i.id));
+                        return selectable.length > 0 && selectable.every(i => selectedItems?.has(i.id || i.codigo));
+                      })()}
                       onCheckedChange={onToggleSelectAll}
                       disabled={items.filter(i => i.id).length === 0}
                     />

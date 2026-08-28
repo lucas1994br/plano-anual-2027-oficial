@@ -486,11 +486,15 @@ const ComprasPanel = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedItems.size === filteredItems.length && filteredItems.length > 0) {
-      setSelectedItems(new Set());
+    const validIds = filteredItems.filter(item => item.id).map(item => item.id!);
+    const allSelected = validIds.length > 0 && validIds.every(id => selectedItems.has(id));
+    const newSet = new Set(selectedItems);
+    if (allSelected) {
+      validIds.forEach(id => newSet.delete(id));
     } else {
-      setSelectedItems(new Set(filteredItems.filter(item => item.id).map(item => item.id!)));
+      validIds.forEach(id => newSet.add(id));
     }
+    setSelectedItems(newSet);
   };
 
   const toggleSelectServico = (id: string) => {
@@ -504,11 +508,15 @@ const ComprasPanel = () => {
   };
 
   const toggleSelectAllServicos = () => {
-    if (selectedServicos.size === filteredServicos.length && filteredServicos.length > 0) {
-      setSelectedServicos(new Set());
+    const validIds = filteredServicos.filter(s => s.id).map(s => s.id!);
+    const allSelected = validIds.length > 0 && validIds.every(id => selectedServicos.has(id));
+    const newSet = new Set(selectedServicos);
+    if (allSelected) {
+      validIds.forEach(id => newSet.delete(id));
     } else {
-      setSelectedServicos(new Set(filteredServicos.filter(s => s.id).map(s => s.id!)));
+      validIds.forEach(id => newSet.add(id));
     }
+    setSelectedServicos(newSet);
   };
 
   const handleExportExcel = async () => {
@@ -1012,7 +1020,10 @@ const ComprasPanel = () => {
                   <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
                     <TableHead className="w-12 cursor-pointer select-none" onClick={toggleSelectAllServicos}>
                       <Checkbox
-                        checked={selectedServicos.size === filteredServicos.length && filteredServicos.length > 0}
+                        checked={(() => {
+                          const valid = filteredServicos.filter(s => s.id);
+                          return valid.length > 0 && valid.every(s => selectedServicos.has(s.id!));
+                        })()}
                         onCheckedChange={toggleSelectAllServicos}
                         className="pointer-events-none"
                       />
@@ -1396,7 +1407,10 @@ const ComprasPanel = () => {
                 <TableRow className="bg-slate-100 text-slate-600 font-semibold text-xs uppercase tracking-wide hover:bg-slate-100">
                   <TableHead className="w-[40px] cursor-pointer select-none" onClick={toggleSelectAll}>
                     <Checkbox
-                      checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
+                      checked={(() => {
+                        const valid = filteredItems.filter(item => item.id);
+                        return valid.length > 0 && valid.every(item => selectedItems.has(item.id!));
+                      })()}
                       onCheckedChange={toggleSelectAll}
                       className="pointer-events-none"
                     />

@@ -461,7 +461,7 @@ const DiretoriaAprovacao = () => {
     if (selectedOption === "servicos") {
       setSelectedServicos(new Set());
     }
-  }, [selectedGerencia, selectedOption]);
+  }, [selectedOption]);
 
   const filteredItems = useMemo(() => {
     let filtered = items;
@@ -511,7 +511,6 @@ const DiretoriaAprovacao = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-    setSelectedItems(new Set());
   }, [selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
 
   const categoriasItensProprios = useMemo(() => {
@@ -885,11 +884,15 @@ const DiretoriaAprovacao = () => {
 
   // Handlers para seleção de itens
   const toggleSelectAll = () => {
-    if (selectedItems.size === selectableItems.length) {
-      setSelectedItems(new Set());
+    const selectableIds = selectableItems.map(item => item.id).filter(Boolean) as string[];
+    const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedItems.has(id));
+    const newSelected = new Set(selectedItems);
+    if (allSelected) {
+      selectableIds.forEach(id => newSelected.delete(id));
     } else {
-      setSelectedItems(new Set(selectableItems.map(item => item.id).filter(Boolean) as string[]));
+      selectableIds.forEach(id => newSelected.add(id));
     }
+    setSelectedItems(newSelected);
   };
 
   const toggleSelectItem = (itemId: string) => {
@@ -1862,12 +1865,14 @@ const DiretoriaAprovacao = () => {
     const selectableIds = servicosFiltradasPorStatus
       .filter((s: any) => s.id && !isServicoReadOnly(s))
       .map((s: any) => s.id as string);
-
-    if (selectedServicos.size === selectableIds.length && selectableIds.length > 0) {
-      setSelectedServicos(new Set());
+    const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedServicos.has(id));
+    const newSelected = new Set(selectedServicos);
+    if (allSelected) {
+      selectableIds.forEach(id => newSelected.delete(id));
     } else {
-      setSelectedServicos(new Set(selectableIds));
+      selectableIds.forEach(id => newSelected.add(id));
     }
+    setSelectedServicos(newSelected);
   };
 
 
@@ -2628,17 +2633,11 @@ const DiretoriaAprovacao = () => {
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="flex items-center gap-2">
                       <Checkbox 
-                        checked={selectedServicos.size === servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length && servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length > 0}
-                        onCheckedChange={() => {
-                          const selectableIds = servicosFiltradasPorStatus
-                            .filter((s: any) => s.id && !isServicoReadOnly(s))
-                            .map((s: any) => s.id as string);
-                          if (selectedServicos.size === selectableIds.length && selectableIds.length > 0) {
-                            setSelectedServicos(new Set());
-                          } else {
-                            setSelectedServicos(new Set(selectableIds));
-                          }
-                        }}
+                        checked={(() => {
+                          const selectable = servicosFiltradasPorStatus.filter(s => Boolean(s.id) && !isServicoReadOnly(s));
+                          return selectable.length > 0 && selectable.every(s => Boolean(s.id && selectedServicos.has(s.id!)));
+                        })()}
+                        onCheckedChange={toggleSelectAllServicos}
                         disabled={servicosFiltradasPorStatus.filter(s => !isServicoReadOnly(s)).length === 0}
                       />
                       <span className="text-sm text-muted-foreground">
@@ -3250,11 +3249,14 @@ const DiretoriaAprovacao = () => {
               }}
               onToggleSelectAll={() => {
                 const validIds = ownPaginationData.paginatedItems.map(i => i.id || i.codigo).filter(Boolean);
-                if (selectedOwnItems.size === validIds.length && validIds.length > 0) {
-                  setSelectedOwnItems(new Set());
+                const allSelected = validIds.length > 0 && validIds.every(id => selectedOwnItems.has(id));
+                const newSet = new Set(selectedOwnItems);
+                if (allSelected) {
+                  validIds.forEach(id => newSet.delete(id));
                 } else {
-                  setSelectedOwnItems(new Set(validIds));
+                  validIds.forEach(id => newSet.add(id));
                 }
+                setSelectedOwnItems(newSet);
               }}
             />
 
@@ -3427,7 +3429,7 @@ const DiretoriaAprovacao = () => {
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
                 <Checkbox 
-                  checked={selectedItems.size === selectableItems.length && selectableItems.length > 0}
+                  checked={selectableItems.length > 0 && selectableItems.every(item => item.id && selectedItems.has(item.id))}
                   onCheckedChange={toggleSelectAll}
                   disabled={selectableItems.length === 0}
                 />

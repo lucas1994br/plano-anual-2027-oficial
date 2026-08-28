@@ -236,16 +236,28 @@ import {
     return unique.sort();
   }, [items]);
 
-  // Resetar página e seleções quando filtros mudarem
+  // Resetar seleções e filtros ao mudar de tela principal
   useEffect(() => {
     setCurrentPage(1);
+    setCurrentPageServicos(1);
     setSelectedAquisicaoIds(new Set());
+    setSelectedServicos(new Set());
+    setSearchTerm("");
+    setCategoria("");
+    setPrioridade("todas");
+    setShowOnlyZerados(false);
+    setShowOnlySent(false);
+    setShowOnlyComQuantidade(false);
+  }, [selectedOption]);
+
+  // Resetar apenas página quando filtros mudarem (mantendo as seleções)
+  useEffect(() => {
+    setCurrentPage(1);
   }, [categoria, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
   useEffect(() => {
     setCurrentPageServicos(1);
-    setSelectedServicos(new Set());
-  }, [selectedOption, searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
+  }, [searchTerm, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
   const { sortedItems: sortedFilteredItems, sortConfig: itemsSortConfig, requestSort: requestItemsSort } = useSortableTable(filteredItems);
 
@@ -1473,7 +1485,7 @@ import {
       valorTotal: filteredServicos.reduce((acc, s) => acc + (s.estimativaValor || s.dotacaoOrcamentaria || 0), 0)
     };
 
-    const canSendServicos = filteredServicos.some((s) => !isServicoReadOnly(s));
+    const canSendServicos = displayedServicos.some((s) => !isServicoReadOnly(s));
     const servicosEditaveis = filteredServicos.filter((s) => !isServicoReadOnly(s));
     const isAllSent = filteredServicos.length > 0 && filteredServicos.every((s) => isServicoReadOnly(s));
 
@@ -1956,7 +1968,7 @@ import {
           />
 
           {/* Ações gerais */}
-          {(searchTerm.trim() !== "" || showOnlyComQuantidade || showOnlyZerados || showOnlySent) && (
+          {(searchTerm.trim() !== "" || showOnlyComQuantidade || showOnlyZerados || showOnlySent || selectedServicos.size > 0) && (
             <div className="px-6 py-3 border-b flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {(() => {
