@@ -23,6 +23,8 @@ import {
   CheckSquare,
   ChevronDown,
   Check,
+  RotateCcw,
+  X,
 } from "lucide-react";
 import {
   getRestricoesAtividades,
@@ -1851,187 +1853,106 @@ export function AdminRestricoesControl({ defaultPeriodoId }: AdminRestricoesCont
           </div>
         </div>
 
-        {/* Separador e Título da Tabela de Regras */}
-        <div className="pt-4 border-t">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-3">
+        {/* Separador e Título da Tabela de Regras com Barra de Busca e Filtros Compacta */}
+        <div className="pt-4 border-t space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                 <Layers className="h-4 w-4 text-primary" />
                 Regras Granulares & Exceções Cadastradas
               </h3>
               <p className="text-xs text-muted-foreground">
-                Tabela com todas as regras específicas por período, diretoria, gerência ou perfil.
+                Tabela com todas as regras específicas de bloqueio/liberação salvas no sistema.
               </p>
             </div>
-          </div>
-        </div>
 
-        {/* Filtros */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 bg-slate-50/70 p-4 rounded-xl border border-slate-200/80">
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Período</Label>
-            <Select value={selectedPeriodo} onValueChange={(v) => { setSelectedPeriodo(v); setCurrentPage(1); }}>
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Selecione o período" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos os períodos</SelectItem>
-                {periodos.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.nome} {p.ativo ? "(Ativo)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+            {/* Barra de Busca Inteligente e Filtros Rápidos */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[240px] sm:min-w-[300px] flex-1 sm:flex-initial">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por gerência, diretoria, módulo, ação..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-9 pr-8 h-9 bg-white text-xs rounded-lg border-slate-200 shadow-xs"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setCurrentPage(1);
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    title="Limpar texto de busca"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
 
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Diretoria</Label>
-            <Select
-              value={selectedDiretoria}
-              onValueChange={(v) => {
-                setSelectedDiretoria(v);
-                setSelectedGerencia("todas");
-                setCurrentPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Todas as diretorias" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todas">Todas as diretorias</SelectItem>
-                {diretorias.map((d: any) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.sigla} - {d.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Gerência</Label>
-            <Select
-              value={selectedGerencia}
-              onValueChange={(v) => { setSelectedGerencia(v); setCurrentPage(1); }}
-              disabled={selectedDiretoria === "todas"}
-            >
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Todas as gerências" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todas">Todas as gerências</SelectItem>
-                {apenasGerencias
-                  .filter((g: any) => selectedDiretoria === "todas" || g.diretoria_id === selectedDiretoria)
-                  .map((g: any) => (
-                    <SelectItem key={g.id} value={g.id}>
-                      {g.sigla} {g.nome ? `- ${g.nome}` : ""}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Módulo</Label>
-            <Select
-              value={selectedModulo}
-              onValueChange={(v) => {
-                setSelectedModulo(v);
-                setSelectedAtividade("todas");
-                setCurrentPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Todos os módulos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos os módulos</SelectItem>
-                {MODULOS_CONFIG.filter((m) => m.id !== "todos").map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Atividade</Label>
-            <Select value={selectedAtividade} onValueChange={(v) => { setSelectedAtividade(v); setCurrentPage(1); }}>
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Todas as atividades" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todas">Todas as atividades</SelectItem>
-                {atividadesDisponiveisFiltro.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Status</Label>
-            <Select value={selectedStatus} onValueChange={(v) => { setSelectedStatus(v); setCurrentPage(1); }}>
-              <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos os status</SelectItem>
-                <SelectItem value="bloqueado">🔴 Bloqueado</SelectItem>
-                <SelectItem value="liberado">🟢 Liberado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="sm:col-span-2 md:col-span-3 lg:col-span-4">
-            <Label className="text-xs font-semibold text-slate-600">Buscar</Label>
-            <div className="relative mt-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por setor, módulo, atividade ou observação..."
-                value={searchTerm}
-                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                className="pl-9 h-9 bg-white text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="sm:col-span-2 md:col-span-3 lg:col-span-2 flex items-end gap-2">
-            <div className="flex-1">
-              <Label className="text-xs font-semibold text-slate-600">Estado da Regra</Label>
-              <Select value={selectedAtivo} onValueChange={(v) => { setSelectedAtivo(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-9 mt-1 bg-white text-xs">
-                  <SelectValue placeholder="Todas" />
+              {/* Filtro Rápido de Status */}
+              <Select
+                value={selectedStatus}
+                onValueChange={(v) => {
+                  setSelectedStatus(v);
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="h-9 bg-white text-xs w-[140px] border-slate-200 shadow-xs">
+                  <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todas (Ativas + Inativas)</SelectItem>
-                  <SelectItem value="ativas">Apenas Ativas</SelectItem>
-                  <SelectItem value="inativas">Apenas Inativas</SelectItem>
+                  <SelectItem value="todos">Todos os status</SelectItem>
+                  <SelectItem value="bloqueado">🔴 Bloqueados</SelectItem>
+                  <SelectItem value="liberado">🟢 Liberados</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Filtro Rápido de Estado da Regra */}
+              <Select
+                value={selectedAtivo}
+                onValueChange={(v) => {
+                  setSelectedAtivo(v);
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="h-9 bg-white text-xs w-[140px] border-slate-200 shadow-xs">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todas as regras</SelectItem>
+                  <SelectItem value="ativas">⚡ Apenas Ativas</SelectItem>
+                  <SelectItem value="inativas">💤 Apenas Inativas</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Botão Limpar Filtros */}
+              {(searchTerm || selectedStatus !== "todos" || selectedAtivo !== "todos" || selectedPeriodo !== "todos" || selectedDiretoria !== "todas" || selectedGerencia !== "todas" || selectedModulo !== "todos" || selectedAtividade !== "todas") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedPeriodo("todos");
+                    setSelectedDiretoria("todas");
+                    setSelectedGerencia("todas");
+                    setSelectedModulo("todos");
+                    setSelectedAtividade("todas");
+                    setSelectedStatus("todos");
+                    setSelectedAtivo("todos");
+                    setSearchTerm("");
+                    setCurrentPage(1);
+                  }}
+                  className="h-9 text-xs gap-1.5 text-slate-600 hover:text-slate-900 border-slate-300 bg-white hover:bg-slate-50 shadow-xs animate-in fade-in"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+                  Limpar
+                </Button>
+              )}
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSelectedPeriodo("todos");
-                setSelectedDiretoria("todas");
-                setSelectedGerencia("todas");
-                setSelectedModulo("todos");
-                setSelectedAtividade("todas");
-                setSelectedStatus("todos");
-                setSelectedAtivo("todos");
-                setSearchTerm("");
-                setCurrentPage(1);
-              }}
-              className="h-9 text-xs"
-            >
-              Limpar
-            </Button>
           </div>
         </div>
 
@@ -2302,10 +2223,29 @@ export function AdminRestricoesControl({ defaultPeriodoId }: AdminRestricoesCont
       <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <ShieldAlert className="h-5 w-5 text-primary" />
-              Nova Restrição de Atividade
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-lg">
+                <ShieldAlert className="h-5 w-5 text-primary" />
+                Nova Restrição de Atividade
+              </DialogTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setModalSelectedDiretoriaIds(new Set());
+                  setModalSelectedGerenciaIds(new Set());
+                  setModalSelectedModulos(new Set());
+                  setModalSelectedAtividades(new Set());
+                  setModalSearchGerencia("");
+                }}
+                className="text-xs h-7 gap-1 text-slate-500 hover:text-slate-900 mr-6"
+                title="Limpar todas as seleções"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Limpar Seleções
+              </Button>
+            </div>
             <DialogDescription>
               Defina as regras de bloqueio ou liberação de atividades operacionais para o período selecionado.
             </DialogDescription>
