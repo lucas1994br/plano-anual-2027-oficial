@@ -6,6 +6,15 @@ import type {
   ServicoItem,
   Diretoria,
 } from "@/types/plan.ts";
+import type {
+  RestricaoAtividade,
+  ActivityPermissionContext,
+  PermissionCheckResult,
+  ModuloTipo,
+  AtividadeTipo,
+  StatusRestricao,
+  EscopoTipo,
+} from "@/types/restricoes.ts";
 import type { AdminBudgetConfig, RoutingRule } from "./adminBudgetConfig.ts";
 import type {
   PostgrestSingleResponse,
@@ -467,6 +476,11 @@ export async function getSolicitacoesByGerencia(
 export async function deleteSolicitacao(itemId: string | number): Promise<boolean> {
   if (!itemId) throw new Error("ID inválido para exclusão");
 
+  await assertActivityAllowed({
+    modulo: "aquisicao",
+    atividade: "excluir_item",
+  });
+
   const idStr = String(itemId);
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr);
 
@@ -508,6 +522,11 @@ export async function deleteSolicitacao(itemId: string | number): Promise<boolea
 
 export async function deleteSolicitacoesBulk(itemIds: (string | number)[]): Promise<boolean> {
   if (!itemIds || itemIds.length === 0) return false;
+
+  await assertActivityAllowed({
+    modulo: "aquisicao",
+    atividade: "excluir_item",
+  });
 
   const stringIds = itemIds.map(String);
   const uuidIds = stringIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
@@ -750,6 +769,14 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
   gerencia_id: string;
   item_id?: string;
 }): Promise<PlanItem> {
+  await assertActivityAllowed({
+    periodoId: solicitacao.periodo_id,
+    gerenciaId: solicitacao.gerencia_id,
+    diretoriaId: solicitacao.diretoria_id,
+    modulo: "aquisicao",
+    atividade: "adicionar_item",
+  });
+
   let itemId = solicitacao.item_id;
   if (!itemId && solicitacao.codigo) {
     const { data: itemData } = await supabase
@@ -828,6 +855,17 @@ export async function updateSolicitacao(
     return {} as PlanItem;
   }
 
+  // Validação de restrição para campos específicos se informados
+  if (dbUpdates.qtd_estimada !== undefined) {
+    await assertActivityAllowed({ modulo: "aquisicao", atividade: "alterar_quantidade" });
+  }
+  if (dbUpdates.prioridade !== undefined) {
+    await assertActivityAllowed({ modulo: "aquisicao", atividade: "alterar_prioridade" });
+  }
+  if (dbUpdates.observacao !== undefined) {
+    await assertActivityAllowed({ modulo: "aquisicao", atividade: "adicionar_observacao" });
+  }
+
   dbUpdates.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -882,6 +920,29 @@ export async function updateSolicitacaoStatus(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<PlanItem> {
+  let atividade: AtividadeTipo = "editar_item";
+  if (status === "enviado") atividade = "enviar_solicitacao";
+  else if (status === "aprovado") atividade = "aprovar";
+  else if (status === "rejeitado") atividade = "reprovar";
+  else if (status === "rascunho") atividade = "devolver_solicitacao";
+  else if (status === "em_compra") atividade = "enviar_compras";
+
+  const { data: solData } = await supabase
+    .from("solicitacoes")
+    .select("periodo_id, gerencia_id, diretoria_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (solData) {
+    await assertActivityAllowed({
+      periodoId: solData.periodo_id,
+      gerenciaId: solData.gerencia_id,
+      diretoriaId: solData.diretoria_id,
+      modulo: "aquisicao",
+      atividade,
+    });
+  }
+
   const updates: Record<string, unknown> = { status };
 
   if (status === "enviado") {
@@ -925,6 +986,29 @@ export async function updateSolicitacaoStatusBulk(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
+  let atividade: AtividadeTipo = "edicao_em_lote";
+  if (status === "enviado") atividade = "enviar_solicitacao";
+  else if (status === "aprovado") atividade = "aprovar";
+  else if (status === "rejeitado") atividade = "reprovar";
+  else if (status === "rascunho") atividade = "devolver_solicitacao";
+  else if (status === "em_compra") atividade = "enviar_compras";
+
+  // Pega dados originais para o log orçamentário e checagem de permissão
+  const { data: originais } = await supabase
+    .from("solicitacoes")
+    .select("id, periodo_id, gerencia_id, diretoria_id, qtd_estimada, valor_unitario")
+    .in("id", ids);
+
+  if (originais && originais[0]) {
+    await assertActivityAllowed({
+      periodoId: originais[0].periodo_id,
+      gerenciaId: originais[0].gerencia_id,
+      diretoriaId: originais[0].diretoria_id,
+      modulo: "aquisicao",
+      atividade,
+    });
+  }
+
   const updates: Record<string, unknown> = { 
     status,
     updated_at: new Date().toISOString()
@@ -937,12 +1021,6 @@ export async function updateSolicitacaoStatusBulk(
   } else if (status === "rejeitado" && justificativa) {
     updates.justificativa_rejeicao = justificativa;
   }
-
-  // Pega dados originais para o log orçamentário
-  const { data: originais } = await supabase
-    .from("solicitacoes")
-    .select("id, diretoria_id, qtd_estimada, valor_unitario")
-    .in("id", ids);
 
   const { error } = await supabase
     .from("solicitacoes")
@@ -1011,6 +1089,29 @@ export async function updateServicoStatusBulk(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
+  let atividade: AtividadeTipo = "edicao_em_lote";
+  if (status === "enviado") atividade = "enviar_solicitacao";
+  else if (status === "aprovado") atividade = "aprovar";
+  else if (status === "rejeitado") atividade = "reprovar";
+  else if (status === "rascunho") atividade = "devolver_solicitacao";
+  else if (status === "em_compra") atividade = "enviar_compras";
+
+  const { data: originais } = await supabase
+    .from("servicos")
+    .select("id, periodo_id, gerencia_id, diretoria_id, tipo_contratacao")
+    .in("id", ids);
+
+  if (originais && originais[0]) {
+    const isNovo = originais[0].tipo_contratacao === "Novo";
+    await assertActivityAllowed({
+      periodoId: originais[0].periodo_id,
+      gerenciaId: originais[0].gerencia_id,
+      diretoriaId: originais[0].diretoria_id,
+      modulo: isNovo ? "servicos_novos" : "servicos_existentes",
+      atividade,
+    });
+  }
+
   const updates: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
 
   if (status === "rejeitado" && justificativa) {
@@ -1710,6 +1811,19 @@ export async function updateServico(
   servicoId: string,
   updates: Partial<ServicoItem> | any
 ): Promise<ServicoItem | undefined> {
+  const isNovo = (updates.tipo_contratacao || updates.tipoContratacao) === "Novo";
+  const modulo: ModuloTipo = isNovo ? "servicos_novos" : "servicos_existentes";
+
+  if (updates.dotacao_orcamentaria !== undefined || updates.dotacaoOrcamentaria !== undefined || updates.estimativa_valor !== undefined || updates.estimativaValor !== undefined) {
+    await assertActivityAllowed({ modulo, atividade: "alterar_valor" });
+  }
+  if (updates.grau_prioridade !== undefined || updates.grauPrioridade !== undefined) {
+    await assertActivityAllowed({ modulo, atividade: "alterar_prioridade" });
+  }
+  if (updates.observacao !== undefined) {
+    await assertActivityAllowed({ modulo, atividade: "adicionar_observacao" });
+  }
+
   const dbUpdates = mapServicoItemToDb(updates);
   dbUpdates.updated_at = new Date().toISOString();
   delete dbUpdates.id;
@@ -1731,6 +1845,18 @@ export async function updateServico(
 export async function createServico(
   servico: Omit<ServicoItem, "id" | "created_at" | "updated_at"> | any
 ): Promise<ServicoItem | undefined> {
+  const isNovo = (servico.tipo_contratacao || servico.tipoContratacao) === "Novo";
+  const modulo: ModuloTipo = isNovo ? "servicos_novos" : "servicos_existentes";
+  const atividade: AtividadeTipo = isNovo ? "adicionar_novo_servico" : "adicionar_servico";
+
+  await assertActivityAllowed({
+    periodoId: servico.periodo_id || servico.periodoId,
+    gerenciaId: servico.gerencia_id || servico.gerenciaId,
+    diretoriaId: servico.diretoria_id || servico.diretoriaId,
+    modulo,
+    atividade,
+  });
+
   const dbRow = mapServicoItemToDb(servico);
   const { data, error } = await supabase
     .from("servicos")
@@ -1755,12 +1881,25 @@ export const deleteServico = async (idOrItem: string | number): Promise<boolean>
   if (!isUuid) {
     const { data } = await supabase
       .from("servicos")
-      .select("id")
+      .select("id, tipo_contratacao, gerencia_id, diretoria_id, periodo_id")
       .eq("item", Number(idOrItem))
       .maybeSingle();
     if (data?.id) {
       targetId = data.id;
+      const isNovo = data.tipo_contratacao === "Novo";
+      await assertActivityAllowed({
+        periodoId: data.periodo_id,
+        gerenciaId: data.gerencia_id,
+        diretoriaId: data.diretoria_id,
+        modulo: isNovo ? "servicos_novos" : "servicos_existentes",
+        atividade: "excluir_servico",
+      });
     }
+  } else {
+    await assertActivityAllowed({
+      modulo: "servicos_existentes",
+      atividade: "excluir_servico",
+    });
   }
 
   await supabase.from("solicitacao_historico").delete().eq("solicitacao_id", targetId);
@@ -1782,6 +1921,11 @@ export const deleteServico = async (idOrItem: string | number): Promise<boolean>
 
 export async function deleteServicosBulk(itemIds: (string | number)[]): Promise<boolean> {
   if (!itemIds || itemIds.length === 0) return false;
+
+  await assertActivityAllowed({
+    modulo: "servicos_existentes",
+    atividade: "excluir_servico",
+  });
 
   const stringIds = itemIds.map(String);
   const uuidIds = stringIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
@@ -2393,12 +2537,783 @@ export async function deleteLogsOrcamentarioBulk(ids: string[]): Promise<boolean
 
 export async function updateLogOrcamentario(id: string, updates: any): Promise<boolean> {
   const { error } = await supabase
-    .from("log_orcamentario")
-    .update(updates)
-    .eq("id", id);
+  .from("log_orcamentario")
+  .update(updates)
+  .eq("id", id);
   if (error) {
     console.error("Erro ao atualizar log orçamentário:", error);
     throw error;
   }
   return true;
 }
+
+// --------------------------------------------------------------------------------
+// RESTRIÇÕES DE ATIVIDADES (Admin & Motor de Permissões)
+// --------------------------------------------------------------------------------
+
+export async function getRestricoesAtividades(
+  periodoId?: string
+): Promise<RestricaoAtividade[]> {
+  let query = supabase
+    .from("restricoes_atividades")
+    .select(`
+      *,
+      periodos:periodo_id(nome),
+      diretorias:diretoria_id(sigla),
+      gerencias:gerencia_id(sigla)
+    `)
+    .order("created_at", { ascending: false });
+
+  if (periodoId) {
+    query = query.eq("periodo_id", periodoId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Erro ao buscar restrições de atividades:", error);
+    throw error;
+  }
+
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    periodo_id: r.periodo_id,
+    escopo_tipo: r.escopo_tipo,
+    diretoria_id: r.diretoria_id,
+    gerencia_id: r.gerencia_id,
+    perfil: r.perfil,
+    modulo: r.modulo,
+    atividade: r.atividade,
+    status: r.status,
+    ativo: r.ativo,
+    observacao: r.observacao,
+    criado_por: r.criado_por,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    periodo_nome: r.periodos?.nome || "",
+    diretoria_sigla: r.diretorias?.sigla || "",
+    gerencia_sigla: r.gerencias?.sigla || "",
+  }));
+}
+
+export async function createRestricaoAtividade(
+  payload: Omit<RestricaoAtividade, "id" | "created_at" | "updated_at" | "periodo_nome" | "diretoria_sigla" | "gerencia_sigla">
+): Promise<RestricaoAtividade> {
+  const insertPayload = {
+    periodo_id: payload.periodo_id,
+    escopo_tipo: payload.escopo_tipo,
+    diretoria_id: payload.diretoria_id || null,
+    gerencia_id: payload.gerencia_id || null,
+    perfil: payload.perfil || null,
+    modulo: payload.modulo,
+    atividade: payload.atividade,
+    status: payload.status,
+    ativo: payload.ativo !== undefined ? payload.ativo : true,
+    observacao: payload.observacao || null,
+    criado_por: payload.criado_por || null,
+  };
+
+  const { data, error } = await supabase
+    .from("restricoes_atividades")
+    .insert([insertPayload])
+    .select(`
+      *,
+      periodos:periodo_id(nome),
+      diretorias:diretoria_id(sigla),
+      gerencias:gerencia_id(sigla)
+    `)
+    .single();
+
+  if (error) {
+    console.error("Erro ao criar restrição de atividade:", error);
+    throw error;
+  }
+
+  await registrarLogAtividade("CRIAR", "restricoes_atividades", data.id, {
+    modulo: data.modulo,
+    atividade: data.atividade,
+    status: data.status,
+    escopo_tipo: data.escopo_tipo,
+    diretoria_sigla: data.diretorias?.sigla,
+    gerencia_sigla: data.gerencias?.sigla,
+    periodo_nome: data.periodos?.nome,
+    observacao: data.observacao,
+  });
+
+  return {
+    ...data,
+    periodo_nome: data.periodos?.nome || "",
+    diretoria_sigla: data.diretorias?.sigla || "",
+    gerencia_sigla: data.gerencias?.sigla || "",
+  };
+}
+
+export async function createRestricoesAtividadesBulk(
+  items: Array<Omit<RestricaoAtividade, "id" | "created_at" | "updated_at" | "periodo_nome" | "diretoria_sigla" | "gerencia_sigla">>
+): Promise<boolean> {
+  if (!items || items.length === 0) return true;
+
+  const insertPayloads = items.map((payload) => ({
+    periodo_id: payload.periodo_id,
+    escopo_tipo: payload.escopo_tipo,
+    diretoria_id: payload.diretoria_id || null,
+    gerencia_id: payload.gerencia_id || null,
+    perfil: payload.perfil || null,
+    modulo: payload.modulo,
+    atividade: payload.atividade,
+    status: payload.status,
+    ativo: payload.ativo !== undefined ? payload.ativo : true,
+    observacao: payload.observacao || null,
+    criado_por: payload.criado_por || null,
+  }));
+
+  const { error } = await supabase
+    .from("restricoes_atividades")
+    .insert(insertPayloads);
+
+  if (error) {
+    console.error("Erro ao criar restrições em lote:", error);
+    throw error;
+  }
+
+  return true;
+}
+
+export async function updateRestricaoAtividade(
+  id: string,
+  updates: Partial<RestricaoAtividade>
+): Promise<RestricaoAtividade> {
+  const updatePayload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.periodo_id !== undefined) updatePayload.periodo_id = updates.periodo_id;
+  if (updates.escopo_tipo !== undefined) updatePayload.escopo_tipo = updates.escopo_tipo;
+  if (updates.diretoria_id !== undefined) updatePayload.diretoria_id = updates.diretoria_id || null;
+  if (updates.gerencia_id !== undefined) updatePayload.gerencia_id = updates.gerencia_id || null;
+  if (updates.perfil !== undefined) updatePayload.perfil = updates.perfil || null;
+  if (updates.modulo !== undefined) updatePayload.modulo = updates.modulo;
+  if (updates.atividade !== undefined) updatePayload.atividade = updates.atividade;
+  if (updates.status !== undefined) updatePayload.status = updates.status;
+  if (updates.ativo !== undefined) updatePayload.ativo = updates.ativo;
+  if (updates.observacao !== undefined) updatePayload.observacao = updates.observacao || null;
+
+  const { data, error } = await supabase
+    .from("restricoes_atividades")
+    .update(updatePayload)
+    .eq("id", id)
+    .select(`
+      *,
+      periodos:periodo_id(nome),
+      diretorias:diretoria_id(sigla),
+      gerencias:gerencia_id(sigla)
+    `)
+    .single();
+
+  if (error) {
+    console.error("Erro ao atualizar restrição de atividade:", error);
+    throw error;
+  }
+
+  await registrarLogAtividade("EDITAR", "restricoes_atividades", id, {
+    modulo: data.modulo,
+    atividade: data.atividade,
+    status: data.status,
+    ativo: data.ativo,
+    escopo_tipo: data.escopo_tipo,
+    diretoria_sigla: data.diretorias?.sigla,
+    gerencia_sigla: data.gerencias?.sigla,
+    periodo_nome: data.periodos?.nome,
+    observacao: data.observacao,
+  });
+
+  return {
+    ...data,
+    periodo_nome: data.periodos?.nome || "",
+    diretoria_sigla: data.diretorias?.sigla || "",
+    gerencia_sigla: data.gerencias?.sigla || "",
+  };
+}
+
+export async function toggleRestricaoAtividade(
+  id: string,
+  ativo: boolean
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("restricoes_atividades")
+    .update({ ativo, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select(`*, periodos:periodo_id(nome)`)
+    .single();
+
+  if (error) {
+    console.error("Erro ao alternar status da restrição:", error);
+    throw error;
+  }
+
+  await registrarLogAtividade(
+    ativo ? "ATIVAR" : "DESATIVAR",
+    "restricoes_atividades",
+    id,
+    {
+      ativo,
+      modulo: data.modulo,
+      atividade: data.atividade,
+      status: data.status,
+      periodo_nome: data.periodos?.nome,
+    }
+  );
+
+  return true;
+}
+
+export async function deleteRestricaoAtividade(id: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("restricoes_atividades")
+    .select(`*, periodos:periodo_id(nome)`)
+    .eq("id", id)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("restricoes_atividades")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    console.error("Erro ao excluir restrição:", error);
+    throw error;
+  }
+
+  if (data) {
+    await registrarLogAtividade("EXCLUIR", "restricoes_atividades", id, {
+      modulo: data.modulo,
+      atividade: data.atividade,
+      status: data.status,
+      periodo_nome: data.periodos?.nome,
+    });
+  }
+
+  return true;
+}
+
+export async function deleteRestricoesAtividadesBulk(ids: string[]): Promise<boolean> {
+  if (!ids || ids.length === 0) return true;
+
+  const { error } = await supabase
+    .from("restricoes_atividades")
+    .delete()
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao excluir restrições em massa:", error);
+    throw error;
+  }
+
+  try {
+    await registrarLogAtividadeBulk("EXCLUIR", "restricoes_atividades", ids, { total: ids.length });
+  } catch (logErr) {
+    console.warn("Aviso ao registrar log de exclusão em massa de restrições:", logErr);
+  }
+
+  return true;
+}
+
+export async function upsertPerfilRestricao(params: {
+  periodo_id: string;
+  perfil: "gerencia" | "diretoria" | "compras";
+  modulo: ModuloTipo;
+  atividade: AtividadeTipo | string;
+  bloqueado: boolean;
+  observacao?: string;
+}): Promise<RestricaoAtividade> {
+  const { data: existing } = await supabase
+    .from("restricoes_atividades")
+    .select(`*, periodos:periodo_id(nome)`)
+    .eq("periodo_id", params.periodo_id)
+    .eq("escopo_tipo", "perfil")
+    .eq("perfil", params.perfil)
+    .eq("modulo", params.modulo)
+    .eq("atividade", params.atividade)
+    .maybeSingle();
+
+  if (existing) {
+    return updateRestricaoAtividade(existing.id, {
+      ativo: params.bloqueado,
+      status: "bloqueado",
+      observacao: params.observacao || null,
+    });
+  } else {
+    return createRestricaoAtividade({
+      periodo_id: params.periodo_id,
+      escopo_tipo: "perfil",
+      perfil: params.perfil,
+      modulo: params.modulo,
+      atividade: params.atividade,
+      status: "bloqueado",
+      ativo: params.bloqueado,
+      observacao: params.observacao || null,
+    });
+  }
+}
+
+export async function upsertMultiplosEscoposRestricao(params: {
+  periodo_id: string;
+  escopo_tipo: "gerencia" | "diretoria" | "perfil";
+  perfil?: "gerencia" | "diretoria" | "compras";
+  target_ids?: string[];
+  modulo: ModuloTipo;
+  atividade: AtividadeTipo | string;
+  bloqueado: boolean;
+  observacao?: string;
+}): Promise<boolean> {
+  // Se for perfil ou sem target_ids específicos
+  if (params.escopo_tipo === "perfil" || !params.target_ids || params.target_ids.length === 0) {
+    if (params.perfil) {
+      await upsertPerfilRestricao({
+        periodo_id: params.periodo_id,
+        perfil: params.perfil,
+        modulo: params.modulo,
+        atividade: params.atividade,
+        bloqueado: params.bloqueado,
+        observacao: params.observacao,
+      });
+    }
+    return true;
+  }
+
+  // Se forem passados IDs específicos de gerência
+  if (params.escopo_tipo === "gerencia") {
+    await Promise.all(
+      params.target_ids.map(async (gerencia_id) => {
+        const { data: existing } = await supabase
+          .from("restricoes_atividades")
+          .select("id")
+          .eq("periodo_id", params.periodo_id)
+          .eq("escopo_tipo", "gerencia")
+          .eq("gerencia_id", gerencia_id)
+          .eq("modulo", params.modulo)
+          .eq("atividade", params.atividade)
+          .maybeSingle();
+
+        if (existing) {
+          await updateRestricaoAtividade(existing.id, {
+            ativo: params.bloqueado,
+            status: "bloqueado",
+            observacao: params.observacao || null,
+          });
+        } else {
+          await createRestricaoAtividade({
+            periodo_id: params.periodo_id,
+            escopo_tipo: "gerencia",
+            gerencia_id,
+            modulo: params.modulo,
+            atividade: params.atividade,
+            status: "bloqueado",
+            ativo: params.bloqueado,
+            observacao: params.observacao || null,
+          });
+        }
+      })
+    );
+  }
+
+  // Se forem passados IDs específicos de diretoria
+  if (params.escopo_tipo === "diretoria") {
+    await Promise.all(
+      params.target_ids.map(async (diretoria_id) => {
+        const { data: existing } = await supabase
+          .from("restricoes_atividades")
+          .select("id")
+          .eq("periodo_id", params.periodo_id)
+          .eq("escopo_tipo", "diretoria")
+          .eq("diretoria_id", diretoria_id)
+          .eq("modulo", params.modulo)
+          .eq("atividade", params.atividade)
+          .maybeSingle();
+
+        if (existing) {
+          await updateRestricaoAtividade(existing.id, {
+            ativo: params.bloqueado,
+            status: "bloqueado",
+            observacao: params.observacao || null,
+          });
+        } else {
+          await createRestricaoAtividade({
+            periodo_id: params.periodo_id,
+            escopo_tipo: "diretoria",
+            diretoria_id,
+            perfil: "diretoria",
+            modulo: params.modulo,
+            atividade: params.atividade,
+            status: "bloqueado",
+            ativo: params.bloqueado,
+            observacao: params.observacao || null,
+          });
+        }
+      })
+    );
+  }
+
+  return true;
+}
+
+/**
+ * Avalia permissão de uma atividade de acordo com a hierarquia de regras com
+ * isolamento total entre Gerência e Diretoria:
+ *
+ * Se Perfil = Gerência:
+ *   1. Regra específica da Gerência (por ID)
+ *   2. Regra da Diretoria aplicável a Gerências
+ *   3. Regra de Ação Individual da Gerência
+ *   4. Regra de Módulo da Gerência
+ *   5. Regra Geral da Gerência ("Restringir toda a Gerência")
+ *   6. Regra Global (Todos os Setores)
+ *   7. Padrão: Liberado
+ *
+ * Se Perfil = Diretoria:
+ *   1. Regra específica da Diretoria (por ID)
+ *   2. Regra de Ação Individual da Diretoria (Aprovar, Reprovar, Devolver, etc.)
+ *   3. Regra de Módulo da Diretoria (Aprovação / Plano Próprio)
+ *   4. Regra Geral da Diretoria ("Restringir toda a Diretoria")
+ *   5. Regra Global (Todos os Setores)
+ *   6. Padrão: Liberado
+ *
+ * Nenhuma restrição de Gerência afeta Diretoria e vice-versa.
+ */
+export function evaluateActivityPermission(
+  rules: RestricaoAtividade[],
+  context: ActivityPermissionContext
+): PermissionCheckResult {
+  if (!rules || rules.length === 0) {
+    return { blocked: false };
+  }
+
+  const activeRules = rules.filter((r) => {
+    if (!r.ativo) return false;
+    if (context.periodoId && r.periodo_id && r.periodo_id !== context.periodoId) {
+      return false;
+    }
+    return true;
+  });
+
+  const matchesActivity = (r: RestricaoAtividade) => {
+    const modMatch = r.modulo === "todos" || r.modulo === context.modulo;
+    const actMatch = r.atividade === "todas" || r.atividade === context.atividade;
+    return modMatch && actMatch;
+  };
+
+  // --------------------------------------------------------------------------
+  // PERFIL: GERÊNCIA
+  // --------------------------------------------------------------------------
+  if (context.perfil === "gerencia") {
+    // 1. Regra específica da Gerência (por ID)
+    if (context.gerenciaId) {
+      // 1.1 Específica por atividade
+      const gerenciaExact = activeRules.find(
+        (r) =>
+          r.escopo_tipo === "gerencia" &&
+          r.gerencia_id === context.gerenciaId &&
+          (r.modulo === context.modulo || r.modulo === "todos") &&
+          r.atividade === context.atividade
+      );
+      if (gerenciaExact) {
+        return {
+          blocked: gerenciaExact.status === "bloqueado",
+          reason:
+            gerenciaExact.observacao ||
+            "Esta atividade está temporariamente bloqueada pelo administrador para a sua gerência no período atual.",
+          matchedRule: gerenciaExact,
+        };
+      }
+
+      // 1.2 Geral da gerência
+      const gerenciaGeneral = activeRules.find(
+        (r) =>
+          r.escopo_tipo === "gerencia" &&
+          r.gerencia_id === context.gerenciaId &&
+          matchesActivity(r)
+      );
+      if (gerenciaGeneral) {
+        return {
+          blocked: gerenciaGeneral.status === "bloqueado",
+          reason:
+            gerenciaGeneral.observacao ||
+            "Esta atividade está temporariamente bloqueada pelo administrador para a sua gerência no período atual.",
+          matchedRule: gerenciaGeneral,
+        };
+      }
+    }
+
+    // 2. Regra da Diretoria aplicável às gerências
+    if (context.diretoriaId) {
+      const diretoriaRule = activeRules.find(
+        (r) =>
+          r.escopo_tipo === "diretoria" &&
+          r.diretoria_id === context.diretoriaId &&
+          (r.perfil === "gerencia" || r.perfil === "todos" || !r.perfil) &&
+          matchesActivity(r)
+      );
+      if (diretoriaRule) {
+        return {
+          blocked: diretoriaRule.status === "bloqueado",
+          reason:
+            diretoriaRule.observacao ||
+            "Esta atividade está temporariamente bloqueada pelo administrador para as gerências desta diretoria no período atual.",
+          matchedRule: diretoriaRule,
+        };
+      }
+    }
+
+    // 3. Regras do Perfil GERÊNCIA
+    // 3.1 Ação individual do perfil Gerência (ex: Enviar, Adicionar, Devolver, etc.)
+    const perfilGerenciaExact = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "gerencia" &&
+        (r.modulo === context.modulo || r.modulo === "todos") &&
+        r.atividade === context.atividade
+    );
+    if (perfilGerenciaExact) {
+      return {
+        blocked: perfilGerenciaExact.status === "bloqueado",
+        reason:
+          perfilGerenciaExact.observacao ||
+          "Esta atividade está temporariamente bloqueada pelo administrador para as gerências no período atual.",
+        matchedRule: perfilGerenciaExact,
+      };
+    }
+
+    // 3.2 Módulo do perfil Gerência (ex: Aquisição, Serviços)
+    const perfilGerenciaModulo = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "gerencia" &&
+        r.modulo === context.modulo &&
+        r.atividade === "todas"
+    );
+    if (perfilGerenciaModulo) {
+      return {
+        blocked: perfilGerenciaModulo.status === "bloqueado",
+        reason:
+          perfilGerenciaModulo.observacao ||
+          "Este módulo está temporariamente bloqueado pelo administrador para as gerências no período atual.",
+        matchedRule: perfilGerenciaModulo,
+      };
+    }
+
+    // 3.3 Geral do perfil Gerência ("Restringir toda a Gerência")
+    const perfilGerenciaAll = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "gerencia" &&
+        r.modulo === "todos" &&
+        r.atividade === "todas"
+    );
+    if (perfilGerenciaAll) {
+      return {
+        blocked: perfilGerenciaAll.status === "bloqueado",
+        reason:
+          perfilGerenciaAll.observacao ||
+          "Todas as atividades de gerência estão temporariamente bloqueadas pelo administrador para o período atual.",
+        matchedRule: perfilGerenciaAll,
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // PERFIL: DIRETORIA
+  // --------------------------------------------------------------------------
+  if (context.perfil === "diretoria") {
+    // 1. Regra específica da Diretoria (por ID)
+    if (context.diretoriaId) {
+      const diretoriaExact = activeRules.find(
+        (r) =>
+          r.escopo_tipo === "diretoria" &&
+          r.diretoria_id === context.diretoriaId &&
+          (r.perfil === "diretoria" || r.perfil === "todos" || !r.perfil) &&
+          matchesActivity(r)
+      );
+      if (diretoriaExact) {
+        return {
+          blocked: diretoriaExact.status === "bloqueado",
+          reason:
+            diretoriaExact.observacao ||
+            "Esta atividade está temporariamente bloqueada pelo administrador para a sua diretoria no período atual.",
+          matchedRule: diretoriaExact,
+        };
+      }
+    }
+
+    // 2. Regras do Perfil DIRETORIA
+    // 2.1 Ação individual do perfil Diretoria (ex: Aprovar, Reprovar, Devolver, Enviar para Compras)
+    const perfilDiretoriaExact = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "diretoria" &&
+        (r.modulo === context.modulo || r.modulo === "todos" || r.modulo === "aprovacao") &&
+        r.atividade === context.atividade
+    );
+    if (perfilDiretoriaExact) {
+      return {
+        blocked: perfilDiretoriaExact.status === "bloqueado",
+        reason:
+          perfilDiretoriaExact.observacao ||
+          "Esta atividade de diretoria está temporariamente bloqueada pelo administrador para o período atual.",
+        matchedRule: perfilDiretoriaExact,
+      };
+    }
+
+    // 2.2 Módulo do perfil Diretoria (ex: Aprovação)
+    const perfilDiretoriaModulo = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "diretoria" &&
+        (r.modulo === context.modulo || r.modulo === "aprovacao") &&
+        r.atividade === "todas"
+    );
+    if (perfilDiretoriaModulo) {
+      return {
+        blocked: perfilDiretoriaModulo.status === "bloqueado",
+        reason:
+          perfilDiretoriaModulo.observacao ||
+          "Este módulo está temporariamente bloqueado pelo administrador para a diretoria no período atual.",
+        matchedRule: perfilDiretoriaModulo,
+      };
+    }
+
+    // 2.3 Geral do perfil Diretoria ("Restringir toda a Diretoria")
+    const perfilDiretoriaAll = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "diretoria" &&
+        (r.modulo === "todos" || r.modulo === "aprovacao") &&
+        r.atividade === "todas"
+    );
+    if (perfilDiretoriaAll) {
+      return {
+        blocked: perfilDiretoriaAll.status === "bloqueado",
+        reason:
+          perfilDiretoriaAll.observacao ||
+          "Todas as atividades de aprovação da diretoria estão temporariamente bloqueadas pelo administrador para o período atual.",
+        matchedRule: perfilDiretoriaAll,
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // PERFIL: COMPRAS
+  // --------------------------------------------------------------------------
+  if (context.perfil === "compras") {
+    const perfilComprasExact = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "compras" &&
+        (r.modulo === context.modulo || r.modulo === "todos" || r.modulo === "compras") &&
+        r.atividade === context.atividade
+    );
+    if (perfilComprasExact) {
+      return {
+        blocked: perfilComprasExact.status === "bloqueado",
+        reason:
+          perfilComprasExact.observacao ||
+          "Esta atividade de compras está temporariamente bloqueada pelo administrador para o período atual.",
+        matchedRule: perfilComprasExact,
+      };
+    }
+
+    const perfilComprasAll = activeRules.find(
+      (r) =>
+        r.escopo_tipo === "perfil" &&
+        r.perfil === "compras" &&
+        (r.modulo === "todos" || r.modulo === "compras") &&
+        r.atividade === "todas"
+    );
+    if (perfilComprasAll) {
+      return {
+        blocked: perfilComprasAll.status === "bloqueado",
+        reason:
+          perfilComprasAll.observacao ||
+          "Todas as atividades de compras estão temporariamente bloqueadas pelo administrador para o período atual.",
+        matchedRule: perfilComprasAll,
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // REGRA GLOBAL (Todos os Setores / Todos os Perfis)
+  // --------------------------------------------------------------------------
+  const globalExact = activeRules.find(
+    (r) =>
+      r.escopo_tipo === "todos" &&
+      (r.modulo === context.modulo || r.modulo === "todos") &&
+      r.atividade === context.atividade
+  );
+  if (globalExact) {
+    return {
+      blocked: globalExact.status === "bloqueado",
+      reason:
+        globalExact.observacao ||
+        "Esta atividade está temporariamente bloqueada pelo administrador para o período atual.",
+      matchedRule: globalExact,
+    };
+  }
+
+  const globalAll = activeRules.find(
+    (r) =>
+      r.escopo_tipo === "todos" &&
+      (r.modulo === "todos" || r.modulo === context.modulo) &&
+      r.atividade === "todas"
+  );
+  if (globalAll) {
+    return {
+      blocked: globalAll.status === "bloqueado",
+      reason:
+        globalAll.observacao ||
+        "Esta atividade está temporariamente bloqueada pelo administrador para o período atual.",
+      matchedRule: globalAll,
+    };
+  }
+
+  // Padrão: Liberado
+  return { blocked: false };
+}
+
+/**
+ * Assegura que uma atividade está liberada antes de executar mutação na camada de serviço.
+ * Lança erro humanizado se estiver bloqueada.
+ */
+export async function assertActivityAllowed(
+  context: ActivityPermissionContext
+): Promise<void> {
+  try {
+    let periodoId = context.periodoId;
+    if (!periodoId) {
+      const periodosAtivos = await getPeriodosAtivos();
+      if (periodosAtivos && periodosAtivos[0]) {
+        periodoId = (periodosAtivos[0] as any).id;
+      }
+    }
+
+    if (!periodoId) return; // Sem período, não aplica restrição
+
+    const rules = await getRestricoesAtividades(periodoId);
+    const result = evaluateActivityPermission(rules, {
+      ...context,
+      periodoId,
+    });
+
+    if (result.blocked) {
+      throw new Error(
+        result.reason ||
+          "Ação bloqueada: Esta atividade está temporariamente bloqueada pelo administrador para o período atual."
+      );
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes("Ação bloqueada")) {
+      throw err;
+    }
+    // Não interrompe em caso de erro desconhecido de consulta para evitar parada acidental
+    console.warn("Aviso ao checar restrições de atividade:", err);
+  }
+}
+

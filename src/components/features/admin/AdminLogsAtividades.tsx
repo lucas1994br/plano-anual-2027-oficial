@@ -134,6 +134,34 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
   } else if (log.tabela_afetada === "aquisicoes") {
     const itemName = record.objeto || record.descricao || "Aquisição Existente não especificada";
     texto = <>{cargo} {funcName} {actionVerb} a aquisição existente "{itemName}" (Item {record.item || record.id || "N/A"}){statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
+  } else if (log.tabela_afetada === "restricoes_atividades") {
+    let detalhesObj: any = {};
+    try {
+      detalhesObj = typeof log.detalhes === 'string' ? JSON.parse(log.detalhes) : (log.detalhes || {});
+    } catch {
+      detalhesObj = {};
+    }
+    const mod = detalhesObj.modulo ? (detalhesObj.modulo.replace(/_/g, " ")) : "módulo";
+    const act = detalhesObj.atividade ? (detalhesObj.atividade.replace(/_/g, " ")) : "atividade";
+    const st = detalhesObj.status === "bloqueado" ? "bloqueou" : "liberou";
+    const escopo = detalhesObj.gerencia_sigla
+      ? `para a Gerência ${detalhesObj.gerencia_sigla}`
+      : detalhesObj.diretoria_sigla
+      ? `para a Diretoria ${detalhesObj.diretoria_sigla}`
+      : detalhesObj.escopo_tipo === "perfil"
+      ? `para o Perfil ${detalhesObj.perfil}`
+      : "para todos os setores";
+    const per = detalhesObj.periodo_nome ? ` no período "${detalhesObj.periodo_nome}"` : "";
+
+    if (log.acao === "ATIVAR") {
+      texto = <>{cargo} {funcName} ativou a restrição da atividade "{act}" ({mod}) {escopo}{per}.</>;
+    } else if (log.acao === "DESATIVAR") {
+      texto = <>{cargo} {funcName} desativou a restrição da atividade "{act}" ({mod}) {escopo}{per}.</>;
+    } else if (log.acao === "EXCLUIR") {
+      texto = <>{cargo} {funcName} excluiu a regra de restrição da atividade "{act}" ({mod}) {escopo}{per}.</>;
+    } else {
+      texto = <>{cargo} {funcName} {st} a atividade "{act}" ({mod}) {escopo}{per}.</>;
+    }
   } else {
     texto = <>{cargo} {funcName} realizou uma alteração no registro ID {String(log.registro_id).substring(0, 8)}{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   }

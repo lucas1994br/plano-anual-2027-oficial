@@ -35,6 +35,7 @@ import * as XLSX from "xlsx-js-style";
 interface PlanTableProps {
   items: PlanItem[];
   totalItems?: number;
+  readOnly?: boolean;
   onUpdateQtdEstimada: (codigo: number, qtdEstimada: number) => void;
   onUpdateUnidade: (codigo: number, unidade: string) => void;
   onUpdateObservacao: (codigo: number, observacao: string) => void;
@@ -49,7 +50,7 @@ interface PlanTableProps {
 
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 
-export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, onEditItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
+export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, onEditItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
   const [editingCodigo, setEditingCodigo] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const _editInputRef = useRef<HTMLInputElement | null>(null);
@@ -344,25 +345,29 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                     <Badge variant="outline" className="text-xs">{item.unidade}</Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    <Input
-                      key={`${item.codigo}-${item.qtdEstimada}`}
-                      type="number"
-                      min="0"
-                      defaultValue={item.qtdEstimada || ""}
-                      onBlur={(e) => {
-                        const val = parseInt(e.target.value) || 0;
-                        if (val !== item.qtdEstimada && onUpdateQtdEstimada) {
-                          onUpdateQtdEstimada(item.codigo, val);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      className="w-20 h-8 text-center"
-                    />
+                    {readOnly ? (
+                      <span className="text-sm font-semibold text-slate-700">{item.qtdEstimada}</span>
+                    ) : (
+                      <Input
+                        key={`${item.codigo}-${item.qtdEstimada}`}
+                        type="number"
+                        min="0"
+                        defaultValue={item.qtdEstimada || ""}
+                        onBlur={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          if (val !== item.qtdEstimada && onUpdateQtdEstimada) {
+                            onUpdateQtdEstimada(item.codigo, val);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="w-20 h-8 text-center"
+                      />
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     {formatCurrency(item.valorUnitario)}
@@ -371,23 +376,29 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                     {formatCurrency(item.qtdEstimada * item.valorUnitario)}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Select
-                      value={item.prioridade}
-                      onValueChange={(value: PlanItem["prioridade"]) =>
-                        onUpdatePrioridade(item.codigo, value)
-                      }
-                    >
-                      <SelectTrigger className="h-8 w-[100px] mx-auto border-none bg-transparent p-0 justify-center">
-                        <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as "default" | "secondary" | "destructive" | "outline"} className="cursor-pointer">
-                          {item.prioridade}
-                        </Badge>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Baixa">Baixa</SelectItem>
-                        <SelectItem value="Média">Média</SelectItem>
-                        <SelectItem value="Alta">Alta</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {readOnly ? (
+                      <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>
+                        {item.prioridade}
+                      </Badge>
+                    ) : (
+                      <Select
+                        value={item.prioridade}
+                        onValueChange={(value: PlanItem["prioridade"]) =>
+                          onUpdatePrioridade(item.codigo, value)
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-[100px] mx-auto border-none bg-transparent p-0 justify-center">
+                          <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">
+                            {item.prioridade}
+                          </Badge>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Baixa">Baixa</SelectItem>
+                          <SelectItem value="Média">Média</SelectItem>
+                          <SelectItem value="Alta">Alta</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </TableCell>
                   <TableCell className="text-center">
                     <Badge variant="outline">{item.gerencia}</Badge>
@@ -399,8 +410,9 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          title="Editar item"
-                          onClick={() => onEditItem(item)}
+                          title={readOnly ? "Edição bloqueada pelo administrador" : "Editar item"}
+                          disabled={readOnly}
+                          onClick={() => !readOnly && onEditItem(item)}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -423,16 +435,19 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                             <Textarea
                               value={observacaoText}
                               onChange={(e) => setObservacaoText(e.target.value)}
-                              placeholder="Digite a observação..."
+                              placeholder={readOnly ? "Sem observação informada" : "Digite a observação..."}
+                              readOnly={readOnly}
                               rows={3}
                             />
                             <div className="flex justify-end gap-2">
                               <Button variant="outline" size="sm" onClick={() => setObservacaoOpen(null)}>
-                                Cancelar
+                                {readOnly ? "Fechar" : "Cancelar"}
                               </Button>
-                              <Button size="sm" onClick={handleSaveObservacao}>
-                                Salvar
-                              </Button>
+                              {!readOnly && (
+                                <Button size="sm" onClick={handleSaveObservacao}>
+                                  Salvar
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </PopoverContent>
@@ -442,8 +457,9 @@ export function PlanTable({ items, totalItems, onUpdateQtdEstimada, onUpdateUnid
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                          title="Devolver para Rascunho"
-                          onClick={() => onDeleteItem(item.id!)}
+                          title={readOnly ? "Ação bloqueada pelo administrador" : "Devolver para Rascunho"}
+                          disabled={readOnly}
+                          onClick={() => !readOnly && onDeleteItem(item.id!)}
                         >
                           <Undo2 className="h-4 w-4" />
                         </Button>

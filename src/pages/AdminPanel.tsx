@@ -24,6 +24,7 @@ import { AdminLogsAtividades } from "../components/features/admin/AdminLogsAtivi
 import { AdminLogsOrcamentarios } from "../components/features/admin/AdminLogsOrcamentarios.tsx";
 import { AdminImportCsv } from "../components/features/admin/AdminImportCsv.tsx";
 import { AdminVisaoGeral } from "../components/features/admin/AdminVisaoGeral.tsx";
+import { AdminRestricoesControl } from "../components/features/admin/AdminRestricoesControl.tsx";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -60,6 +61,7 @@ const AdminPanel = () => {
     "importar-csv": "Importar dados",
     logs: "Logs de Atividades",
     "logs-orcamentarios": "Trilha Financeira",
+    restricoes: "Restrições",
   };
 
   const [expandedDir, setExpandedDir] = useState<string | null>(null);
@@ -215,7 +217,7 @@ const AdminPanel = () => {
         />
 
         <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
-          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="bg-white/20 p-3 rounded-lg">
               <Shield className="h-8 w-8 text-white" />
             </div>
@@ -226,17 +228,18 @@ const AdminPanel = () => {
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-6 py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="mb-5 flex flex-wrap h-auto gap-1">
-              <TabsTrigger value="visao-geral">Visão Geral</TabsTrigger>
-              <TabsTrigger value="periodos">Períodos e Diretorias</TabsTrigger>
-              <TabsTrigger value="orcamento">Orçamentos</TabsTrigger>
-              <TabsTrigger value="catalogo">Aquisição</TabsTrigger>
-              <TabsTrigger value="servicos">Serviços</TabsTrigger>
-              <TabsTrigger value="importar-csv">Importar dados</TabsTrigger>
-              <TabsTrigger value="logs">Logs de Atividades</TabsTrigger>
-              <TabsTrigger value="logs-orcamentarios">Trilha Financeira</TabsTrigger>
+            <TabsList className="mb-5 flex flex-wrap lg:flex-nowrap items-center justify-start lg:justify-between w-full h-auto p-1 gap-1 bg-slate-100/90 border border-slate-200/80 rounded-xl overflow-x-auto">
+              <TabsTrigger value="visao-geral" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Visão Geral</TabsTrigger>
+              <TabsTrigger value="periodos" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Períodos e Diretorias</TabsTrigger>
+              <TabsTrigger value="orcamento" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Orçamentos</TabsTrigger>
+              <TabsTrigger value="catalogo" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Aquisição</TabsTrigger>
+              <TabsTrigger value="servicos" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Serviços</TabsTrigger>
+              <TabsTrigger value="importar-csv" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Importar dados</TabsTrigger>
+              <TabsTrigger value="logs" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Logs de Atividades</TabsTrigger>
+              <TabsTrigger value="logs-orcamentarios" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Trilha Financeira</TabsTrigger>
+              <TabsTrigger value="restricoes" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Restrições</TabsTrigger>
             </TabsList>
 
             <TabsContent value="visao-geral">
@@ -499,6 +502,10 @@ const AdminPanel = () => {
 
             <TabsContent value="logs-orcamentarios">
               <AdminLogsOrcamentarios />
+            </TabsContent>
+
+            <TabsContent value="restricoes">
+              <AdminRestricoesControl defaultPeriodoId={periodoAtivo?.id} />
             </TabsContent>
           </Tabs>
         </div>

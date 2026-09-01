@@ -45,6 +45,7 @@ import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/Item
 import { useToast } from "@/hooks/use-toast.ts";
 import { useSortableTable } from "@/hooks/useSortableTable.ts";
 import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import { useActivityRestrictions } from "@/hooks/useActivityRestrictions.ts";
 
 const ComprasPanel = () => {
   const navigate = useNavigate();
@@ -84,6 +85,16 @@ const ComprasPanel = () => {
   });
 
   const periodAtivo = periodos[0] as any;
+
+  const { isBlocked, getBlockReason } = useActivityRestrictions({
+    periodoId: periodAtivo?.id,
+    perfil: "compras",
+  });
+
+  const isProcessarComprasBlocked = isBlocked("compras", "processar_solicitacoes");
+  const isAlterarInfoComprasBlocked = isBlocked("compras", "alterar_informacoes");
+  const isDevolverComprasBlocked = isBlocked("compras", "devolver_solicitacao");
+  const isExcluirComprasBlocked = isBlocked("compras", "excluir_solicitacao");
 
   const { data: solicitacoesCompras = [], isLoading: loadingSol } = useQuery({
     queryKey: ["solicitacoes-compras", periodAtivo?.id],
@@ -254,6 +265,14 @@ const ComprasPanel = () => {
 
   const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
     if (!solicitacaoEdicao?.id) return;
+    if (isAlterarInfoComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "alterar_informacoes") || "A alteração de informações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await updateSolicitacao(solicitacaoEdicao.id, updates);
       setSolicitacaoEditOpen(false);
@@ -273,6 +292,14 @@ const ComprasPanel = () => {
 
   const handleSaveServicoEdicao = async () => {
     if (!servicoEdicao?.id) return;
+    if (isAlterarInfoComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "alterar_informacoes") || "A alteração de informações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const updates: Partial<ServicoItem> = {
       objeto: servicoEdicao.objeto,
@@ -301,6 +328,14 @@ const ComprasPanel = () => {
   };
 
   const handleBulkEditAquisicao = async (updates: any) => {
+    if (isAlterarInfoComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "alterar_informacoes") || "A alteração de informações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsBulkUpdating(true);
     try {
       const ids = singleEditId ? [singleEditId] : getSelectedAquisicaoDbIds();
@@ -318,6 +353,14 @@ const ComprasPanel = () => {
   };
 
   const handleBulkEditServicos = async (updates: any) => {
+    if (isAlterarInfoComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "alterar_informacoes") || "A alteração de informações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsBulkUpdating(true);
     try {
       const ids = singleEditId ? [singleEditId] : Array.from(selectedServicos);
@@ -335,6 +378,14 @@ const ComprasPanel = () => {
   };
 
   const handleBulkDeleteAquisicao = async (singleId?: string) => {
+    if (isExcluirComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "excluir_solicitacao") || "A exclusão de solicitações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja excluir permanentemente?")) return;
     setIsBulkUpdating(true);
     try {
@@ -351,6 +402,14 @@ const ComprasPanel = () => {
   };
 
   const handleBulkDeleteServicos = async (singleId?: string) => {
+    if (isExcluirComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "excluir_solicitacao") || "A exclusão de solicitações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja excluir permanentemente?")) return;
     setIsBulkUpdating(true);
     try {
@@ -367,6 +426,14 @@ const ComprasPanel = () => {
   };
 
   const handleBulkDevolverAquisicao = async (singleId?: string) => {
+    if (isDevolverComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "devolver_solicitacao") || "A devolução de solicitações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja devolver para rascunho?")) return;
     setIsBulkUpdating(true);
     try {
@@ -383,12 +450,18 @@ const ComprasPanel = () => {
   };
 
   const handleBulkDevolverServicos = async (singleId?: string) => {
+    if (isDevolverComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "devolver_solicitacao") || "A devolução de solicitações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja devolver para rascunho?")) return;
     setIsBulkUpdating(true);
     try {
       const ids = singleId ? [singleId] : Array.from(selectedServicos);
-      // Aqui usamos updateServicoStatusBulk que suporta array. Se não suportasse, usaríamos um Promise.all, mas updateServicoStatusBulk já existe.
-      // O backend pode esperar (ids, status)
       await updateServicoStatusBulk(ids, "rascunho");
       await queryClient.invalidateQueries({ queryKey: ["servicos-compras", periodAtivo?.id] });
       if (!singleId) setSelectedServicos(new Set());
@@ -402,6 +475,14 @@ const ComprasPanel = () => {
 
   const handleMarcarConcluidoAquisicoes = (isRevert = false) => {
     if (selectedItems.size === 0) return;
+    if (isProcessarComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("compras", "processar_solicitacoes") || "O processamento de solicitações em compras está bloqueado pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
     const idsToUpdate = Array.from(selectedItems) as string[];
     
     updateSolicitacoesMutation.mutate({ ids: idsToUpdate, status: isRevert ? "em_compra" : "concluido" });

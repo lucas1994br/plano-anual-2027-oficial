@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
+import { useActivityRestrictions } from "@/hooks/useActivityRestrictions";
 import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/ItemEditDialogs";
@@ -252,6 +253,28 @@ const DiretoriaAprovacao = () => {
   });
 
   const periodAtivo = periodos[0];
+
+  const { isBlocked, getBlockReason } = useActivityRestrictions({
+    periodoId: periodAtivo?.id,
+    diretoriaId: diretoria?.id,
+    perfil: "diretoria",
+  });
+
+  const isAprovarAquisicaoBlocked = isBlocked("aprovacao", "aprovar") || isBlocked("aquisicao", "aprovar") || isBlocked("todos", "aprovar");
+  const isRejeitarAquisicaoBlocked = isBlocked("aprovacao", "reprovar") || isBlocked("aquisicao", "reprovar") || isBlocked("todos", "reprovar");
+  const isDevolverAquisicaoBlocked = isBlocked("aprovacao", "devolver") || isBlocked("aquisicao", "devolver") || isBlocked("aquisicao", "devolver_solicitacao") || isBlocked("todos", "devolver");
+  const isEnviarComprasBlocked = isBlocked("aprovacao", "enviar_compras") || isBlocked("aquisicao", "enviar_compras") || isBlocked("compras", "enviar_compras") || isBlocked("todos", "enviar_compras");
+  const isAddPlanoProprioBlocked = isBlocked("aprovacao", "adicionar_item") || isBlocked("aquisicao", "adicionar_item") || isBlocked("todos", "adicionar_item");
+  const isEditarAquisicaoBlocked = isBlocked("aprovacao", "editar_item") || isBlocked("aquisicao", "alterar_quantidade") || isBlocked("aquisicao", "editar_item") || isBlocked("todos", "editar_item") || isBlocked("todos", "alterar_quantidade");
+
+  const isAprovarServicosBlocked = isBlocked("aprovacao", "aprovar") || isBlocked("servicos_existentes", "aprovar") || isBlocked("servicos_novos", "aprovar") || isBlocked("todos", "aprovar");
+  const isRejeitarServicosBlocked = isBlocked("aprovacao", "reprovar") || isBlocked("servicos_existentes", "reprovar") || isBlocked("servicos_novos", "reprovar") || isBlocked("todos", "reprovar");
+  const isDevolverServicosBlocked = isBlocked("aprovacao", "devolver") || isBlocked("servicos_existentes", "devolver") || isBlocked("servicos_novos", "devolver") || isBlocked("servicos_existentes", "devolver_solicitacao") || isBlocked("servicos_novos", "devolver_solicitacao") || isBlocked("todos", "devolver");
+  const isAddNovoServicoBlocked = isBlocked("servicos_novos", "adicionar_novo_servico") || isBlocked("servicos_novos", "adicionar_item") || isBlocked("aprovacao", "adicionar_servico") || isBlocked("aprovacao", "adicionar_item") || isBlocked("todos", "adicionar_item");
+  const isEditarServicosBlocked = isBlocked("aprovacao", "editar_item") || isBlocked("servicos_existentes", "alterar_valor") || isBlocked("servicos_novos", "alterar_valor") || isBlocked("servicos_existentes", "editar_item") || isBlocked("servicos_novos", "editar_item") || isBlocked("todos", "editar_item") || isBlocked("todos", "alterar_valor");
+
+  const isAnyAquisicaoActionBlocked = isAprovarAquisicaoBlocked || isRejeitarAquisicaoBlocked || isDevolverAquisicaoBlocked || isEnviarComprasBlocked || isAddPlanoProprioBlocked || isEditarAquisicaoBlocked;
+  const isAnyServicosActionBlocked = isAprovarServicosBlocked || isRejeitarServicosBlocked || isDevolverServicosBlocked || isAddNovoServicoBlocked || isEditarServicosBlocked;
 
   const isPeriodExpired = useMemo(() => {
     if (!periodAtivo?.fim) return false;
@@ -595,16 +618,16 @@ const DiretoriaAprovacao = () => {
   }, [filteredOwnItems, ownCurrentPage]);
 
   /** 
-   * Liberado para edição em todas as abas conforme solicitado para permitir ajustes orçamentários.
+   * Respeita regras de bloqueio de edição e encerramento de período
    */
-  const isItemReadOnly = (item: PlanItem) => false;
+  const isItemReadOnly = (item: PlanItem) => isEditarAquisicaoBlocked || isPeriodExpired;
 
   const selectableItems = useMemo(
     () =>
       recebidosTableItems.filter((item) => {
         if (!item.id) return false;
-        if (recebidosStatusTab === "rejeitados") return item.status === "rejeitado";
-        return !isItemReadOnly(item);
+        if (recebidosStatusTab === "em_compra") return false;
+        return true;
       }),
     [recebidosTableItems, recebidosStatusTab],
   );
@@ -912,6 +935,14 @@ const DiretoriaAprovacao = () => {
   // Handlers para edição
   const handleUpdateQtdEstimada = async (id: string, qtdEstimada: number) => {
     if (!id) return;
+    if (isEditarAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "editar_item") || "A edição de quantidades está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Atualização otimista no cache local para recálculo instantâneo na UI
     const queryKey = solicitacoesQueryKey;
@@ -928,6 +959,14 @@ const DiretoriaAprovacao = () => {
 
   const handleUpdateObservacao = async (id: string, observacao: string) => {
     if (!id) return;
+    if (isEditarAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "editar_item") || "A edição de observações está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const queryKey = solicitacoesQueryKey;
     queryClient.setQueryData(queryKey, (current: any) => {
@@ -943,6 +982,14 @@ const DiretoriaAprovacao = () => {
 
   const handleUpdatePrioridade = async (id: string, prioridade: PlanItem["prioridade"]) => {
     if (!id) return;
+    if (isEditarAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "editar_item") || "A alteração de prioridades está bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const queryKey = solicitacoesQueryKey;
     queryClient.setQueryData(queryKey, (current: any) => {
@@ -961,6 +1008,15 @@ const DiretoriaAprovacao = () => {
   };
 
   const ensureSolicitacaoDiretoria = async (codigo: number, updates: Partial<PlanItem>) => {
+    if (isEditarAquisicaoBlocked || isAddPlanoProprioBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "adicionar_item") || getBlockReason("aprovacao", "editar_item") || "A edição e inclusão no plano próprio estão bloqueadas pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const itemExistente = itensPropriosMap.get(codigo);
 
     if (itemExistente?.id) {
@@ -1050,6 +1106,31 @@ const DiretoriaAprovacao = () => {
 
   const handleActionOwnSubmit = async () => {
     if (!actionOwnDialog.action) return;
+
+    if (actionOwnDialog.action === "aprovar" && isAprovarAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "aprovar") || "A aprovação de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionOwnDialog.action === "rejeitar" && isRejeitarAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "reprovar") || "A rejeição de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionOwnDialog.action === "devolver" && isDevolverAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aprovacao", "devolver") || "A devolução de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const actionMap = {
       aprovar: "aprovado" as SolicitacaoStatus,
@@ -1395,6 +1476,18 @@ const DiretoriaAprovacao = () => {
 
   const handleSendToCompras = async () => {
     if (selectedApprovedItems.length === 0) return;
+
+    if (isEnviarComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "enviar_compras") ||
+          "O envio de itens para compras está temporariamente bloqueado pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setConfirmComprasOpen(false);
     setSelectedItems(new Set());
     try {
@@ -1419,6 +1512,48 @@ const DiretoriaAprovacao = () => {
 
   const confirmActionServicosBulk = async () => {
     if (selectedServicos.size === 0) return;
+
+    if (actionServicosDialog.action === "aprovar" && isAprovarServicosBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "aprovar") ||
+          "A aprovação de serviços está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionServicosDialog.action === "rejeitar" && isRejeitarServicosBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "reprovar") ||
+          "A rejeição de serviços está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionServicosDialog.action === "devolver" && isDevolverServicosBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "devolver") ||
+          "A devolução de serviços está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionServicosDialog.action === "enviar_compras" && isEnviarComprasBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "enviar_compras") ||
+          "O envio de serviços para compras está temporariamente bloqueado pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsUpdating(true);
     try {
       const validIds = Array.from(selectedServicos);
@@ -1432,6 +1567,9 @@ const DiretoriaAprovacao = () => {
       } else if (actionServicosDialog.action === "devolver") {
         newStatus = "rascunho";
         actionText = "devolvido(s) ao rascunho";
+      } else if (actionServicosDialog.action === "enviar_compras") {
+        newStatus = "em_compra";
+        actionText = "enviado(s) para compras";
       }
 
       await Promise.all(
@@ -1488,6 +1626,17 @@ const DiretoriaAprovacao = () => {
   const handleAddItem = async () => {
     if (!selectedCatalogItem || !diretoria || !periodAtivo || !selectedGerenciaId) return;
 
+    if (isAddPlanoProprioBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "adicionar_item") ||
+          "A adição de itens está temporariamente bloqueada pelo administrador para este período.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       await createSolicitacao({
         periodo_id: periodAtivo.id,
@@ -1527,6 +1676,37 @@ const DiretoriaAprovacao = () => {
 
   const handleAction = async () => {
     if (!actionDialog.action) return;
+
+    if (actionDialog.action === "aprovar" && isAprovarAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "aprovar") ||
+          "A aprovação de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionDialog.action === "rejeitar" && isRejeitarAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "reprovar") ||
+          "A rejeição de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (actionDialog.action === "devolver" && isDevolverAquisicaoBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description:
+          getBlockReason("aprovacao", "devolver") ||
+          "A devolução de solicitações está temporariamente bloqueada pelo administrador.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const actionMap = {
       aprovar: "aprovado" as SolicitacaoStatus,
@@ -2368,6 +2548,13 @@ const DiretoriaAprovacao = () => {
               { label: "Serviços", onClick: () => setSelectedOption("servicos") },
               { label: selectedOption === "servicos_novos" ? "Novos Serviços" : "Serviços Existentes", isActive: true },
             ]}
+            rightContent={
+              (isAnyServicosActionBlocked || isPeriodExpired) ? (
+                <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-xs gap-1 py-1 px-3">
+                  <Lock className="h-3 w-3" /> Somente leitura
+                </Badge>
+              ) : undefined
+            }
           />
 
           <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-6">
@@ -2383,7 +2570,27 @@ const DiretoriaAprovacao = () => {
             </div>
           </div>
 
-                    <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="max-w-7xl mx-auto px-6 py-6">
+            {/* Banner de restrição de serviços da diretoria */}
+            {isAnyServicosActionBlocked && (
+              <div className="mb-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-900 text-sm shadow-sm">
+                <div className="p-2 bg-red-100 rounded-lg shrink-0">
+                  <Lock className="h-5 w-5 text-red-600" />
+                </div>
+                <div>
+                  <p className="font-bold text-red-800">Ações de Serviços da Diretoria Bloqueadas</p>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    {getBlockReason("aprovacao", "aprovar") ||
+                      getBlockReason("aprovacao", "reprovar") ||
+                      getBlockReason("aprovacao", "enviar_compras") ||
+                      getBlockReason("servicos_novos", "adicionar_novo_servico") ||
+                      getBlockReason("aprovacao", "editar_item") ||
+                      "Ações de aprovação e gerenciamento de serviços estão temporariamente bloqueadas para esta diretoria no período atual."}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <BudgetConsumptionCard
               titulo={`Orçamento da Diretoria ${siglaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
               orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
@@ -2438,10 +2645,13 @@ const DiretoriaAprovacao = () => {
                       className="gap-2"
                       onClick={() => {
                         setOwnServicosShowOnlyZerados(!ownServicosShowOnlyZerados);
-                        if (!ownServicosShowOnlyZerados) setOwnServicosShowOnlyComValor(false);
+                        if (!ownServicosShowOnlyZerados) {
+                          setOwnServicosShowOnlyComValor(false);
+                          setOwnServicosShowOnlyAprovados(false);
+                        }
                       }}
                     >
-                      Filtrar serviços zerados
+                      {ownServicosShowOnlyZerados ? "Mostrando apenas zerados" : "Filtrar zerados"}
                     </Button>
                     <Button
                       variant={ownServicosShowOnlyComValor ? "default" : "outline"}
@@ -2449,10 +2659,13 @@ const DiretoriaAprovacao = () => {
                       className="gap-2"
                       onClick={() => {
                         setOwnServicosShowOnlyComValor(!ownServicosShowOnlyComValor);
-                        if (!ownServicosShowOnlyComValor) setOwnServicosShowOnlyZerados(false);
+                        if (!ownServicosShowOnlyComValor) {
+                          setOwnServicosShowOnlyZerados(false);
+                          setOwnServicosShowOnlyAprovados(false);
+                        }
                       }}
                     >
-                      Filtrar serviços com valor
+                      {ownServicosShowOnlyComValor ? "Mostrando apenas com valor" : "Filtrar com valor"}
                     </Button>
                     <Button
                       variant={ownServicosShowOnlyAprovados ? "default" : "outline"}
@@ -2468,6 +2681,7 @@ const DiretoriaAprovacao = () => {
                           variant="outline"
                           size="sm"
                           className="gap-2 text-muted-foreground"
+                          disabled={isDevolverServicosBlocked || isPeriodExpired}
                           onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
                         >
                           <Undo2 className="h-4 w-4" />
@@ -2477,6 +2691,7 @@ const DiretoriaAprovacao = () => {
                           variant="destructive"
                           size="sm"
                           className="gap-2"
+                          disabled={isRejeitarServicosBlocked || isPeriodExpired}
                           onClick={() => setActionServicosDialog({ open: true, action: "rejeitar" })}
                         >
                           <XCircle className="h-4 w-4" />
@@ -2487,6 +2702,7 @@ const DiretoriaAprovacao = () => {
                             variant="outline"
                             size="sm"
                             className="gap-2"
+                            disabled={isEditarServicosBlocked || isPeriodExpired}
                             onClick={() => setBulkEditServicosOpen(true)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -2497,6 +2713,7 @@ const DiretoriaAprovacao = () => {
                           variant="default" 
                           size="sm" 
                           className="gap-2 bg-success hover:bg-success/90 text-white"
+                          disabled={isAprovarServicosBlocked || isPeriodExpired}
                           onClick={() => setActionServicosDialog({ open: true, action: "aprovar" })}
                         >
                           <Send className="h-4 w-4" />
@@ -2532,6 +2749,8 @@ const DiretoriaAprovacao = () => {
                   <Button
                     variant="outline"
                     className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
+                    disabled={isAddNovoServicoBlocked || isPeriodExpired}
+                    title={isAddNovoServicoBlocked ? "Criação de novos serviços bloqueada pelo administrador" : undefined}
                     onClick={() => setNovoServicoOpen(true)}
                   >
                     <Plus className="h-4 w-4" />
@@ -2651,9 +2870,10 @@ const DiretoriaAprovacao = () => {
                           size="sm"
                           variant="default"
                           className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                          disabled={isAprovarServicosBlocked || isPeriodExpired}
                           onClick={() => setActionServicosDialog({ open: true, action: "aprovar" })}
                         >
-                          <CheckCircle className="h-4 w-4" />
+                          {isAprovarServicosBlocked ? <Lock className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                           Aprovar Selecionados ({selectedServicos.size})
                         </Button>
                       )}
@@ -2663,9 +2883,9 @@ const DiretoriaAprovacao = () => {
                         variant="secondary"
                         className="gap-2"
                         onClick={() => setActionServicosDialog({ open: true, action: "enviar_compras" })}
-                        disabled={selectedServicos.size === 0 || servicosStatusTab !== "aprovados"}
+                        disabled={selectedServicos.size === 0 || servicosStatusTab !== "aprovados" || isEnviarComprasBlocked || isPeriodExpired}
                       >
-                        <Send className="h-4 w-4" />
+                        {isEnviarComprasBlocked ? <Lock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                         Enviar para Compras ({selectedServicos.size})
                       </Button>
 
@@ -2680,9 +2900,9 @@ const DiretoriaAprovacao = () => {
                             setSelectedServicos(new Set(pendentes.map(s => s.id).filter(Boolean) as string[]));
                             setActionServicosDialog({ open: true, action: "aprovar" });
                           }}
-                          disabled={!servicosFiltradasPorStatus.some(isPendenteServicoAprovacao)}
+                          disabled={!servicosFiltradasPorStatus.some(isPendenteServicoAprovacao) || isAprovarServicosBlocked || isPeriodExpired}
                         >
-                          <CheckCircle className="h-4 w-4" />
+                          {isAprovarServicosBlocked ? <Lock className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                           Aprovar todos
                         </Button>
                       )}
@@ -2692,9 +2912,9 @@ const DiretoriaAprovacao = () => {
                         variant="destructive" 
                         className="gap-2"
                         onClick={() => setActionServicosDialog({ open: true, action: "rejeitar" })}
-                        disabled={selectedServicos.size === 0 || servicosStatusTab === "rejeitados"}
+                        disabled={selectedServicos.size === 0 || servicosStatusTab === "rejeitados" || isRejeitarServicosBlocked || isPeriodExpired}
                       >
-                        <XCircle className="h-4 w-4" />
+                        {isRejeitarServicosBlocked ? <Lock className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         Rejeitar ({selectedServicos.size})
                       </Button>
 
@@ -2705,7 +2925,7 @@ const DiretoriaAprovacao = () => {
                             variant="outline" 
                             className="gap-2 text-primary border-primary hover:bg-primary/10"
                             onClick={() => setBulkEditServicosOpen(true)}
-                            disabled={selectedServicos.size === 0}
+                            disabled={selectedServicos.size === 0 || isEditarServicosBlocked || isPeriodExpired}
                           >
                             <Pencil className="h-4 w-4" />
                             Editar Selecionados
@@ -2715,7 +2935,7 @@ const DiretoriaAprovacao = () => {
                             variant="outline" 
                             className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                             onClick={() => setActionServicosDialog({ open: true, action: "devolver" })}
-                            disabled={selectedServicos.size === 0}
+                            disabled={selectedServicos.size === 0 || isDevolverServicosBlocked || isPeriodExpired}
                           >
                             <Undo2 className="h-4 w-4" />
                             Devolver para Rascunho ({selectedServicos.size})
@@ -2730,7 +2950,7 @@ const DiretoriaAprovacao = () => {
                             variant="outline" 
                             className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                             onClick={() => setActionServicosDialog({ open: true, action: "analisar" })}
-                            disabled={selectedServicos.size === 0}
+                            disabled={selectedServicos.size === 0 || isAprovarServicosBlocked || isPeriodExpired}
                           >
                             <Undo2 className="h-4 w-4" />
                             Voltar para Pendentes ({selectedServicos.size})
@@ -3050,7 +3270,12 @@ const DiretoriaAprovacao = () => {
           { label: "Aquisição", isActive: true },
         ]}
         rightContent={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {(isAnyAquisicaoActionBlocked || isPeriodExpired) && (
+              <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-xs gap-1 py-1 px-3">
+                <Lock className="h-3 w-3" /> Somente leitura
+              </Badge>
+            )}
             <Button
               variant={approvalTab === "aquisicao" ? "default" : "outline"}
               size="sm"
@@ -3087,6 +3312,26 @@ const DiretoriaAprovacao = () => {
           <p className="text-white/80 text-sm">{diretoria.nome}</p>
         </div>
       </div>
+
+      {/* Banner de restrição de aquisição da diretoria */}
+      {isAnyAquisicaoActionBlocked && (
+        <div className="mx-6 my-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-900 text-sm shadow-sm">
+          <div className="p-2 bg-red-100 rounded-lg shrink-0">
+            <Lock className="h-5 w-5 text-red-600" />
+          </div>
+          <div>
+            <p className="font-bold text-red-800">Ações da Diretoria Bloqueadas</p>
+            <p className="text-xs text-red-700 mt-0.5">
+              {getBlockReason("aprovacao", "aprovar") ||
+                getBlockReason("aprovacao", "reprovar") ||
+                getBlockReason("aprovacao", "enviar_compras") ||
+                getBlockReason("aprovacao", "adicionar_item") ||
+                getBlockReason("aprovacao", "editar_item") ||
+                "Ações administrativas e de aprovação estão temporariamente bloqueadas para esta diretoria no período atual."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <SummaryCards totalItens={summary.totalItens} valorTotal={summary.valorTotal} />
@@ -3169,6 +3414,7 @@ const DiretoriaAprovacao = () => {
                     variant="outline"
                     size="sm"
                     className="gap-2 text-muted-foreground"
+                    disabled={isDevolverAquisicaoBlocked || isPeriodExpired}
                     onClick={() => setActionOwnDialog({ open: true, action: "devolver" })}
                   >
                     <Undo2 className="h-4 w-4" />
@@ -3178,6 +3424,7 @@ const DiretoriaAprovacao = () => {
                     variant="destructive"
                     size="sm"
                     className="gap-2"
+                    disabled={isRejeitarAquisicaoBlocked || isPeriodExpired}
                     onClick={() => setActionOwnDialog({ open: true, action: "rejeitar" })}
                   >
                     <XCircle className="h-4 w-4" />
@@ -3187,6 +3434,7 @@ const DiretoriaAprovacao = () => {
                     variant="outline"
                     size="sm"
                     className="gap-2"
+                    disabled={isEditarAquisicaoBlocked || isPeriodExpired}
                     onClick={() => {
                       setEditingBulkOwn(true);
                       setBulkEditAquisicaoOpen(true);
@@ -3199,6 +3447,7 @@ const DiretoriaAprovacao = () => {
                     variant="default" 
                     size="sm" 
                     className="gap-2 bg-success hover:bg-success/90 text-white"
+                    disabled={isAprovarAquisicaoBlocked || isPeriodExpired}
                     onClick={() => setActionOwnDialog({ open: true, action: "aprovar" })}
                   >
                     <Send className="h-4 w-4" />
@@ -3233,6 +3482,7 @@ const DiretoriaAprovacao = () => {
             <PlanTable
               items={ownPaginationData.paginatedItems}
               totalItems={filteredOwnItems.length}
+              readOnly={isEditarAquisicaoBlocked || isAddPlanoProprioBlocked || isPeriodExpired}
               onUpdateQtdEstimada={handleUpdateQtdEstimadaDiretoria}
               onUpdateUnidade={handleUpdateUnidadeDiretoria}
               onUpdateObservacao={handleUpdateObservacaoDiretoria}
@@ -3444,9 +3694,10 @@ const DiretoriaAprovacao = () => {
                     size="sm"
                     variant="default"
                     className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    disabled={isAprovarAquisicaoBlocked || isPeriodExpired}
                     onClick={() => setActionDialog({ open: true, action: "aprovar", isBulk: false })}
                   >
-                    <CheckCircle className="h-4 w-4" />
+                    {isAprovarAquisicaoBlocked ? <Lock className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                     Aprovar Selecionados ({selectedItems.size})
                   </Button>
                 )}
@@ -3456,9 +3707,9 @@ const DiretoriaAprovacao = () => {
                   variant="secondary"
                   className="gap-2"
                   onClick={() => setConfirmComprasOpen(true)}
-                  disabled={selectedApprovedItems.length === 0 || recebidosStatusTab !== "aprovados"}
+                  disabled={selectedApprovedItems.length === 0 || recebidosStatusTab !== "aprovados" || isEnviarComprasBlocked || isPeriodExpired}
                 >
-                  <Send className="h-4 w-4" />
+                  {isEnviarComprasBlocked ? <Lock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                   Enviar para Compras ({selectedApprovedItems.length})
                 </Button>
 
@@ -3468,9 +3719,10 @@ const DiretoriaAprovacao = () => {
                     variant="default" 
                     className="gap-2"
                     onClick={() => setActionDialog({ open: true, action: "aprovar", isBulk: true })}
-                    disabled={!filteredItems.some(isPendenteDiretoriaAprovacao)}
+                    disabled={!filteredItems.some(isPendenteDiretoriaAprovacao) || isAprovarAquisicaoBlocked || isPeriodExpired}
+                    title={isAprovarAquisicaoBlocked ? "Aprovação bloqueada pelo administrador" : undefined}
                   >
-                    <CheckCircle className="h-4 w-4" />
+                    {isAprovarAquisicaoBlocked ? <Lock className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                     Aprovar todos
                   </Button>
                 )}
@@ -3480,9 +3732,9 @@ const DiretoriaAprovacao = () => {
                   variant="destructive" 
                   className="gap-2"
                   onClick={() => setActionDialog({ open: true, action: "rejeitar", isBulk: false })}
-                  disabled={selectedItems.size === 0 || recebidosStatusTab === "rejeitados"}
+                  disabled={selectedItems.size === 0 || recebidosStatusTab === "rejeitados" || isRejeitarAquisicaoBlocked || isPeriodExpired}
                 >
-                  <XCircle className="h-4 w-4" />
+                  {isRejeitarAquisicaoBlocked ? <Lock className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                   Rejeitar ({selectedItems.size})
                 </Button>
 
@@ -3496,7 +3748,7 @@ const DiretoriaAprovacao = () => {
                         setEditingBulkOwn(false);
                         setBulkEditAquisicaoOpen(true);
                       }}
-                      disabled={selectedItems.size === 0}
+                      disabled={selectedItems.size === 0 || isEditarAquisicaoBlocked || isPeriodExpired}
                     >
                       <Pencil className="h-4 w-4" />
                       Editar Selecionados
@@ -3506,7 +3758,7 @@ const DiretoriaAprovacao = () => {
                       variant="outline" 
                       className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                       onClick={() => setActionDialog({ open: true, action: "devolver", isBulk: false })}
-                      disabled={selectedItems.size === 0}
+                      disabled={selectedItems.size === 0 || isDevolverAquisicaoBlocked || isPeriodExpired}
                     >
                       <Undo2 className="h-4 w-4" />
                       Devolver para Rascunho ({selectedItems.size})
@@ -3521,7 +3773,7 @@ const DiretoriaAprovacao = () => {
                       variant="outline" 
                       className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                       onClick={() => setActionDialog({ open: true, action: "analisar", isBulk: false })}
-                      disabled={selectedItems.size === 0}
+                      disabled={selectedItems.size === 0 || isAprovarAquisicaoBlocked || isPeriodExpired}
                     >
                       <Undo2 className="h-4 w-4" />
                       Voltar para Pendentes ({selectedItems.size})

@@ -76,6 +76,7 @@ import {
   import { SortableTableHead } from "@/components/ui/sortable-table-head";
   import { useGerenciaData } from "@/hooks/useGerenciaData";
   import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
+  import { useActivityRestrictions } from "@/hooks/useActivityRestrictions";
   
   // Mapeamento de ícones por sigla
   const getIconPath = (sigla: string): string | null => {
@@ -157,6 +158,31 @@ import {
       isAquisicaoLoading,
       isServicosLoading,
     } = useGerenciaData(siglaUpper, gerenciaUpper);
+
+  const { isBlocked, getBlockReason } = useActivityRestrictions({
+    periodoId: periodAtivo?.id,
+    gerenciaId: gerenciaAtual?.id,
+    diretoriaId: diretoria?.id,
+    perfil: "gerencia",
+  });
+
+  const isSendAquisicaoBlocked = isBlocked("aquisicao", "enviar_solicitacao") || isBlocked("todos", "enviar_solicitacao");
+  const isAddAquisicaoBlocked = isBlocked("aquisicao", "adicionar_item") || isBlocked("todos", "adicionar_item");
+  const isQtdAquisicaoBlocked = isBlocked("aquisicao", "alterar_quantidade") || isBlocked("aquisicao", "editar_item") || isBlocked("todos", "alterar_quantidade") || isBlocked("todos", "editar_item");
+  const isPrioridadeAquisicaoBlocked = isBlocked("aquisicao", "alterar_prioridade") || isBlocked("todos", "alterar_prioridade") || isQtdAquisicaoBlocked;
+  const isObsAquisicaoBlocked = isBlocked("aquisicao", "adicionar_observacao") || isBlocked("todos", "adicionar_observacao") || isQtdAquisicaoBlocked;
+  const isDevolverAquisicaoBlocked = isBlocked("aquisicao", "devolver_solicitacao") || isBlocked("aquisicao", "devolver") || isBlocked("todos", "devolver_solicitacao") || isBlocked("todos", "devolver");
+  const isExcluirAquisicaoBlocked = isBlocked("aquisicao", "excluir_item") || isBlocked("todos", "excluir_item");
+
+  const isSendServicosExistentesBlocked = isBlocked("servicos_existentes", "enviar_solicitacao") || isBlocked("todos", "enviar_solicitacao");
+  const isAddServicosExistentesBlocked = isBlocked("servicos_existentes", "adicionar_servico") || isBlocked("servicos_existentes", "adicionar_item") || isBlocked("todos", "adicionar_item");
+  const isValorServicosExistentesBlocked = isBlocked("servicos_existentes", "alterar_valor") || isBlocked("servicos_existentes", "alterar_quantidade") || isBlocked("servicos_existentes", "editar_item") || isBlocked("todos", "alterar_valor") || isBlocked("todos", "editar_item");
+  const isDevolverServicosExistentesBlocked = isBlocked("servicos_existentes", "devolver_solicitacao") || isBlocked("servicos_existentes", "devolver") || isBlocked("todos", "devolver_solicitacao") || isBlocked("todos", "devolver");
+
+  const isSendServicosNovosBlocked = isBlocked("servicos_novos", "enviar_solicitacao") || isBlocked("todos", "enviar_solicitacao");
+  const isAddServicosNovosBlocked = isBlocked("servicos_novos", "adicionar_novo_servico") || isBlocked("servicos_novos", "adicionar_item") || isBlocked("todos", "adicionar_item");
+  const isValorServicosNovosBlocked = isBlocked("servicos_novos", "alterar_valor") || isBlocked("servicos_novos", "alterar_quantidade") || isBlocked("servicos_novos", "editar_item") || isBlocked("todos", "alterar_valor") || isBlocked("todos", "editar_item");
+  const isDevolverServicosNovosBlocked = isBlocked("servicos_novos", "devolver_solicitacao") || isBlocked("servicos_novos", "devolver") || isBlocked("todos", "devolver_solicitacao") || isBlocked("todos", "devolver");
 
   const isPeriodExpired = useMemo(() => {
     if (!periodAtivo?.fim) return false;
@@ -427,6 +453,14 @@ import {
   };
 
   const handleUpdateQtdEstimada = async (codigo: number, qtdEstimada: number) => {
+    if (isQtdAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "alterar_quantidade") || "A edição de quantidades está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     const item = items.find(i => i.codigo === codigo);
     if (item && item.id) {
       if (item.status !== "rascunho" && item.status !== "rejeitado") return;
@@ -438,6 +472,14 @@ import {
   };
 
   const handleUpdateUnidade = async (codigo: number, unidade: string) => {
+    if (isQtdAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "alterar_quantidade") || "A edição está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     const item = items.find(i => i.codigo === codigo);
     if (item && item.id) {
       if (item.status !== "rascunho" && item.status !== "rejeitado") return;
@@ -449,6 +491,14 @@ import {
   };
 
   const handleUpdateObservacao = async (codigo: number, observacao: string) => {
+    if (isObsAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "adicionar_observacao") || "A edição de observações está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     const item = items.find(i => i.codigo === codigo);
     if (item && item.id) {
       if (item.status !== "rascunho" && item.status !== "rejeitado") return;
@@ -460,6 +510,14 @@ import {
   };
 
   const handleUpdatePrioridade = async (codigo: number, prioridade: PlanItem["prioridade"]) => {
+    if (isPrioridadeAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "alterar_prioridade") || "A alteração de prioridades está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     const item = items.find(i => i.codigo === codigo);
     if (item && item.id) {
       if (item.status !== "rascunho" && item.status !== "rejeitado") return;
@@ -471,6 +529,14 @@ import {
   };
 
   const handleDevolverAquisicao = async (itemId: string) => {
+    if (isDevolverAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "devolver_solicitacao") || "A devolução de solicitações está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja devolver este item para rascunho?")) return;
     try {
       await updateSolicitacao(itemId, { status: "rascunho" });
@@ -483,6 +549,14 @@ import {
   };
 
   const handleDevolverTodosAquisicao = async (itemIds: string[]) => {
+    if (isDevolverAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "devolver_solicitacao") || "A devolução de solicitações está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (itemIds.length === 0) {
       toast({
         title: "Nenhum item selecionado",
@@ -511,6 +585,14 @@ import {
   };
 
   const handleDeleteItem = async (itemId: string) => {
+    if (isExcluirAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "excluir_item") || "A exclusão de itens está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Excluir este item permanentemente?")) return;
 
     try {
@@ -606,11 +688,27 @@ import {
   };
 
   const openSolicitacaoEditor = (item: PlanItem) => {
+    if (isQtdAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "alterar_quantidade") || "A edição de solicitações está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSolicitacaoEdicao(item);
     setSolicitacaoEditOpen(true);
   };
 
   const handleSaveSolicitacaoEdicao = async (codigo: number, updates: Partial<PlanItem>) => {
+    if (isQtdAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "alterar_quantidade") || "A edição de solicitações está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       if (solicitacaoEdicao?.id) {
         await updateSolicitacao(solicitacaoEdicao.id, updates);
@@ -629,6 +727,14 @@ import {
   };
 
   const handleBulkEditAquisicao = async (updates: any) => {
+    if (isQtdAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("aquisicao", "edicao_em_lote") || getBlockReason("aquisicao", "alterar_quantidade") || "A edição em lote está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsBulkUpdating(true);
     try {
       await updateSolicitacoesBulkData(Array.from(selectedAquisicaoIds), updates);
@@ -710,29 +816,54 @@ import {
   };
 
   const handleUpdateGrauPrioridade = async (item: number, grauPrioridade: GrauPrioridade) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "alterar_valor") || "A alteração de prioridades está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     await ensureServico(item, { grau_prioridade: grauPrioridade });
   };
 
   const handleUpdateJustificativa = async (item: number, justificativa: string) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) return;
     const justificativaLimpa = justificativa.trim();
     if (!justificativaLimpa) return;
     await ensureServico(item, { justificativa: justificativaLimpa });
   };
 
   const handleUpdateDotacao = async (item: number, dotacaoOrcamentaria: number) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) return;
     await ensureServico(item, { dotacao_orcamentaria: dotacaoOrcamentaria });
   };
 
   const handleUpdateVinculacao = async (item: number, vinculacao: string) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) return;
     await ensureServico(item, { vinculacao });
   };
 
   const handleUpdateObservacaoServico = async (item: number, observacao: string) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) return;
     await ensureServico(item, { observacao });
   };
 
-
   const handleDevolverServico = async (servicoId: string) => {
+    const isCurrentDevolverBlocked = (selectedOption === "servicos_novos" ? isDevolverServicosNovosBlocked : isDevolverServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentDevolverBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "devolver_solicitacao") || "A devolução de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja devolver este serviço para rascunho?")) return;
     try {
       await updateServico(servicoId, { status: "rascunho" });
@@ -745,6 +876,15 @@ import {
   };
 
   const handleDevolverTodosServico = async (servicoIds: string[]) => {
+    const isCurrentDevolverBlocked = (selectedOption === "servicos_novos" ? isDevolverServicosNovosBlocked : isDevolverServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentDevolverBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "devolver_solicitacao") || "A devolução de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (servicoIds.length === 0) {
       toast({
         title: "Nenhum serviço selecionado",
@@ -774,6 +914,14 @@ import {
   };
 
   const handleDeleteServico = async (servicoId: string | undefined, itemCode: number) => {
+    if (isExcluirAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("servicos_novos", "excluir_item") || "A exclusão de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
 
     try {
@@ -846,6 +994,14 @@ import {
 
   const handleCriarServico = async () => {
     if (novoServicoLoading) return; // Prevent double submission
+    if (isAddServicosNovosBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("servicos_novos", "adicionar_novo_servico") || "A criação de novos serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!gerenciaAtual || !diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
@@ -964,12 +1120,30 @@ import {
   };
 
   const openServicoEditor = (servico: ServicoItem) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "alterar_valor") || "A edição de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     setServicoEdicao(servico);
     setServicoEditOpen(true);
   };
 
   const handleSaveServicoEdicao = async () => {
     if (!servicoEdicao?.item) return;
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "alterar_valor") || "A edição de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const updates: Partial<ServicoItem> = {
       objeto: servicoEdicao.objeto,
@@ -997,6 +1171,15 @@ import {
   };
 
   const handleBulkEditServicos = async (updates: any) => {
+    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+    if (isCurrentValorBlocked) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason(selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes", "edicao_em_lote") || "A edição em lote está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsBulkUpdating(true);
     try {
       const promises = Array.from(selectedServicos).map((itemCode) =>
@@ -1014,6 +1197,14 @@ import {
   };
 
   const handleBulkDeleteServicos = async () => {
+    if (isExcluirAquisicaoBlocked || isPeriodExpired) {
+      toast({
+        title: "🔒 Ação Bloqueada",
+        description: getBlockReason("servicos_novos", "excluir_item") || "A exclusão de serviços está bloqueada para a sua gerência neste período.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!confirm("Excluir os serviços selecionados permanentemente?")) return;
     try {
       const selectedCodes = Array.from(selectedServicos);
@@ -1641,12 +1832,16 @@ import {
                   </tr>
                 ) : (
                   paginatedLista.map((servico, index) => {
-                    const readOnly = isServicoReadOnly(servico);
-                    const isSelectable = showOnlySent ? Boolean(servico.id) : !readOnly;
+                    const isServicoLocked = isServicoReadOnly(servico);
+                    const isCurrentValorBlocked = (selectedOption === "servicos_novos" ? isValorServicosNovosBlocked : isValorServicosExistentesBlocked) || isPeriodExpired;
+                    const isCurrentDevolverBlocked = (selectedOption === "servicos_novos" ? isDevolverServicosNovosBlocked : isDevolverServicosExistentesBlocked) || isPeriodExpired;
+                    const isCurrentExcluirBlocked = isExcluirAquisicaoBlocked || isPeriodExpired;
+                    const isEditDisabled = isServicoLocked || isCurrentValorBlocked;
+                    const isSelectable = showOnlySent ? Boolean(servico.id) : !isServicoLocked;
                     return (
                       <tr
                         key={servico.id || index}
-                        className={`border-b ${readOnly && !showOnlySent ? "opacity-80" : "hover:bg-muted/20"} ${index % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
+                        className={`border-b ${isServicoLocked && !showOnlySent ? "opacity-80" : "hover:bg-muted/20"} ${index % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
                       >
                         <td className="p-3">
                           <Checkbox
@@ -1665,7 +1860,7 @@ import {
                           </p>
                         </td>
                         <td className="p-3 text-sm">
-                          {readOnly ? (
+                          {isEditDisabled ? (
                             <p className="text-xs text-muted-foreground line-clamp-3">{servico.justificativa || "—"}</p>
                           ) : (
                             <textarea
@@ -1685,7 +1880,7 @@ import {
                           )}
                         </td>
                         <td className="p-3">
-                          {readOnly ? (
+                          {isEditDisabled ? (
                             <Badge variant={getPrioridadeBadgeVariant(servico.grauPrioridade)}>{servico.grauPrioridade}</Badge>
                           ) : (
                             <Select
@@ -1711,7 +1906,7 @@ import {
                           <span className="text-sm">{formatCurrency(servico.estimativaValor)}</span>
                         </td>
                         <td className="p-3">
-                          {readOnly ? (
+                          {isEditDisabled ? (
                             <div className="space-y-1">
                               <span className="text-sm">{servico.vinculacao}</span>
                               {servico.dependenciaDescricao && (
@@ -1749,36 +1944,39 @@ import {
                           </Badge>
                         </td>
                         <td className="p-3 text-right">
-                          {!readOnly ? (
+                          {!isServicoLocked ? (
                             <div className="flex items-center justify-end gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
                                 onClick={() => openServicoEditor(servico)}
-                                title="Editar serviço"
+                                disabled={isEditDisabled}
+                                title={isEditDisabled ? "Edição bloqueada pelo administrador" : "Editar serviço"}
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
-                                {selectedOption === "servicos_novos" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-destructive"
-                                    onClick={() => handleDeleteServico(servico.id, servico.item)}
-                                    title="Excluir serviço"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
+                              {selectedOption === "servicos_novos" && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive"
+                                  disabled={isCurrentExcluirBlocked}
+                                  onClick={() => handleDeleteServico(servico.id, servico.item)}
+                                  title={isCurrentExcluirBlocked ? "Exclusão bloqueada pelo administrador" : "Excluir serviço"}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
                           ) : servico.status === "enviado" && servico.id ? (
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-amber-500"
+                              disabled={isCurrentDevolverBlocked}
                               onClick={() => handleDevolverServico(servico.id!)}
-                              title="Devolver serviço para Rascunho"
+                              title={isCurrentDevolverBlocked ? "Devolução bloqueada pelo administrador" : "Devolver serviço para Rascunho"}
                             >
                               <Undo2 className="h-4 w-4" />
                             </Button>
@@ -1921,15 +2119,34 @@ import {
                       Excluir Selecionados
                     </Button>
                   )}
-                  <Button
-                    size="sm"
-                    className="gap-2"
-                    onClick={() => setConfirmSendServicosOpen(true)}
-                    disabled={selectedServicos.size === 0}
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar para Diretoria ({selectedServicos.size})
-                  </Button>
+                  {(() => {
+                    const isCurrentSendBlocked = selectedOption === "servicos_novos" ? isSendServicosNovosBlocked : isSendServicosExistentesBlocked;
+                    return (
+                      <Button
+                        size="sm"
+                        className={`gap-2 ${isCurrentSendBlocked ? "opacity-60 cursor-not-allowed bg-slate-400 hover:bg-slate-400" : ""}`}
+                        onClick={() => {
+                          if (isCurrentSendBlocked) {
+                            toast({
+                              title: "🔒 Ação Bloqueada",
+                              description:
+                                getBlockReason(
+                                  selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes",
+                                  "enviar_solicitacao"
+                                ) || "O envio de serviços está temporariamente bloqueado pelo administrador para a sua gerência neste período.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          setConfirmSendServicosOpen(true);
+                        }}
+                        disabled={selectedServicos.size === 0 || isCurrentSendBlocked}
+                      >
+                        {isCurrentSendBlocked ? <Lock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                        Enviar para Diretoria ({selectedServicos.size})
+                      </Button>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -1954,6 +2171,25 @@ import {
               </Button>
             </div>
           </div>
+
+          {/* Banner de restrição de serviços */}
+          {((selectedOption === "servicos_novos" && isSendServicosNovosBlocked) ||
+            (selectedOption === "servicos_existentes" && isSendServicosExistentesBlocked)) && (
+            <div className="mx-6 mb-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-900 text-sm shadow-sm">
+              <div className="p-2 bg-red-100 rounded-lg shrink-0">
+                <Lock className="h-5 w-5 text-red-600" />
+              </div>
+              <div>
+                <p className="font-bold text-red-800">Envio de Serviços Bloqueado</p>
+                <p className="text-xs text-red-700 mt-0.5">
+                  {getBlockReason(
+                    selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes",
+                    "enviar_solicitacao"
+                  ) || "O envio de solicitações de serviços está temporariamente bloqueado pelo administrador para a sua gerência neste período."}
+                </p>
+              </div>
+            </div>
+          )}
 
           <PlanFilters
             searchTerm={searchTerm}
@@ -2048,10 +2284,27 @@ import {
               <div className="mt-4 flex justify-center">
                 <Button
                   variant="outline"
-                  className="gap-2 border-dashed border-green-400 text-green-700 hover:bg-green-50"
-                  onClick={() => setNovoServicoOpen(true)}
+                  className={`gap-2 border-dashed ${
+                    isAddServicosNovosBlocked
+                      ? "border-slate-300 text-slate-400 cursor-not-allowed hover:bg-transparent"
+                      : "border-green-400 text-green-700 hover:bg-green-50"
+                  }`}
+                  disabled={isAddServicosNovosBlocked}
+                  onClick={() => {
+                    if (isAddServicosNovosBlocked) {
+                      toast({
+                        title: "🔒 Ação Bloqueada",
+                        description:
+                          getBlockReason("servicos_novos", "adicionar_novo_servico") ||
+                          "A criação de novos serviços está temporariamente bloqueada para o período atual.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    setNovoServicoOpen(true);
+                  }}
                 >
-                  <Plus className="h-4 w-4" />
+                  {isAddServicosNovosBlocked ? <Lock className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                   Adicionar Novo Serviço
                 </Button>
               </div>
@@ -2433,11 +2686,23 @@ import {
           {hasRascunhoItems && !hasApprovedItems && (
             <Button
               size="sm"
-              className="gap-2"
-              disabled={!canSend || selectedAquisicaoIds.size === 0}
-              onClick={() => setConfirmSendOpen(true)}
+              className={`gap-2 ${isSendAquisicaoBlocked ? "opacity-60 cursor-not-allowed bg-slate-400 hover:bg-slate-400" : ""}`}
+              disabled={!canSend || selectedAquisicaoIds.size === 0 || isSendAquisicaoBlocked}
+              onClick={() => {
+                if (isSendAquisicaoBlocked) {
+                  toast({
+                    title: "🔒 Ação Bloqueada",
+                    description:
+                      getBlockReason("aquisicao", "enviar_solicitacao") ||
+                      "O envio de solicitações está temporariamente bloqueado pelo administrador para a sua gerência neste período.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setConfirmSendOpen(true);
+              }}
             >
-              <Send className="h-4 w-4" />
+              {isSendAquisicaoBlocked ? <Lock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               Enviar ({selectedAquisicaoIds.size})
             </Button>
           )}
@@ -2464,6 +2729,22 @@ import {
           </Button>
         </div>
       </div>
+
+      {/* Banner de restrição de aquisição */}
+      {isSendAquisicaoBlocked && (
+        <div className="mx-6 mb-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-900 text-sm shadow-sm">
+          <div className="p-2 bg-red-100 rounded-lg shrink-0">
+            <Lock className="h-5 w-5 text-red-600" />
+          </div>
+          <div>
+            <p className="font-bold text-red-800">Envio de Solicitações Bloqueado</p>
+            <p className="text-xs text-red-700 mt-0.5">
+              {getBlockReason("aquisicao", "enviar_solicitacao") ||
+                "A atividade 'Enviar solicitação' está temporariamente bloqueada para sua gerência neste período. Entre em contato com o administrador caso necessário."}
+            </p>
+          </div>
+        </div>
+      )}
 
       <PlanFilters
         searchTerm={searchTerm}
@@ -2575,7 +2856,10 @@ import {
                 </thead>
                 <tbody>
                   {paginationData.paginatedItems.map((item, idx) => {
-                    const readOnly = item.status !== "rascunho" && item.status !== "rejeitado";
+                    const isItemLocked = item.status !== "rascunho" && item.status !== "rejeitado";
+                    const isQtyDisabled = isItemLocked || isQtdAquisicaoBlocked || isPeriodExpired;
+                    const isPriorityDisabled = isItemLocked || isPrioridadeAquisicaoBlocked || isPeriodExpired;
+                    const isEditDisabled = isItemLocked || isQtdAquisicaoBlocked || isPeriodExpired;
                     const isSelectable = showOnlySent
                       ? Boolean(item.id)
                       : Boolean(item.id && (item.status === "rascunho" || item.status === "rejeitado"));
@@ -2608,44 +2892,44 @@ import {
                           <Badge variant="outline" className="text-xs">{item.unidade}</Badge>
                         </td>
                         <td className="p-3 text-center">
-                          {readOnly ? (
-                            <span className="text-sm">{item.qtdEstimada}</span>
+                          {isQtyDisabled ? (
+                            <span className="text-sm font-medium">{item.qtdEstimada}</span>
                           ) : (
-                              <input
-                                key={`${item.codigo}-${item.qtdEstimada}`}
-                                type="number"
-                                min="0"
-                                defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
-                                onBlur={(e) => {
-                                  const val = parseInt(e.target.value) || 0;
-                                  if (val !== item.qtdEstimada) {
-                                    handleUpdateQtdEstimada(item.codigo, val);
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    e.currentTarget.blur();
-                                  }
-                                }}
-                                className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
-                              />
-                            )}
-                          </td>
-                          <td className="p-3 text-right text-sm">
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
-                          </td>
-                          <td className="p-3 text-right text-sm font-semibold text-primary">
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
-                          </td>
-                          <td className="p-3 text-center">
-                            {readOnly ? (
-                              <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
-                            ) : (
-                              <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.codigo, v as PlanItem["prioridade"])}>
-                                <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
-                                  <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
-                                </SelectTrigger>
+                            <input
+                              key={`${item.codigo}-${item.qtdEstimada}`}
+                              type="number"
+                              min="0"
+                              defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
+                              onBlur={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                if (val !== item.qtdEstimada) {
+                                  handleUpdateQtdEstimada(item.codigo, val);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              className="w-20 h-8 text-center text-sm border rounded px-2 bg-background"
+                            />
+                          )}
+                        </td>
+                        <td className="p-3 text-right text-sm">
+                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
+                        </td>
+                        <td className="p-3 text-right text-sm font-semibold text-primary">
+                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
+                        </td>
+                        <td className="p-3 text-center">
+                          {isPriorityDisabled ? (
+                            <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
+                          ) : (
+                            <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.codigo, v as PlanItem["prioridade"])}>
+                              <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
+                                <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
+                              </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="Baixa">Baixa</SelectItem>
                                 <SelectItem value="Média">Média</SelectItem>
@@ -2660,37 +2944,24 @@ import {
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
                             {(item.status === "rascunho" || item.status === "rejeitado") && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  title="Editar item"
-                                  onClick={() => openSolicitacaoEditor(item)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                {/* 
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive"
-                                  title="Excluir item"
-                                  disabled={!item.id}
-                                  onClick={() => item.id && handleDeleteItem(item.id)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                                */}
-                              </>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title={isEditDisabled ? "Edição bloqueada pelo administrador" : "Editar item"}
+                                disabled={isEditDisabled}
+                                onClick={() => openSolicitacaoEditor(item)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                             )}
                             {item.status === "enviado" && (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-amber-500"
-                                title="Devolver item para Rascunho"
-                                disabled={!item.id}
+                                title={isDevolverAquisicaoBlocked || isPeriodExpired ? "Devolução bloqueada pelo administrador" : "Devolver item para Rascunho"}
+                                disabled={!item.id || isDevolverAquisicaoBlocked || isPeriodExpired}
                                 onClick={() => item.id && handleDevolverAquisicao(item.id)}
                               >
                                 <Undo2 className="h-4 w-4" />
