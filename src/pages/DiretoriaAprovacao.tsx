@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2, ArrowUp, ArrowDown, ArrowUpDown, Search, Lock } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Plus, Home, Check, X, Send, Download, FileText, Pencil, Trash2, Clock, ShoppingCart, FileSpreadsheet, FileDown, Undo2, ArrowUp, ArrowDown, ArrowUpDown, Search, Lock, ArrowRightLeft, Loader2 } from "lucide-react";
 import { PageBreadcrumb } from "@/components/layout/PageBreadcrumb";
 import { Button } from "@/components/ui/button";
 import { CurrencyInput } from "@/components/ui/currency-input";
@@ -10,7 +10,7 @@ import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
 import { useActivityRestrictions } from "@/hooks/useActivityRestrictions";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk } from "@/lib/services";
+import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk, registrarLogAtividade, transferirSolicitacoesParaGerenciaBulk, transferirServicosParaGerenciaBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/ItemEditDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -137,6 +137,25 @@ const DiretoriaAprovacao = () => {
     open: boolean;
     action: "aprovar" | "rejeitar" | "devolver" | "analisar" | null;
   }>({ open: false, action: null });
+
+  // Estado do diálogo de Transferir para Gerência
+  const [transferDialog, setTransferDialog] = useState<{
+    open: boolean;
+    tipo: "aquisicao" | "servicos_existentes" | "servicos_novos";
+    item: PlanItem | ServicoItem | null;
+    isBulk?: boolean;
+    bulkSource?: "aquisicao_proprios" | "aquisicao_recebidos" | "servicos_proprios" | "servicos_recebidos";
+    bulkCount?: number;
+    targetGerenciaId: string;
+    loading: boolean;
+  }>({
+    open: false,
+    tipo: "aquisicao",
+    item: null,
+    isBulk: false,
+    targetGerenciaId: "",
+    loading: false,
+  });
 
   // Estado do dialog de novo serviço da diretoria
   const [novoServicoOpen, setNovoServicoOpen] = useState(false);
@@ -2055,6 +2074,262 @@ const DiretoriaAprovacao = () => {
     setSelectedServicos(newSelected);
   };
 
+  const handleOpenTransferDialog = (
+    item: PlanItem | ServicoItem,
+    tipo: "aquisicao" | "servicos_existentes" | "servicos_novos"
+  ) => {
+    const defaultGerenciaId =
+      (item as any).gerencia_id ||
+      (ownGerenciaId !== "diretoria" ? ownGerenciaId : "") ||
+      (gerenciasData && gerenciasData.length > 0 ? gerenciasData[0].id : "");
+
+    setTransferDialog({
+      open: true,
+      tipo,
+      item,
+      isBulk: false,
+      targetGerenciaId: defaultGerenciaId,
+      loading: false,
+    });
+  };
+
+  const handleOpenBulkTransferDialog = (
+    source: "aquisicao_proprios" | "aquisicao_recebidos" | "servicos_proprios" | "servicos_recebidos"
+  ) => {
+    let count = 0;
+    let tipo: "aquisicao" | "servicos_existentes" | "servicos_novos" = "aquisicao";
+
+    if (source === "aquisicao_proprios") {
+      count = selectedOwnItems.size;
+      tipo = "aquisicao";
+    } else if (source === "aquisicao_recebidos") {
+      count = selectedItems.size;
+      tipo = "aquisicao";
+    } else if (source === "servicos_proprios" || source === "servicos_recebidos") {
+      count = selectedServicos.size;
+      tipo = selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes";
+    }
+
+    if (count === 0) return;
+
+    const defaultGerenciaId =
+      (ownGerenciaId !== "diretoria" && ownGerenciaId ? ownGerenciaId : "") ||
+      (gerenciasData && gerenciasData.length > 0 ? gerenciasData[0].id : "");
+
+    setTransferDialog({
+      open: true,
+      tipo,
+      item: null,
+      isBulk: true,
+      bulkSource: source,
+      bulkCount: count,
+      targetGerenciaId: defaultGerenciaId,
+      loading: false,
+    });
+  };
+
+  const handleConfirmTransfer = async () => {
+    const { item, tipo, targetGerenciaId, isBulk, bulkSource } = transferDialog;
+    if (!targetGerenciaId) return;
+
+    setTransferDialog((prev) => ({ ...prev, loading: true }));
+
+    const gerenciaDestinoObj = (todasGerenciasData as any[]).find((g: any) => g.id === targetGerenciaId);
+    const gerenciaDestinoSigla = gerenciaDestinoObj?.sigla || gerenciaMap[targetGerenciaId] || "Gerência";
+
+    try {
+      if (isBulk) {
+        if (bulkSource === "aquisicao_proprios") {
+          const selectedArray = Array.from(selectedOwnItems);
+          const uuidIds: string[] = [];
+          const codeItems: number[] = [];
+
+          for (const rawId of selectedArray) {
+            const strId = String(rawId);
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(strId);
+            if (isUuid) {
+              uuidIds.push(strId);
+            } else {
+              codeItems.push(Number(rawId));
+            }
+          }
+
+          if (uuidIds.length > 0) {
+            await transferirSolicitacoesParaGerenciaBulk(uuidIds, targetGerenciaId);
+          }
+
+          for (const codigo of codeItems) {
+            await ensureSolicitacaoDiretoria(codigo, {
+              status: "rascunho",
+              gerencia_id: targetGerenciaId,
+            });
+          }
+
+          setSelectedOwnItems(new Set());
+          await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+          await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+          if (periodAtivo) {
+            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+          }
+
+          toast({
+            title: "Transferência em massa concluída",
+            description: `${selectedArray.length} item(ns) transferido(s) para a Gerência ${gerenciaDestinoSigla} com sucesso.`,
+          });
+        } else if (bulkSource === "aquisicao_recebidos") {
+          const ids = Array.from(selectedItems).filter((id): id is string => typeof id === "string");
+          if (ids.length > 0) {
+            await transferirSolicitacoesParaGerenciaBulk(ids, targetGerenciaId);
+          }
+
+          setSelectedItems(new Set());
+          await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+          await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+          if (periodAtivo) {
+            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+          }
+
+          toast({
+            title: "Transferência em massa concluída",
+            description: `${ids.length} item(ns) transferido(s) para a Gerência ${gerenciaDestinoSigla} com sucesso.`,
+          });
+        } else if (bulkSource === "servicos_proprios" || bulkSource === "servicos_recebidos") {
+          const ids = Array.from(selectedServicos).filter(Boolean);
+          if (ids.length > 0) {
+            await transferirServicosParaGerenciaBulk(ids, targetGerenciaId);
+          }
+
+          setSelectedServicos(new Set());
+          await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+          await queryClient.invalidateQueries({ queryKey: servicosQueryKey });
+          if (periodAtivo) {
+            await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
+          }
+
+          toast({
+            title: "Transferência em massa concluída",
+            description: `${ids.length} serviço(s) transferido(s) para a Gerência ${gerenciaDestinoSigla} com sucesso.`,
+          });
+        }
+
+        setTransferDialog({
+          open: false,
+          tipo: "aquisicao",
+          item: null,
+          isBulk: false,
+          targetGerenciaId: "",
+          loading: false,
+        });
+        return;
+      }
+
+      // Fluxo individual
+      if (!item) return;
+
+      if (tipo === "aquisicao") {
+        const planItem = item as PlanItem;
+        const itemId = planItem.id;
+
+        if (!itemId && planItem.codigo) {
+          await ensureSolicitacaoDiretoria(planItem.codigo, {
+            status: "rascunho",
+            gerencia_id: targetGerenciaId,
+          });
+        } else if (itemId) {
+          await updateSolicitacao(itemId, {
+            status: "rascunho",
+            gerencia_id: targetGerenciaId,
+          });
+        }
+
+        await registrarLogAtividade("TRANSFERIR", "solicitacoes", itemId || String(planItem.codigo), {
+          acao: "transferir_para_gerencia",
+          item_codigo: planItem.codigo,
+          descricao: planItem.descricao,
+          gerencia_destino_id: targetGerenciaId,
+          gerencia_destino_sigla: gerenciaDestinoSigla,
+          status_anterior: planItem.status,
+          status_novo: "rascunho",
+        });
+
+        queryClient.setQueryData(solicitacoesQueryKey, (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((i: any) =>
+            i.id === itemId || (planItem.codigo && i.codigo === planItem.codigo)
+              ? { ...i, status: "rascunho", gerencia_id: targetGerenciaId, gerencia: gerenciaDestinoSigla }
+              : i
+          );
+        });
+
+        await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+        await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
+        if (periodAtivo) {
+          await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+        }
+
+        toast({
+          title: "Transferência realizada",
+          description: `Item transferido para a Gerência ${gerenciaDestinoSigla} com sucesso.`,
+        });
+      } else {
+        const servicoItem = item as ServicoItem;
+        const servicoId = servicoItem.id;
+
+        if (!servicoId && servicoItem.item) {
+          await ensureServicoDiretoria(servicoItem.item, {
+            status: "rascunho",
+            gerencia_id: targetGerenciaId,
+          });
+        } else if (servicoId) {
+          await updateServico(servicoId, {
+            status: "rascunho",
+            gerencia_id: targetGerenciaId,
+          });
+        }
+
+        await registrarLogAtividade("TRANSFERIR", "servicos", servicoId || String(servicoItem.item), {
+          acao: "transferir_para_gerencia",
+          item_numero: servicoItem.item,
+          objeto: servicoItem.objeto,
+          gerencia_destino_id: targetGerenciaId,
+          gerencia_destino_sigla: gerenciaDestinoSigla,
+          status_anterior: servicoItem.status,
+          status_novo: "rascunho",
+        });
+
+        queryClient.setQueryData(servicosQueryKey, (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((s: any) =>
+            s.id === servicoId || (servicoItem.item && s.item === servicoItem.item)
+              ? { ...s, status: "rascunho", gerencia_id: targetGerenciaId, gerencia: gerenciaDestinoSigla }
+              : s
+          );
+        });
+
+        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        await queryClient.invalidateQueries({ queryKey: servicosQueryKey });
+        if (periodAtivo) {
+          await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
+        }
+
+        toast({
+          title: "Transferência realizada",
+          description: `Serviço transferido para a Gerência ${gerenciaDestinoSigla} com sucesso.`,
+        });
+      }
+
+      setTransferDialog({ open: false, tipo: "aquisicao", item: null, isBulk: false, targetGerenciaId: "", loading: false });
+    } catch (error: any) {
+      console.error("Erro ao transferir item/serviço:", error);
+      toast({
+        title: "Erro na transferência",
+        description: error?.message || "Não foi possível transferir para a gerência.",
+        variant: "destructive",
+      });
+      setTransferDialog((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
 
 
   if (isDiretoriasLoading) {
@@ -2501,6 +2776,17 @@ const DiretoriaAprovacao = () => {
                           </Button>
                       )}
 
+                      {/* Botão Transferir para Gerência */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        title="Transferir para Gerência"
+                        onClick={() => handleOpenTransferDialog(servico, selectedOption === "servicos_novos" ? "servicos_novos" : "servicos_existentes")}
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                      </Button>
+
                       {/* Botão Excluir (lixeira): visível apenas para novos serviços criados pela diretoria */}
                       {selectedOption === "servicos_novos" && servico.id && (
                         <Button
@@ -2677,6 +2963,15 @@ const DiretoriaAprovacao = () => {
                     </Button>
                     {selectedServicos.size > 0 && (
                       <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                          onClick={() => handleOpenBulkTransferDialog("servicos_proprios")}
+                        >
+                          <ArrowRightLeft className="h-4 w-4" />
+                          Transferir para Gerência ({selectedServicos.size})
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -2929,6 +3224,16 @@ const DiretoriaAprovacao = () => {
                           >
                             <Pencil className="h-4 w-4" />
                             Editar Selecionados
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                            onClick={() => handleOpenBulkTransferDialog("servicos_recebidos")}
+                            disabled={selectedServicos.size === 0 || isPeriodExpired}
+                          >
+                            <ArrowRightLeft className="h-4 w-4" />
+                            Transferir para Gerência ({selectedServicos.size})
                           </Button>
                           <Button 
                             size="sm" 
@@ -3413,6 +3718,15 @@ const DiretoriaAprovacao = () => {
                   <Button
                     variant="outline"
                     size="sm"
+                    className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    onClick={() => handleOpenBulkTransferDialog("aquisicao_proprios")}
+                  >
+                    <ArrowRightLeft className="h-4 w-4" />
+                    Transferir para Gerência ({selectedOwnItems.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="gap-2 text-muted-foreground"
                     disabled={isDevolverAquisicaoBlocked || isPeriodExpired}
                     onClick={() => setActionOwnDialog({ open: true, action: "devolver" })}
@@ -3488,6 +3802,7 @@ const DiretoriaAprovacao = () => {
               onUpdateObservacao={handleUpdateObservacaoDiretoria}
               onUpdatePrioridade={handleUpdatePrioridadeDiretoria}
               onDeleteItem={handleOwnDevolverIndividual}
+              onTransferItem={(item) => handleOpenTransferDialog(item, "aquisicao")}
               onEditItem={openSolicitacaoEditor}
               valorTotal={filteredOwnItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0)}
               selectedItems={selectedOwnItems}
@@ -3756,6 +4071,16 @@ const DiretoriaAprovacao = () => {
                     <Button 
                       size="sm" 
                       variant="outline" 
+                      className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                      onClick={() => handleOpenBulkTransferDialog("aquisicao_recebidos")}
+                      disabled={selectedItems.size === 0 || isPeriodExpired}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      Transferir para Gerência ({selectedItems.size})
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
                       className="gap-2 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                       onClick={() => setActionDialog({ open: true, action: "devolver", isBulk: false })}
                       disabled={selectedItems.size === 0 || isDevolverAquisicaoBlocked || isPeriodExpired}
@@ -3947,6 +4272,15 @@ const DiretoriaAprovacao = () => {
                                 <Undo2 className="h-3.5 w-3.5" />
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              title="Transferir para Gerência"
+                              onClick={() => handleOpenTransferDialog(item, "aquisicao")}
+                            >
+                              <ArrowRightLeft className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -4279,6 +4613,87 @@ const DiretoriaAprovacao = () => {
         }}
         canEditStatus={true}
       />
+
+      {/* Dialog Transferir para Gerência */}
+      <Dialog open={transferDialog.open} onOpenChange={(open) => !transferDialog.loading && setTransferDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-blue-600" />
+              {transferDialog.isBulk ? "Transferir Itens para a Gerência?" : "Transferir para a Gerência?"}
+            </DialogTitle>
+            <DialogDescription>
+              {transferDialog.isBulk
+                ? `Os ${transferDialog.bulkCount} registros selecionados serão encaminhados para o Painel da Gerência para complementação da solicitação.`
+                : "O item/serviço selecionado será encaminhado para o Painel da Gerência para complementação da solicitação."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-3">
+            {transferDialog.isBulk ? (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">
+                  Registros Selecionados
+                </p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {transferDialog.bulkCount} {transferDialog.tipo === "aquisicao" ? "item(ns) de aquisição" : "serviço(s)"} selecionado(s)
+                </p>
+              </div>
+            ) : transferDialog.item ? (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">
+                  {transferDialog.tipo === "aquisicao" ? "Item de Aquisição" : "Serviço"}
+                </p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {transferDialog.tipo === "aquisicao"
+                    ? `${(transferDialog.item as PlanItem).codigo} - ${(transferDialog.item as PlanItem).descricao}`
+                    : `Item ${(transferDialog.item as ServicoItem).item} - ${(transferDialog.item as ServicoItem).objeto}`}
+                </p>
+              </div>
+            ) : null}
+
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                Gerência de Destino:
+              </label>
+                <Select
+                  value={transferDialog.targetGerenciaId}
+                  onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
+                  disabled={transferDialog.loading}
+                >
+                  <SelectTrigger className="w-full bg-background">
+                    <SelectValue placeholder="Selecione a gerência de destino" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {gerenciasData.map((g: any) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.sigla} - {g.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+          <DialogFooter className="flex justify-end gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setTransferDialog(prev => ({ ...prev, open: false }))}
+              disabled={transferDialog.loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmTransfer}
+              disabled={transferDialog.loading || !transferDialog.targetGerenciaId}
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {transferDialog.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+              Confirmar transferência
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </div>
   );

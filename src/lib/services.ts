@@ -3317,3 +3317,53 @@ export async function assertActivityAllowed(
   }
 }
 
+export async function transferirSolicitacoesParaGerenciaBulk(
+  ids: string[],
+  targetGerenciaId: string
+): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase
+    .from("solicitacoes")
+    .update({
+      status: "rascunho",
+      gerencia_id: targetGerenciaId,
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao transferir solicitacoes em massa:", error);
+    throw error;
+  }
+
+  await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
+    acao: "transferir_para_gerencia_bulk",
+    gerencia_destino_id: targetGerenciaId,
+  });
+}
+
+export async function transferirServicosParaGerenciaBulk(
+  ids: string[],
+  targetGerenciaId: string
+): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase
+    .from("servicos")
+    .update({
+      status: "rascunho",
+      gerencia_id: targetGerenciaId,
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", ids);
+
+  if (error) {
+    console.error("Erro ao transferir servicos em massa:", error);
+    throw error;
+  }
+
+  await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
+    acao: "transferir_para_gerencia_bulk",
+    gerencia_destino_id: targetGerenciaId,
+  });
+}
+

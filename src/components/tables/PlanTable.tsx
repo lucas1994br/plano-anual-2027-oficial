@@ -1,6 +1,6 @@
  
 import { useRef, useState } from "react";
-import { MessageSquare, FileDown, FileSpreadsheet, Undo2, Pencil } from "lucide-react";
+import { MessageSquare, FileDown, FileSpreadsheet, Undo2, Pencil, ArrowRightLeft } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -42,6 +42,7 @@ interface PlanTableProps {
   onUpdatePrioridade: (codigo: number, prioridade: PlanItem["prioridade"]) => void;
   onDeleteItem?: (itemId: string) => void;
   onEditItem?: (item: PlanItem) => void;
+  onTransferItem?: (item: PlanItem) => void;
   valorTotal?: number;
   selectedItems?: Set<string | number>;
   onToggleSelect?: (id: string | number) => void;
@@ -50,7 +51,7 @@ interface PlanTableProps {
 
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 
-export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, onEditItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
+export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEstimada, onUpdateUnidade: _onUpdateUnidade, onUpdateObservacao, onUpdatePrioridade, onDeleteItem, onEditItem, onTransferItem, valorTotal, selectedItems, onToggleSelect, onToggleSelectAll }: PlanTableProps) {
   const [editingCodigo, setEditingCodigo] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const _editInputRef = useRef<HTMLInputElement | null>(null);
@@ -462,6 +463,17 @@ export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEsti
                           onClick={() => !readOnly && onDeleteItem(item.id!)}
                         >
                           <Undo2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {onTransferItem && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Transferir para Gerência"
+                          onClick={() => onTransferItem(item)}
+                        >
+                          <ArrowRightLeft className="h-4 w-4" />
                         </Button>
                       )}
                       {item.status && (
