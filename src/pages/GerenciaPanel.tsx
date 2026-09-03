@@ -394,17 +394,10 @@ import {
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
   }, [servicosData, servicosCatalogoData, selectedServicos]);
 
-<<<<<<< HEAD
-  const canSend = items.some((item) => item.qtdEstimada > 0 && item.status === "rascunho"); // Permite enviar se tiver pelo menos 1 item com quantidade em rascunho
-  const isReadOnly = items.some((item) => item.status === "enviado" || item.status === "em_analise" || item.status === "aprovado");
-  const hasApprovedItems = items.some((item) => item.status === "aprovado");
-  const hasRascunhoItems = items.some((item) => item.status === "rascunho");
-=======
   const canSend = items.some((item) => item.qtdEstimada > 0 && (item.status === "rascunho" || item.status === "rejeitado")); // Permite enviar se tiver pelo menos 1 item elegivel com quantidade
   const isReadOnly = items.some((item) => item.status === "enviado" || item.status === "em_analise" || item.status === "aprovado");
   const hasApprovedItems = items.some((item) => item.status === "aprovado");
   const hasRascunhoItems = items.some((item) => item.status === "rascunho" || item.status === "rejeitado");
->>>>>>> 0fd1792 (novas atualizações 9-26)
   const solicitacoesQueryKey = useMemo(() => ["solicitacoes", gerenciaAtual?.id, periodAtivo?.id] as const, [gerenciaAtual?.id, periodAtivo?.id]);
 
   const patchSolicitacaoInCache = useCallback(
@@ -2488,28 +2481,10 @@ import {
               </div>
               <div className="flex justify-end gap-3">
                 <Button variant="outline" disabled={isSendingServicos} onClick={() => setConfirmSendServicosOpen(false)}>Cancelar</Button>
-<<<<<<< HEAD
-                {servicosData.some((s: any) => 
-                  (s.status === "enviado" || s.status === "em_analise") && 
-                  (selectedOption === "servicos_novos" 
-                    ? !servicosCatalogoData.some((c: any) => c.item === s.item) 
-                    : servicosCatalogoData.some((c: any) => c.item === s.item))
-                ) ? (
-                  <p className="text-sm text-amber-600 font-medium py-2">
-                    Aguarde a diretoria aprovar/rejeitar os envios pendentes desta aba.
-                  </p>
-                ) : (
-                  <Button onClick={handleSendServicosToDir} disabled={isSendingServicos} className="gap-2">
-                    {isSendingServicos ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    {isSendingServicos ? "Enviando..." : "Confirmar Envio"}
-                  </Button>
-                )}
-=======
                 <Button onClick={handleSendServicosToDir} disabled={isSendingServicos || selectedServicos.size === 0} className="gap-2">
                   {isSendingServicos ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   {isSendingServicos ? "Enviando..." : "Confirmar Envio"}
                 </Button>
->>>>>>> 0fd1792 (novas atualizações 9-26)
               </div>
             </DialogContent>
           </Dialog>
@@ -2697,11 +2672,7 @@ import {
               Devolver Todos ({filteredItems.filter(i => i.id && selectedAquisicaoIds.has(i.id)).length})
             </Button>
           )}
-<<<<<<< HEAD
-          {hasRascunhoItems && !hasApprovedItems && (
-=======
           {hasRascunhoItems && (
->>>>>>> 0fd1792 (novas atualizações 9-26)
             <Button
               size="sm"
               className={`gap-2 ${isSendAquisicaoBlocked ? "opacity-60 cursor-not-allowed bg-slate-400 hover:bg-slate-400" : ""}`}
@@ -3042,23 +3013,10 @@ import {
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="outline" disabled={isSendingAquisicao} onClick={() => setConfirmSendOpen(false)}>Cancelar</Button>
-<<<<<<< HEAD
-            {items.some(i => i.status === "enviado" || i.status === "em_analise") ? (
-              <p className="text-sm text-amber-600 font-medium py-2">
-                Aguarde a diretoria aprovar/rejeitar os itens já enviados.
-              </p>
-            ) : (
-              <Button onClick={handleSendToDiretoria} disabled={isSendingAquisicao} className="gap-2">
-                {isSendingAquisicao ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                {isSendingAquisicao ? "Enviando..." : "Confirmar Envio"}
-              </Button>
-            )}
-=======
             <Button onClick={handleSendToDiretoria} disabled={isSendingAquisicao || selectedAquisicaoIds.size === 0} className="gap-2">
               {isSendingAquisicao ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {isSendingAquisicao ? "Enviando..." : "Confirmar Envio"}
             </Button>
->>>>>>> 0fd1792 (novas atualizações 9-26)
           </div>
         </DialogContent>
       </Dialog>
