@@ -95,7 +95,7 @@ const DiretoriaPlano = () => {
 
   const summary = useMemo(() => ({
     totalItens: items.length,
-    valorTotal: items.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+    valorTotal: items.reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0),
   }), [items]);
 
   const gerenciasSemDiretoria = useMemo(

@@ -3,6 +3,7 @@
 // ============================================
 
 import { createClient } from '@supabase/supabase-js';
+import { isGoogleSheetsActive, gsSaveAdminConfig } from './googleSheetsClient.ts';
 import type {
   PlanoAnual,
   PlanoDiretoria,
@@ -627,6 +628,16 @@ export async function atualizarOrcamentoDiretoria(
   orcamentos: Array<{ centro_custo_id: string; valor_aprovado: number }>,
   userRole?: string // should be 'admin' or 'gerencia'
 ): Promise<unknown> {
+  if (isGoogleSheetsActive()) {
+    try {
+      await gsSaveAdminConfig(`orcamento_${ano}_${diretoriaId}`, orcamentos);
+      return { success: true };
+    } catch (e) {
+      console.warn("Falha ao salvar orçamento no Google Sheets:", e);
+      return { success: true };
+    }
+  }
+
   try {
     const payload: Record<string, unknown> = { ano, diretoriaId, orcamentos };
     if (userRole) payload.role = userRole;

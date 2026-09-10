@@ -1,0 +1,118 @@
+<USER_REQUEST>
+quero implementar os dados do banco de dados do supabase para google planilhas
+
+todos dados os dados de create e insert do supabase migrar google planilhas 
+
+https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=0#gid=0
+
+
+completar o que tiver faltando 
+
+
+
+/**
+ * =========================================================================
+ * PLANO ANUAL 2027 - BACKEND GOOGLE APPS SCRIPT (CUSTO ZERO)
+ * =========================================================================
+ * Este script deve ser copiado e colado no editor de scripts do Google Planilhas:
+ * 1. Abra a sua Planilha Google
+ * 2. Clique em Extensões > Apps Script
+ * 3. Substitua todo o conteúdo pelo código deste arquivo
+ * 4. Clique em "Implantar" > "Nova Implantação"
+ * 5. Selecione o tipo "App da Web" (Web App)
+ *    - Executar como: "Eu" (seu e-mail)
+ *    - Quem pode acessar: "Qualquer pessoa" (Anyone)
+ * 6. Copie a URL gerada e cole no arquivo .env (VITE_GOOGLE_SCRIPT_URL)
+ * =========================================================================
+ */
+
+// ================= CONSTANTES E CONFIGURAÇÃO =================
+const SHEETS = {
+  DIRETORIAS: "diretorias",
+  GERENCIAS: "gerencias",
+  PERIODOS: "periodos",
+  CODIGOS_ACESSO: "codigos_acesso",
+  SOLICITACOES: "solicitacoes",
+  SERVICOS: "servicos",
+  SERVICOS_CATALOGO: "servicos_catalogo",
+  LOGS: "logs_atividades",
+  ADMIN_CONFIG: "admin_config"
+};
+
+// ==================== ROTEAMENTO HTTP (GET e POST) ====================
+
+function doGet(e) {
+  try {
+    const params = (e && e.parameter) || {};
+    const action = params.action || "ping";
+
+    if (action === "ping") {
+      return jsonResponse({ success: true, message: "Google Apps Script Backend PAC 2027 ativo!", timestamp: new Date().toISOString() });
+    }
+
+    if (action === "initSpreadsheet") {
+      const result = initSpreadsheet();
+      return jsonResponse({ success: true, result });
+    }
+
+    if (action === "getDiretorias") {
+   
+<truncated 25543 bytes>
+if (sCat.getLastRow() <= 0) {
+    const headers = ["id", "item", "tipo_contratacao", "objeto", "justificativa", "estimativa_valor", "grau_prioridade", "vinculacao", "dependencia_descricao", "contrato", "contratada", "diretoria_id", "gerencia_id", "created_at"];
+    sCat.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  // 8. LOGS
+  const sLog = getOrCreateSheet(SHEETS.LOGS);
+  if (sLog.getLastRow() <= 0) {
+    const headers = ["id", "matricula", "acao", "tabela_afetada", "registro_id", "detalhes", "created_at"];
+    sLog.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  // 9. ADMIN CONFIG
+  const sCfg = getOrCreateSheet(SHEETS.ADMIN_CONFIG);
+  if (sCfg.getLastRow() <= 0) {
+    const headers = ["id", "chave", "valor", "updated_at"];
+    sCfg.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  return { message: "Planilha estruturada e pré-populada com sucesso!" };
+}
+
+
+⚠️ REGRA FINAL — NÃO REGREDIR O SISTEMA
+
+Não alterar, remover, substituir, refatorar ou modificar funcionalidades que já estejam funcionando corretamente.
+
+A implementação deve ser incremental e isolada.
+
+Não modificar:
+
+fluxos existentes;
+regras de negócio existentes;
+telas não relacionadas;
+filtros;
+seleção de itens;
+envio;
+aprovação;
+devolução;
+CRUD;
+integrações;
+banco de dados não relacionado;
+componentes que não participam da nova funcionalidade.
+
+Somente modificar os pontos necessários para implementar/corrigir o sistema
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-09T19:17:29-03:00.
+
+The user's current state is as follows:
+Active Document: c:\Users\noell\Downloads\Projetos\plano-anual-2027-oficial\.env (LANGUAGE_UNSPECIFIED)
+Cursor is on line: 1
+Other open documents:
+- c:\Users\noell\Downloads\Projetos\plano-anual-2027-oficial\.env (LANGUAGE_UNSPECIFIED)
+No browser pages are currently open.
+Running terminal commands:
+- npm run dev (in c:\Users\noell\Downloads\Projetos\plano-anual-2027-oficial, running for 15m4s)
+</ADDITIONAL_METADATA>

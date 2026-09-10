@@ -65,13 +65,15 @@ import {
     deleteServicosBulk,
     updateServicosBulkData,
     getServicosCatalogo,
-    createSolicitacao
+    createSolicitacao,
+    deleteServicoCatalogo,
+    parseSafeNumber,
+    formatCurrency
   } from "@/lib/services";
   import { getBudgetOwnerDiretoriaId, getGerenciaBudget, getDiretoriaBudget, loadAdminBudgetConfig } from "@/lib/adminBudgetConfig";
   import { getPrioridadeBadgeVariant } from "@/lib/prioridade";
   import { useQuery, useQueryClient } from "@tanstack/react-query";
   import { useToast } from "@/hooks/use-toast";
-  import { supabase } from "@/lib/supabaseClient";
   import { useSortableTable } from "@/hooks/useSortableTable";
   import { SortableTableHead } from "@/components/ui/sortable-table-head";
   import { useGerenciaData } from "@/hooks/useGerenciaData";
@@ -193,11 +195,30 @@ import {
 
 
 
+  // Lookup map O(1) para evitar busca quadrática em catalogoData de 11.170 itens
+  const solicitacoesLookup = useMemo(() => {
+    const byItemId = new Map<string, any>();
+    const byCodigo = new Map<number, any>();
+    for (const s of (solicitacoes as any[])) {
+      if (s.item_id) {
+        byItemId.set(String(s.item_id).toLowerCase(), s);
+      }
+      if (s.codigo !== undefined && s.codigo !== null && s.codigo !== "") {
+        const numCod = Number(s.codigo);
+        if (!isNaN(numCod)) byCodigo.set(numCod, s);
+      }
+    }
+    return { byItemId, byCodigo };
+  }, [solicitacoes]);
+
   // Converter solicitações para o formato de PlanItem
   const items: PlanItem[] = useMemo(() => {
-    // Mesclar catálogo base com solicitações existentes
+    const { byItemId, byCodigo } = solicitacoesLookup;
+    // Mesclar catálogo base com solicitações existentes em O(N)
     return catalogoData.map((c: any) => {
-      const existente = solicitacoes.find((s: any) => s.item_id === c.id || Number(s.codigo) === Number(c.codigo));
+      const cIdStr = c.id ? String(c.id).toLowerCase() : "";
+      const cCodNum = c.codigo !== undefined && c.codigo !== null && c.codigo !== "" ? Number(c.codigo) : NaN;
+      const existente = (cIdStr ? byItemId.get(cIdStr) : undefined) || (!isNaN(cCodNum) ? byCodigo.get(cCodNum) : undefined);
       const s = existente || { ...c, qtd_estimada: 0, status: "rascunho" };
 
       const mappedCategory = materialDescriptions[String(c.codigo)];
@@ -221,9 +242,9 @@ import {
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
         prioridade: s.prioridade || "Baixa",
-        qtdEstimada: s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0),
+        qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
         unidade: s.unidade || c.unidade || "un",
-        valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (c.valor_unitario || 0),
+        valorUnitario: parseSafeNumber(s.valor_unitario !== undefined ? s.valor_unitario : (c.valor_unitario || 0), 0),
         observacao: s.observacao || "",
         status: (s.status as SolicitacaoStatus) || "rascunho",
         justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
@@ -233,27 +254,40 @@ import {
         isOrcamentoCompartilhado: !!diretoria && diretoriaOrcamentariaId !== diretoria.id,
       };
     });
-  }, [solicitacoes, catalogoData, materialDescriptions, gerenciaUpper, diretoria, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
+  }, [solicitacoesLookup, catalogoData, materialDescriptions, gerenciaUpper, diretoria, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb]);
 
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const searchLower = searchTerm.toLowerCase();
-      const descInitials = item.descricao.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
-      const codInitials = item.codigo.toString().split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
-      
-      const matchesSearch = searchTerm === "" || 
-        item.descricao.toLowerCase().includes(searchLower) || 
-        item.codigo.toString().includes(searchLower) ||
-        descInitials.includes(searchLower) ||
-        codInitials.includes(searchLower);
+    const trimmedSearch = searchTerm.trim().toLowerCase();
+    const hasSearch = trimmedSearch.length > 0;
 
-      const matchesCategoria = !categoria || categoria === "" || item.categoria === categoria;
-      const matchesPrioridade = prioridade === "todas" || item.prioridade === prioridade;
+    return items.filter((item) => {
       const isSentStatus = ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
-      const matchesZerado = !showOnlyZerados || item.qtdEstimada === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || (item.qtdEstimada > 0 && !isSentStatus);
-      const matchesSent = !showOnlySent || isSentStatus;
-      return matchesSearch && matchesCategoria && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
+
+      // Curto-circuito ultrarrápido: elimina 99%+ dos itens antes de qualquer processamento de texto
+      if (showOnlyComQuantidade && (item.qtdEstimada <= 0 || isSentStatus)) return false;
+      if (showOnlySent && !isSentStatus) return false;
+      if (showOnlyZerados && item.qtdEstimada !== 0) return false;
+      if (categoria && categoria !== "" && item.categoria !== categoria) return false;
+      if (prioridade !== "todas" && item.prioridade !== prioridade) return false;
+
+      // Busca textual SOMENTE se houver termo de busca digitado
+      if (hasSearch) {
+        const descLower = item.descricao.toLowerCase();
+        const codStr = item.codigo.toString();
+        // Verificação direta de substring (altíssima velocidade no motor V8)
+        if (descLower.includes(trimmedSearch) || codStr.includes(trimmedSearch)) {
+          return true;
+        }
+        // Fallback para iniciais apenas se includes direto falhar
+        const descInitials = item.descricao.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+        const codInitials = codStr.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
+        if (descInitials.includes(trimmedSearch) || codInitials.includes(trimmedSearch)) {
+          return true;
+        }
+        return false;
+      }
+
+      return true;
     });
   }, [items, searchTerm, categoria, prioridade, showOnlyZerados, showOnlyComQuantidade, showOnlySent]);
 
@@ -305,6 +339,15 @@ import {
   const orcamentoDiretoriaServicosExistentes = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as AdminBudgetConfig | null, diretoria.id, "servicos_existentes")
     : 0;
+
+  const orcamentoGeralGerencia = gerenciaAtual?.id
+    ? (orcamentoConfig as any)?.gerenciaBudgetsOrcamentoGeral?.[gerenciaAtual.id] || 0
+    : 0;
+  const orcamentoGeralDiretoria = diretoria?.id
+    ? (orcamentoConfig as any)?.diretoriaBudgetsOrcamentoGeral?.[diretoria.id] || 0
+    : 0;
+  const orcamentoGeralAtivo = orcamentoGeralGerencia > 0 ? orcamentoGeralGerencia : orcamentoGeralDiretoria;
+
   const isAprovado = (status?: SolicitacaoStatus) =>
     status === "aprovado" || status === "em_compra" || status === "concluido";
 
@@ -316,17 +359,17 @@ import {
           const matchCodigo = selectedAquisicaoIds.has(item.codigo as any) || selectedAquisicaoIds.has(String(item.codigo) as any);
           return (matchId || matchCodigo) && item.qtdEstimada > 0;
         })
-        .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
+        .reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0);
     }
     return items
       .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && isAprovado(item.status) && item.qtdEstimada > 0)
-      .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
+      .reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0);
   }, [items, diretoria?.id, selectedAquisicaoIds]);
 
   const summary = useMemo(
     () => ({
       totalItens: filteredItems.length,
-      valorTotal: filteredItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+      valorTotal: filteredItems.reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0),
     }),
     [filteredItems],
   );
@@ -338,7 +381,8 @@ import {
         .forEach((item) => {
           const siglaDestino = diretoria?.sigla || "N/D";
           const atual = grupos.get(siglaDestino) || { sigla: siglaDestino, total: 0, itens: 0 };
-          atual.total += item.qtdEstimada * item.valorUnitario;
+          const itemTotal = (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0);
+          atual.total += isNaN(itemTotal) ? 0 : itemTotal;
           atual.itens += 1;
           grupos.set(siglaDestino, atual);
         });
@@ -354,7 +398,8 @@ import {
         .forEach((item) => {
           const siglaDestino = diretoria?.sigla || "N/D";
           const atual = grupos.get(siglaDestino) || { sigla: siglaDestino, total: 0, itens: 0 };
-          atual.total += item.qtdEstimada * item.valorUnitario;
+          const itemTotal = (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0);
+          atual.total += isNaN(itemTotal) ? 0 : itemTotal;
           atual.itens += 1;
           grupos.set(siglaDestino, atual);
         });
@@ -947,7 +992,7 @@ import {
       const catalogoItem = servicosCatalogoData.find((c: any) => c.item === itemCode);
       if (catalogoItem?.id) {
         try {
-          await supabase.from("servicos_catalogo").delete().eq("id", catalogoItem.id);
+          await deleteServicoCatalogo(catalogoItem.id);
         } catch (catErr) {
           console.warn("Could not delete from servicos_catalogo:", catErr);
         }
@@ -1427,6 +1472,14 @@ import {
               </div>
               <p className="text-white/90 text-sm mb-2">{gerenciaNome}</p>
               <p className="text-white/80 text-lg">Selecione o tipo de solicitação</p>
+              {orcamentoGeralAtivo > 0 && (
+                <div className="mt-3 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 text-white text-sm font-medium">
+                  <span>{orcamentoGeralGerencia > 0 ? "Orçamento Geral da Gerência:" : "Orçamento Geral da Diretoria:"}</span>
+                  <span className="font-bold text-amber-300">
+                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(orcamentoGeralAtivo)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1586,39 +1639,49 @@ import {
       observacao?: string;
     };
 
-    const getContratadaFallback = (contrato: string | undefined | null) => {
-      if (!contrato) return null;
-      const found = (servicosCatalogoData as any[]).find(c => c.contrato === contrato && c.contratada);
-      return found ? found.contratada : null;
-    };
+    const contratadaMap = new Map<string, string>();
+    for (const c of (servicosCatalogoData as any[])) {
+      if (c.contrato && c.contratada) {
+        contratadaMap.set(String(c.contrato).trim().toLowerCase(), c.contratada);
+      }
+    }
 
-    const servicos: ServicoItem[] = (servicosData as any[]).map((s: any) => ({
-      id: s.id,
-      item: s.item,
-      tipoContratacao: s.tipoContratacao || s.tipo_contratacao || "",
-      unidadeDemandante: s.unidadeDemandante || s.unidade_demandante || "",
-      objeto: s.objeto || "",
-      justificativa: s.justificativa || "",
-      previsaoInicio: s.previsaoInicio || s.previsao_inicio,
-      estimativaValor: s.estimativaValor || s.estimativa_valor,
-      dotacaoOrcamentaria: s.dotacaoOrcamentaria || s.dotacao_orcamentaria,
-      grauPrioridade: s.grauPrioridade || s.grau_prioridade || "Baixo",
-      vinculacao: s.vinculacao || "Não",
-      dependenciaDescricao: s.dependenciaDescricao || s.dependencia_descricao,
-      gerencia: gerenciaUpper,
-      diretoriaSigla: siglaUpper,
-      status: s.status,
-      observacao: s.observacao,
-      contrato: s.contrato,
-      contratada: s.contratada || getContratadaFallback(s.contrato),
-    }));
+    const servicosByItem = new Map<any, ServicoItem>();
+    const servicos: ServicoItem[] = (servicosData as any[]).map((s: any) => {
+      const itemKey = s.item !== undefined && s.item !== null ? s.item : undefined;
+      const contratoKey = s.contrato ? String(s.contrato).trim().toLowerCase() : "";
+      const sItem: ServicoItem = {
+        id: s.id,
+        item: s.item,
+        tipoContratacao: s.tipoContratacao || s.tipo_contratacao || "",
+        unidadeDemandante: s.unidadeDemandante || s.unidade_demandante || "",
+        objeto: s.objeto || "",
+        justificativa: s.justificativa || "",
+        previsaoInicio: s.previsaoInicio || s.previsao_inicio,
+        estimativaValor: s.estimativaValor || s.estimativa_valor,
+        dotacaoOrcamentaria: s.dotacaoOrcamentaria || s.dotacao_orcamentaria,
+        grauPrioridade: s.grauPrioridade || s.grau_prioridade || "Baixo",
+        vinculacao: s.vinculacao || "Não",
+        dependenciaDescricao: s.dependenciaDescricao || s.dependencia_descricao,
+        gerencia: gerenciaUpper,
+        diretoriaSigla: siglaUpper,
+        status: s.status,
+        observacao: s.observacao,
+        contrato: s.contrato,
+        contratada: s.contratada || (contratoKey ? contratadaMap.get(contratoKey) : null),
+      };
+      if (itemKey !== undefined) {
+        servicosByItem.set(itemKey, sItem);
+      }
+      return sItem;
+    });
 
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho" && s.status !== "rejeitado";
     const catalogoItemsSet = new Set((servicosCatalogoData as any[]).map(c => c.item));
     
     // Serviços Existentes vêm do catálogo (Painel Administrativo)
     const servicosExistentes: ServicoItem[] = (servicosCatalogoData as any[]).map((catalogoItem) => {
-      const servicoDb = servicos.find(s => s.item === catalogoItem.item);
+      const servicoDb = servicosByItem.get(catalogoItem.item);
       if (servicoDb) {
         return servicoDb;
       }
@@ -1649,26 +1712,44 @@ import {
     const servicosNovos = servicos.filter((s) => !catalogoItemsSet.has(s.item));
     const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
     
-    const filteredServicos = displayedServicos.filter((item) => {
-      const searchLower = searchTerm.toLowerCase();
-      const objInitials = item.objeto.split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
-      const codInitials = item.item.toString().split(/\s+/).map(w => w[0]?.toLowerCase() || '').join('');
-      
-      const matchesSearch = searchTerm === "" || 
-        item.objeto.toLowerCase().includes(searchLower) || 
-        item.item.toString().includes(searchLower) ||
-        (item.contrato && item.contrato.toLowerCase().includes(searchLower)) ||
-        (item.contratada && item.contratada.toLowerCase().includes(searchLower)) ||
-        objInitials.includes(searchLower) ||
-        codInitials.includes(searchLower);
+    const trimmedServicoSearch = searchTerm.trim().toLowerCase();
+    const hasServicoSearch = trimmedServicoSearch.length > 0;
 
-      const matchesPrioridade = prioridade === "todas" || item.grauPrioridade === prioridade;
+    const filteredServicos = displayedServicos.filter((item) => {
       const val = item.estimativaValor || item.dotacaoOrcamentaria || 0;
       const isServicoSentStatus = ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
-      const matchesZerado = !showOnlyZerados || val === 0;
-      const matchesComQuantidade = !showOnlyComQuantidade || (val > 0 && !isServicoSentStatus);
-      const matchesSent = !showOnlySent || isServicoSentStatus;
-      return matchesSearch && matchesPrioridade && matchesZerado && matchesComQuantidade && matchesSent;
+
+      // Curto-circuito ultrarrápido numérico e booleano
+      if (showOnlyComQuantidade && (val <= 0 || isServicoSentStatus)) return false;
+      if (showOnlySent && !isServicoSentStatus) return false;
+      if (showOnlyZerados && val !== 0) return false;
+      if (prioridade !== "todas" && item.grauPrioridade !== prioridade) return false;
+
+      // Busca textual SOMENTE se houver termo digitado
+      if (hasServicoSearch) {
+        const objLower = (item.objeto || "").toLowerCase();
+        const itemStr = item.item !== undefined && item.item !== null ? item.item.toString() : "";
+        const contratoLower = (item.contrato || "").toLowerCase();
+        const contratadaLower = (item.contratada || "").toLowerCase();
+
+        if (
+          objLower.includes(trimmedServicoSearch) ||
+          itemStr.includes(trimmedServicoSearch) ||
+          contratoLower.includes(trimmedServicoSearch) ||
+          contratadaLower.includes(trimmedServicoSearch)
+        ) {
+          return true;
+        }
+
+        const objInitials = objLower.split(/\s+/).map(w => w[0] || '').join('');
+        const codInitials = itemStr.split(/\s+/).map(w => w[0] || '').join('');
+        if (objInitials.includes(trimmedServicoSearch) || codInitials.includes(trimmedServicoSearch)) {
+          return true;
+        }
+        return false;
+      }
+
+      return true;
     });
 
     const servicosSummary = {
@@ -2042,6 +2123,7 @@ import {
             titulo={`Orçamento da Diretoria ${diretoria?.sigla} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
             orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
             gasto={selectedOption === "servicos_existentes" ? gastoServicosExistentes : gastoServicosNovos}
+            orcamentoGeral={orcamentoGeralAtivo}
           />
 
           <div className="px-6 pb-2 pt-4 flex flex-wrap justify-between items-center gap-2">
@@ -2583,6 +2665,7 @@ import {
         titulo={`Orçamento da Diretoria ${diretoria?.sigla} (aquisição)`}
         orcamento={orcamentoDiretoriaAquisicao}
         gasto={gastoAquisicaoGerencia}
+        orcamentoGeral={orcamentoGeralAtivo}
       />
 
       {resumoOrcamentoPorDiretoria.length > 0 && (
@@ -2906,10 +2989,10 @@ import {
                           )}
                         </td>
                         <td className="p-3 text-right text-sm">
-                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.valorUnitario)}
+                          {formatCurrency(item.valorUnitario)}
                         </td>
                         <td className="p-3 text-right text-sm font-semibold text-primary">
-                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.qtdEstimada * item.valorUnitario)}
+                          {formatCurrency((Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0))}
                         </td>
                         <td className="p-3 text-center">
                           {isPriorityDisabled ? (

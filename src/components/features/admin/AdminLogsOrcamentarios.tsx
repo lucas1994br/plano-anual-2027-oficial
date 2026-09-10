@@ -54,6 +54,17 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+function formatSafeDate(dateVal: any, formatPattern = "dd/MM/yyyy HH:mm:ss", options?: any): string {
+  if (!dateVal) return "-";
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return "-";
+    return format(d, formatPattern, options);
+  } catch {
+    return "-";
+  }
+}
+
 type LogOrcamentario = {
   id: string;
   acao: string;
@@ -189,7 +200,7 @@ export function AdminLogsOrcamentarios() {
   const exportToExcel = () => {
     try {
       const dataToExport = filteredLogs.map((log: LogOrcamentario) => ({
-        "Data/Hora": format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
+        "Data/Hora": formatSafeDate(log.created_at, "dd/MM/yyyy HH:mm:ss"),
         "Centro de Custo": log.centro_custo ? `${log.centro_custo.codigo} - ${log.centro_custo.nome}` : "-",
         "Ação": getActionFriendlyName(log.acao),
         "Valor (R$)": log.valor,
@@ -216,7 +227,7 @@ export function AdminLogsOrcamentarios() {
       const tableColumn = ["Data/Hora", "Centro de Custo", "Ação", "Referência", "Valor (R$)"];
       const tableRows = filteredLogs.map((log: LogOrcamentario) => {
         return [
-          format(new Date(log.created_at), "dd/MM/yyyy"),
+          formatSafeDate(log.created_at, "dd/MM/yyyy"),
           log.centro_custo ? log.centro_custo.codigo : "-",
           getActionFriendlyName(log.acao),
           getRefTypeFriendly(log.referencia_tipo),
@@ -329,7 +340,7 @@ export function AdminLogsOrcamentarios() {
                     />
                   </TableCell>
                   <TableCell className="font-medium whitespace-nowrap">
-                    {format(new Date(log.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                    {formatSafeDate(log.created_at, "dd/MM/yyyy HH:mm", { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
@@ -429,7 +440,7 @@ export function AdminLogsOrcamentarios() {
                 <div>
                   <p className="text-sm font-semibold">Data da Operação</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {format(new Date(selectedLog.created_at), "dd/MM/yyyy HH:mm:ss")}
+                    {formatSafeDate(selectedLog.created_at, "dd/MM/yyyy HH:mm:ss")}
                   </p>
                 </div>
                 <div>

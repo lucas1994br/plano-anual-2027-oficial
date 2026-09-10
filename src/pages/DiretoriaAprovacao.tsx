@@ -10,7 +10,7 @@ import { AccessCodeScreen } from "@/components/ui/AccessCodeScreen";
 import { PlanItem, SolicitacaoStatus, ServicoItem, GrauPrioridade, Diretoria, Gerencia } from "@/types/plan";
 import { useMaterialDescriptions } from "@/hooks/useMaterialDescriptions";
 import { useActivityRestrictions } from "@/hooks/useActivityRestrictions";
-import getItensCatalogo, { getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk, registrarLogAtividade, transferirSolicitacoesParaGerenciaBulk, transferirServicosParaGerenciaBulk } from "@/lib/services";
+import getItensCatalogo, { parseSafeNumber, getAdminMiniErpConfigDb, getCategoryBudgetOwnerRules, getDiretorias, getSolicitacoesByDiretoria, getPeriodosAtivos, getGerenciasByDiretoria, getTodasGerencias, updateSolicitacaoStatus, updateSolicitacaoStatusBulk, updateSolicitacoesBulkData, updateSolicitacao, deleteSolicitacao, deleteSolicitacoesBulk, createSolicitacao, getServicosByDiretoria, getServicosCatalogo, updateServico, deleteServico, deleteServicosBulk, updateServicosBulkData, createServico, updateServicoStatusBulk, registrarLogAtividade, transferirSolicitacoesParaGerenciaBulk, transferirServicosParaGerenciaBulk } from "@/lib/services";
 import { BulkEditAquisicaoDialog, BulkEditServicosDialog } from "@/components/common/BulkActionDialogs";
 import { ServicoEditDialog, AquisicaoEditDialog } from "@/components/common/ItemEditDialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -212,7 +212,10 @@ const DiretoriaAprovacao = () => {
   const globalGerenciaMap = useMemo(() => {
     const map: Record<string, { sigla: string, diretoria_id: string }> = {};
     (todasGerenciasData as any[]).forEach((g: any) => {
-      map[g.id] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+      if (g.id) {
+        map[g.id] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+        map[String(g.id).toLowerCase()] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+      }
     });
     return map;
   }, [todasGerenciasData]);
@@ -229,7 +232,13 @@ const DiretoriaAprovacao = () => {
   const gerenciaMap = useMemo(() => {
     const map: Record<string, string> = {};
     (todasGerenciasData as any[]).forEach((g: any) => {
-      map[g.id] = g.sigla;
+      if (g.id && g.sigla) {
+        map[g.id] = g.sigla;
+        map[String(g.id).toLowerCase()] = g.sigla;
+      }
+      if (g.sigla) {
+        map[g.sigla] = g.sigla;
+      }
     });
     return map;
   }, [todasGerenciasData]);
@@ -377,14 +386,16 @@ const DiretoriaAprovacao = () => {
         ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
       )
       .map((s: any) => {
-        const codigo = Number(s.codigo || s.item?.codigo || 0);
-        const descricao = s.descricao || s.item?.descricao || "";
-        const mappedCategory = materialDescriptions[String(codigo)];
-        const categoriaItem = mappedCategory
-          ? mappedCategory
-          : (typeof s.categoria === "string" && s.categoria.trim().length > 0)
-            ? s.categoria
-            : (s.item?.categoria || "diversos");
+        const rawCode = s.codigo ?? s.item?.codigo ?? 0;
+        const codigo = Number(rawCode) || 0;
+        const descFromMap = codigo > 0 ? (materialDescriptions[String(codigo)] || "") : "";
+        const rawDesc = s.descricao || s.item?.descricao || "";
+        const descricao = (rawDesc && rawDesc.trim().toLowerCase() !== "diversos")
+          ? rawDesc
+          : (descFromMap || rawDesc || "Material não especificado");
+        const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos")
+          ? s.categoria
+          : (s.item?.categoria || "MATERIAIS DE CUSTEIO");
         const trueRequesterDiretoriaId = globalGerenciaMap[s.gerencia_id]?.diretoria_id || s.diretoria_id;
         
         const diretoriaOrcamentariaIdRaw = getBudgetOwnerDiretoriaId(
@@ -405,11 +416,11 @@ const DiretoriaAprovacao = () => {
           codigo,
           descricao,
           categoria: categoriaItem,
-          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || s.gerencia || "N/A",
+          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || gerenciaMap[s.gerencia_id] || gerenciaMap[s.gerencia] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || "N/A",
           prioridade: s.prioridade || "Média",
-          qtdEstimada: Number(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0)),
+          qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
           unidade: s.unidade || s.item?.unidade || "un",
-          valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0),
+          valorUnitario: parseSafeNumber(s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0), 0),
           observacao: s.observacao || "",
           status: s.status as SolicitacaoStatus,
           justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
@@ -420,7 +431,7 @@ const DiretoriaAprovacao = () => {
           gerencia_id: s.gerencia_id,
         };
       });
-  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, gerenciaMap]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {
@@ -437,18 +448,23 @@ const DiretoriaAprovacao = () => {
     const latestByCodigo = new Map<number, PlanItem>();
 
     solicitacoesRascunho.forEach((s: any) => {
-      const codigo = Number(s.codigo || s.item?.codigo || 0);
-      const descricao = s.descricao || s.item?.descricao || "";
+      const rawCode = s.codigo ?? s.item?.codigo ?? 0;
+      const codigo = Number(rawCode) || 0;
+      const descFromMap = codigo > 0 ? (materialDescriptions[String(codigo)] || "") : "";
+      const rawDesc = s.descricao || s.item?.descricao || "";
+      const descricao = (rawDesc && rawDesc.trim().toLowerCase() !== "diversos")
+        ? rawDesc
+        : (descFromMap || rawDesc || "Material não especificado");
       latestByCodigo.set(codigo, {
         id: s.id,
         codigo,
         descricao,
-        categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0) ? s.categoria : (s.item?.categoria || "diversos"),
-        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || s.gerencia || "N/A",
+        categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos") ? s.categoria : (s.item?.categoria || "MATERIAIS DE CUSTEIO"),
+        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || gerenciaMap[s.gerencia_id] || gerenciaMap[s.gerencia] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || "N/A",
         prioridade: s.prioridade || "Média",
-        qtdEstimada: Number(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0)),
+        qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
         unidade: s.unidade || s.item?.unidade || "un",
-        valorUnitario: s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0),
+        valorUnitario: parseSafeNumber(s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0), 0),
         observacao: s.observacao || "",
         status: s.status as SolicitacaoStatus,
         justificativaRejeicao: "",
@@ -457,10 +473,12 @@ const DiretoriaAprovacao = () => {
     });
 
     return Array.from(latestByCodigo.values());
-  }, [solicitacoes, diretoria, globalGerenciaMap]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, materialDescriptions]);
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+  const formatCurrency = (value: any) => {
+    const num = parseSafeNumber(value, 0);
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num);
+  };
 
   const gerencias = useMemo(() => {
     const unique = [...new Set(items.map((i) => i.gerencia))].filter(g => g !== "N/A");
@@ -469,12 +487,12 @@ const DiretoriaAprovacao = () => {
 
   const catalogItems: PlanItem[] = useMemo(() => {
     return catalogoData.map((item: any) => ({
-      codigo: Number(item.codigo),
+      codigo: Number(item.codigo) || 0,
       descricao: item.descricao,
-      categoria: item.categoria || "diversos",
+      categoria: item.categoria || "MATERIAIS DE CUSTEIO",
       unidade: item.unidade || "un",
       qtdEstimada: 0,
-      valorUnitario: item.valor_unitario || 0,
+      valorUnitario: parseSafeNumber(item.valor_unitario, 0),
       prioridade: "Média",
       gerencia: "",
     }));
@@ -678,6 +696,11 @@ const DiretoriaAprovacao = () => {
   const orcamentoDiretoriaServicosExistentes = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "servicos_existentes")
     : 0;
+
+  const orcamentoGeralDiretoria = diretoria?.id
+    ? (orcamentoConfig as any)?.diretoriaBudgetsOrcamentoGeral?.[diretoria.id] || 0
+    : 0;
+
   const isAprovado = (status?: SolicitacaoStatus) =>
     status === "aprovado" || status === "em_compra" || status === "concluido";
 
@@ -755,10 +778,15 @@ const DiretoriaAprovacao = () => {
 
     const servicosDaDiretoria = servicosData
       .filter((s: ServicoItem) => s.unidadeDemandante === siglaUpper)
-      .map((s: ServicoItem) => ({
-        ...s,
-        contratada: s.contratada || getContratadaFallback(s.contrato),
-      }));
+      .map((s: ServicoItem) => {
+        const rawG = s.gerencia || (s as any).gerencia_id;
+        const resolvedGer = gerenciaMap[rawG] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) || siglaUpper;
+        return {
+          ...s,
+          gerencia: resolvedGer,
+          contratada: s.contratada || getContratadaFallback(s.contrato),
+        };
+      });
     
     if (selectedOption === "servicos_existentes") {
       return (servicosCatalogoData as any[]).map((catalogoItem) => {
@@ -791,7 +819,7 @@ const DiretoriaAprovacao = () => {
       return servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(s.item));
     }
     return [];
-  }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet]);
+  }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet, gerenciaMap]);
 
   const servicosProprios = useMemo(() => {
     let list = servicosPropriosBase;
@@ -848,11 +876,16 @@ const DiretoriaAprovacao = () => {
 
     return servicosData
       .filter((s: ServicoItem) => s.status !== "rascunho")
-      .map((s: ServicoItem) => ({
-        ...s,
-        contratada: s.contratada || getContratadaFallback(s.contrato),
-      }));
-  }, [servicosData, servicosCatalogoData]);
+      .map((s: ServicoItem) => {
+        const rawG = s.gerencia || (s as any).gerencia_id;
+        const resolvedGer = gerenciaMap[rawG] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) || s.gerencia;
+        return {
+          ...s,
+          gerencia: resolvedGer,
+          contratada: s.contratada || getContratadaFallback(s.contrato),
+        };
+      });
+  }, [servicosData, servicosCatalogoData, gerenciaMap]);
 
   const filteredServicos = useMemo(() => {
     const list = selectedGerencia === "todas"
@@ -916,7 +949,8 @@ const DiretoriaAprovacao = () => {
     items.forEach((item) => {
       const siglaOrigem = item.diretoriaSigla || siglaUpper;
       const atual = grupos.get(siglaOrigem) || { sigla: siglaOrigem, total: 0, itens: 0 };
-      atual.total += item.qtdEstimada * item.valorUnitario;
+      const itemTotal = (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0);
+      atual.total += isNaN(itemTotal) ? 0 : itemTotal;
       atual.itens += 1;
       grupos.set(siglaOrigem, atual);
     });
@@ -1322,8 +1356,8 @@ const DiretoriaAprovacao = () => {
           item.gerencia,
           item.prioridade,
           item.qtdEstimada,
-          `R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-          `R$ ${(item.qtdEstimada * item.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+          formatCurrency(item.valorUnitario),
+          formatCurrency((Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0))
         ]);
 
         doc.autoTable({
@@ -2420,6 +2454,14 @@ const DiretoriaAprovacao = () => {
               </div>
               <h1 className="text-2xl font-bold text-white mb-2">{diretoria.nome}</h1>
               <p className="text-white/80 text-lg">Selecione o tipo de solicitação</p>
+              {orcamentoGeralDiretoria > 0 && (
+                <div className="mt-3 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 text-white text-sm font-medium">
+                  <span>Orçamento Geral da Diretoria:</span>
+                  <span className="font-bold text-amber-300">
+                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(orcamentoGeralDiretoria)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2695,7 +2737,7 @@ const DiretoriaAprovacao = () => {
                       </>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm">{servico.gerencia}</td>
+                  <td className="px-4 py-3 text-sm font-medium">{gerenciaMap[servico.gerencia] || servico.gerencia}</td>
                   <td className="px-4 py-3 text-sm text-center font-mono">
                     {isServicoReadOnly(servico) ? (
                       new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(servico.estimativaValor || 0)
@@ -2881,6 +2923,7 @@ const DiretoriaAprovacao = () => {
               titulo={`Orçamento da Diretoria ${siglaUpper} (${selectedOption === "servicos_existentes" ? "serviços existentes" : "novos serviços"})`}
               orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
               gasto={gastoServicosDiretoria}
+              orcamentoGeral={orcamentoGeralDiretoria}
             />
 
             {/* Seus Serviços - adicionados diretamente pela diretoria */}
@@ -3645,6 +3688,7 @@ const DiretoriaAprovacao = () => {
         titulo={`Orçamento da Diretoria ${siglaUpper} (aquisição)`}
         orcamento={orcamentoDiretoriaAquisicao}
         gasto={gastoAquisicaoDiretoria}
+        orcamentoGeral={orcamentoGeralDiretoria}
       />
 
       {/* Seus Itens - adicionados diretamente pela diretoria */}
@@ -4198,7 +4242,7 @@ const DiretoriaAprovacao = () => {
                           <p className="font-medium line-clamp-2">{item.descricao}</p>
                           <p className="text-xs text-muted-foreground">{item.categoria}</p>
                         </td>
-                        <td className="p-3 text-sm">{item.gerencia}</td>
+                        <td className="p-3 text-sm font-medium">{gerenciaMap[item.gerencia] || item.gerencia}</td>
                         <td className="p-3">
                           <Badge variant={getStatusBadgeVariant(item.status || "rascunho") as any}>
                             {getStatusLabel(item.status || "rascunho")}
@@ -4242,10 +4286,10 @@ const DiretoriaAprovacao = () => {
                         </td>
                         <td className="p-3 text-sm">{item.unidade}</td>
                         <td className="p-3 text-right text-sm">
-                          R$ {item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          {formatCurrency(item.valorUnitario)}
                         </td>
                         <td className="p-3 text-right text-sm font-medium">
-                          R$ {(item.qtdEstimada * item.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          {formatCurrency((Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0))}
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">

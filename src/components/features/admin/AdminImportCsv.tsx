@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
-import { getPeriodosAtivos } from "@/lib/services";
+import { getPeriodosAtivos, getAllGerencias, getDiretorias } from "@/lib/services";
+import { isGoogleSheetsActive, gsBulkInsert, GOOGLE_SPREADSHEET_URL } from "@/lib/googleSheetsClient";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -39,19 +40,12 @@ export function AdminImportCsv() {
           setActivePeriodId(periodos[0].id as string);
         }
 
-        const { data: gerencias } = await supabase
-          .from("gerencias")
-          .select("id, sigla, diretoria_id")
-          .eq("ativa", true);
-          
+        const gerencias = await getAllGerencias();
         if (gerencias) {
           setGerenciasList(gerencias as any[]);
         }
 
-        const { data: diretorias } = await supabase
-          .from("diretorias")
-          .select("id, sigla");
-          
+        const diretorias = await getDiretorias();
         if (diretorias) {
           const map: Record<string, string> = {};
           diretorias.forEach((d: any) => {
@@ -242,8 +236,12 @@ export function AdminImportCsv() {
           valor_unitario: row.valor_unitario
         }));
 
-        const { error } = await supabase.from("itens_catalogo").insert(payload);
-        if (error) throw error;
+        if (isGoogleSheetsActive()) {
+          await gsBulkInsert("itens_catalogo", payload);
+        } else {
+          const { error } = await supabase.from("itens_catalogo").insert(payload);
+          if (error) throw error;
+        }
       } else {
         const catalogoPayload = data.rows.map(row => ({
           item: row.item,
@@ -261,8 +259,12 @@ export function AdminImportCsv() {
           ativo: row._ativo
         }));
 
-        const { error: catalogoError } = await supabase.from("servicos_catalogo").insert(catalogoPayload);
-        if (catalogoError) throw catalogoError;
+        if (isGoogleSheetsActive()) {
+          await gsBulkInsert("servicos_catalogo", catalogoPayload);
+        } else {
+          const { error: catalogoError } = await supabase.from("servicos_catalogo").insert(catalogoPayload);
+          if (catalogoError) throw catalogoError;
+        }
 
         const servicosPayload: any[] = [];
         data.rows.forEach(row => {
@@ -290,10 +292,17 @@ export function AdminImportCsv() {
           });
         });
 
-        for (let i = 0; i < servicosPayload.length; i += 500) {
-          const chunk = servicosPayload.slice(i, i + 500);
-          const { error: servicosError } = await supabase.from("servicos").insert(chunk);
-          if (servicosError) throw servicosError;
+        if (isGoogleSheetsActive()) {
+          for (let i = 0; i < servicosPayload.length; i += 500) {
+            const chunk = servicosPayload.slice(i, i + 500);
+            await gsBulkInsert("servicos", chunk);
+          }
+        } else {
+          for (let i = 0; i < servicosPayload.length; i += 500) {
+            const chunk = servicosPayload.slice(i, i + 500);
+            const { error: servicosError } = await supabase.from("servicos").insert(chunk);
+            if (servicosError) throw servicosError;
+          }
         }
       }
       
@@ -333,14 +342,26 @@ export function AdminImportCsv() {
 
   return (
     <Card className="shadow-sm border border-border/50">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileSpreadsheet className="h-5 w-5 text-primary" />
-          Importação de Dados
-        </CardTitle>
-        <CardDescription>
-          Faça o upload de um arquivo CSV ou Excel para incluir Aquisições ou Serviços em lote.
-        </CardDescription>
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-primary" />
+            Importação de Dados
+          </CardTitle>
+          <CardDescription>
+            Faça o upload de um arquivo CSV ou Excel para incluir Aquisições ou Serviços em lote.
+          </CardDescription>
+        </div>
+        <a
+          href={GOOGLE_SPREADSHEET_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors w-fit self-start sm:self-auto"
+          title="Abrir Planilha Google Oficial (PAC 2027)"
+        >
+          <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+          <span>Abrir Planilha Google Oficial</span>
+        </a>
       </CardHeader>
       
       <CardContent className="space-y-6">

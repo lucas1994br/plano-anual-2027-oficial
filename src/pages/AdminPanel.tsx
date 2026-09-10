@@ -8,7 +8,8 @@ const DIRETORIA_GERENCIAS: Record<string, string[]> = {
   "DO": ["ODCD", "OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB", "OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"],
   "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
 };
-import { ArrowLeft, Calendar, Save, Shield, Users, Clock, RefreshCw, Plus } from "lucide-react";
+import { ArrowLeft, Calendar, Save, Shield, Users, Clock, RefreshCw, Plus, FileSpreadsheet, ExternalLink } from "lucide-react";
+import { GOOGLE_SPREADSHEET_URL } from "@/lib/googleSheetsClient.ts";
 import { PageBreadcrumb } from "../components/layout/PageBreadcrumb";
 import { Button } from "../components/ui/button.tsx";
 import { Badge } from "../components/ui/badge.tsx";
@@ -217,14 +218,27 @@ const AdminPanel = () => {
         />
 
         <div className="bg-gradient-to-r from-gray-800 to-gray-950 px-6 py-6">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-white/20 p-3 rounded-lg">
-              <Shield className="h-8 w-8 text-white" />
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="bg-white/20 p-3 rounded-lg">
+                <Shield className="h-8 w-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white">Painel Administrativo</h1>
+                <p className="text-white/80 text-sm">Controle de períodos, acessos e configurações do PAC 2027</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white">Painel Administrativo</h1>
-              <p className="text-white/80 text-sm">Controle de períodos, acessos e configurações do PAC 2027</p>
-            </div>
+            <a
+              href={GOOGLE_SPREADSHEET_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-medium text-emerald-100 bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/40 rounded-lg transition-colors shadow-sm"
+              title="Abrir Planilha Google Oficial (PAC 2027)"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-400" />
+              <span>Planilha Google Oficial</span>
+              <ExternalLink className="h-3.5 w-3.5 text-emerald-300 opacity-70" />
+            </a>
           </div>
         </div>
 
@@ -345,8 +359,17 @@ const AdminPanel = () => {
                               <p className="font-semibold text-lg text-foreground">{periodoAtivo.nome}</p>
                               <p className="text-sm text-muted-foreground mt-2">
                                 <Clock className="h-4 w-4 inline mr-2" />
-                                {format(new Date(periodoAtivo.inicio + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })} até{" "}
-                                {format(new Date(periodoAtivo.fim + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                                {(() => {
+                                  try {
+                                    const d1 = new Date((periodoAtivo.inicio || "").split("T")[0] + "T12:00:00");
+                                    const d2 = new Date((periodoAtivo.fim || "").split("T")[0] + "T12:00:00");
+                                    const s1 = isNaN(d1.getTime()) ? (periodoAtivo.inicio || "-") : format(d1, "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
+                                    const s2 = isNaN(d2.getTime()) ? (periodoAtivo.fim || "-") : format(d2, "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
+                                    return `${s1} até ${s2}`;
+                                  } catch {
+                                    return `${periodoAtivo.inicio || "-"} até ${periodoAtivo.fim || "-"}`;
+                                  }
+                                })()}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">

@@ -14,11 +14,35 @@ export default defineConfig(({ mode }) => ({
     },
   },
   build: {
-    chunkSizeWarningLimit: 4000,
+    chunkSizeWarningLimit: 2000,
     rollupOptions: {
       onwarn(warning, warn) {
         if (warning.code === "INEFFECTIVE_DYNAMIC_IMPORT") return;
         warn(warning);
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("jspdf") || id.includes("jspdf-autotable")) {
+              return "vendor-pdf";
+            }
+            if (id.includes("xlsx") || id.includes("papaparse")) {
+              return "vendor-excel";
+            }
+            if (id.includes("recharts")) {
+              return "vendor-charts";
+            }
+            if (id.includes("lucide-react")) {
+              return "vendor-icons";
+            }
+            if (id.includes("react-router-dom") || id.includes("react-dom") || id.includes("react/")) {
+              return "vendor-react";
+            }
+            if (id.includes("@tanstack/react-query")) {
+              return "vendor-query";
+            }
+          }
+        },
       },
     },
   },

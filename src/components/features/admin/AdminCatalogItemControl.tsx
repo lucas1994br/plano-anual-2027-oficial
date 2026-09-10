@@ -39,7 +39,8 @@ import { CATEGORIAS_ITEM_PREDEFINIDAS, UNIDADES_ITEM_PREDEFINIDAS } from "@/lib/
 import { 
   createItemCatalogoAndDistribuir,
   updateItemCatalogoAdmin,
-  deleteItemCatalogoAdmin 
+  deleteItemCatalogoAdmin,
+  deleteItensCatalogoBulkAdmin
 } from "@/lib/services.ts";
 import getItensCatalogo from "@/lib/services.ts";
 
@@ -52,6 +53,8 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination.tsx";
+import { SortableTableHead } from "@/components/ui/sortable-table-head.tsx";
+import { useSortableTable } from "@/hooks/useSortableTable.ts";
 
 // ==================== TIPOS ====================
 type ItemCatalogo = {
@@ -127,13 +130,15 @@ export function AdminCatalogItemControl() {
     );
   }, [itens, searchTerm]);
 
+  const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredItens as ItemCatalogo[]);
+
   const paginationData = useMemo(() => {
-    const totalPages = Math.ceil(filteredItens.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIdx = startIdx + ITEMS_PER_PAGE;
-    const paginatedItems = (filteredItens as ItemCatalogo[]).slice(startIdx, endIdx);
-    return { totalPages, currentPage, paginatedItems, totalFiltered: filteredItens.length };
-  }, [filteredItens, currentPage]);
+    const paginatedItems = (sortedItems as ItemCatalogo[]).slice(startIdx, endIdx);
+    return { totalPages, currentPage, paginatedItems, totalFiltered: sortedItems.length };
+  }, [sortedItems, currentPage]);
 
   const summary = useMemo(() => {
     const totalItens = itens.length;
@@ -263,7 +268,7 @@ export function AdminCatalogItemControl() {
 
     setIsDeletingBulk(true);
     try {
-      await Promise.all(selectedIds.map(id => deleteItemCatalogoAdmin(id)));
+      await deleteItensCatalogoBulkAdmin(selectedIds);
       setSelectedIds([]);
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
@@ -495,11 +500,11 @@ export function AdminCatalogItemControl() {
                       aria-label="Selecionar todos os itens da página"
                     />
                   </TableHead>
-                  <TableHead className="w-24">Código</TableHead>
-                  <TableHead>Descrição</TableHead>
-                  <TableHead className="w-48">Categoria</TableHead>
-                  <TableHead className="w-32">Unidade</TableHead>
-                  <TableHead className="w-32 text-right">Valor Unitário</TableHead>
+                  <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>Código</SortableTableHead>
+                  <SortableTableHead className="cursor-pointer hover:text-slate-900" field="descricao" sortConfig={sortConfig} onRequestSort={requestSort}>Descrição</SortableTableHead>
+                  <SortableTableHead className="w-48 cursor-pointer hover:text-slate-900" field="categoria" sortConfig={sortConfig} onRequestSort={requestSort}>Categoria</SortableTableHead>
+                  <SortableTableHead className="w-32 cursor-pointer hover:text-slate-900" field="unidade" sortConfig={sortConfig} onRequestSort={requestSort}>Unidade</SortableTableHead>
+                  <SortableTableHead className="w-32 text-right cursor-pointer hover:text-slate-900" field="valor_unitario" sortConfig={sortConfig} onRequestSort={requestSort}>Valor Unitário</SortableTableHead>
                   <TableHead className="w-20 text-center">Ações</TableHead>
                 </TableRow>
               </TableHeader>

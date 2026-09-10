@@ -118,8 +118,18 @@ const ComprasPanel = () => {
 
   const queryClient = useQueryClient();
   const diretoriasById = useMemo(() => {
-    const entries = diretorias.map((dir: any) => [dir.id, dir.sigla]);
-    return new Map<string, string>(entries as any);
+    const map = new Map<string, string>();
+    diretorias.forEach((dir: any) => {
+      if (dir.id && dir.sigla) {
+        map.set(String(dir.id), dir.sigla);
+        map.set(String(dir.id).toLowerCase(), dir.sigla);
+      }
+      if (dir.sigla) {
+        map.set(String(dir.sigla), dir.sigla);
+        map.set(String(dir.sigla).toLowerCase(), dir.sigla);
+      }
+    });
+    return map;
   }, [diretorias]);
 
   const servicosCatalogoSet = useMemo(() => {
@@ -132,42 +142,50 @@ const ComprasPanel = () => {
     return found ? found.contratada : null;
   };
 
-  const allApprovedItems: PlanItem[] = useMemo(() => solicitacoesCompras.map((s: any) => ({
-    id: s.id,
-    codigo: s.codigo,
-    descricao: s.descricao,
-    categoria: s.categoria || "diversos",
-    unidade: s.unidade || "un",
-    qtdEstimada: s.qtd_estimada || 0,
-    valorUnitario: s.valor_unitario || 0,
-    valorTotal: (s.qtd_estimada || 0) * (s.valor_unitario || 0),
-    prioridade: s.prioridade || "Média",
-    gerencia: s.gerencias?.sigla || "N/A",
-    diretoriaSigla: diretoriasById.get(s.diretoria_id) || s.diretorias?.sigla || "N/A",
-    observacao: s.observacao || "",
-    status: s.status as SolicitacaoStatus,
-  })), [solicitacoesCompras, diretoriasById]);
+  const allApprovedItems: PlanItem[] = useMemo(() => solicitacoesCompras.map((s: any) => {
+    const dirKey = s.diretoria_id ? String(s.diretoria_id).toLowerCase() : "";
+    const resolvedDir = (dirKey && diretoriasById.get(dirKey)) || s.diretoria_sigla || s.diretorias?.sigla || (s.diretoria_id && diretoriasById.get(s.diretoria_id)) || "N/A";
+    return {
+      id: s.id,
+      codigo: s.codigo,
+      descricao: s.descricao,
+      categoria: s.categoria || "diversos",
+      unidade: s.unidade || "un",
+      qtdEstimada: s.qtd_estimada || 0,
+      valorUnitario: s.valor_unitario || 0,
+      valorTotal: (s.qtd_estimada || 0) * (s.valor_unitario || 0),
+      prioridade: s.prioridade || "Média",
+      gerencia: s.gerencias?.sigla || s.gerencia || "N/A",
+      diretoriaSigla: resolvedDir,
+      observacao: s.observacao || "",
+      status: s.status as SolicitacaoStatus,
+    };
+  }), [solicitacoesCompras, diretoriasById]);
 
-  const mapServico = (s: any): ServicoItem => ({
-    id: s.id,
-    item: s.item,
-    tipoContratacao: s.tipo_contratacao,
-    unidadeDemandante: s.unidade_demandante,
-    objeto: s.objeto,
-    justificativa: s.justificativa || "",
-    previsaoInicio: s.previsao_inicio,
-    estimativaValor: s.estimativa_valor,
-    dotacaoOrcamentaria: s.dotacao_orcamentaria,
-    grauPrioridade: s.grau_prioridade as GrauPrioridade,
-    vinculacao: s.vinculacao as "Sim" | "Não",
-    dependenciaDescricao: s.dependencia_descricao,
-    gerencia: s.gerencias?.sigla || "N/A",
-    diretoriaSigla: diretoriasById.get(s.diretoria_id) || s.diretorias?.sigla || "N/A",
-    status: s.status as SolicitacaoStatus,
-    observacao: s.observacao,
-    contrato: s.contrato,
-    contratada: s.contratada || getContratadaFallback(s.contrato),
-  });
+  const mapServico = (s: any): ServicoItem => {
+    const dirKey = s.diretoria_id ? String(s.diretoria_id).toLowerCase() : "";
+    const resolvedDir = (dirKey && diretoriasById.get(dirKey)) || s.diretoria_sigla || s.diretorias?.sigla || (s.diretoria_id && diretoriasById.get(s.diretoria_id)) || "N/A";
+    return {
+      id: s.id,
+      item: s.item,
+      tipoContratacao: s.tipo_contratacao,
+      unidadeDemandante: s.unidade_demandante,
+      objeto: s.objeto,
+      justificativa: s.justificativa || "",
+      previsaoInicio: s.previsao_inicio,
+      estimativaValor: s.estimativa_valor,
+      dotacaoOrcamentaria: s.dotacao_orcamentaria,
+      grauPrioridade: s.grau_prioridade as GrauPrioridade,
+      vinculacao: s.vinculacao as "Sim" | "Não",
+      dependenciaDescricao: s.dependencia_descricao,
+      gerencia: s.gerencias?.sigla || s.gerencia || "N/A",
+      diretoriaSigla: resolvedDir,
+      status: s.status as SolicitacaoStatus,
+      observacao: s.observacao,
+      contrato: s.contrato,
+      contratada: s.contratada || getContratadaFallback(s.contrato),
+    };
+  };
 
   const isNovoServico = (s: any) => {
     const itemNum = Number(s.item);

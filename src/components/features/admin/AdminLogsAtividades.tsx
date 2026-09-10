@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Eye, FileSpreadsheet, Trash2, MoreHorizontal, FileDown, ArchiveRestore } from "lucide-react";
+import { Search, Eye, FileSpreadsheet, Trash2, MoreHorizontal, FileDown, ArchiveRestore, AlertTriangle } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -29,6 +29,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog.tsx";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog.tsx";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -53,27 +63,35 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 
-const toTitleCase = (str: string) => {
-  if (!str) return "";
-  return str
+const toTitleCase = (str: unknown) => {
+  if (str === null || str === undefined) return "";
+  return String(str)
     .toLowerCase()
     .split(" ")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 };
 
+function formatSafeDate(dateVal: any, formatPattern = "dd/MM/yyyy HH:mm:ss", options?: any): string {
+  if (!dateVal) return "-";
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return "-";
+    return format(d, formatPattern, options);
+  } catch {
+    return "-";
+  }
+}
+
 type FuncionarioInfo = { nome: string; diretoria_id?: string; gerencia_id?: string; [key: string]: unknown };
 
-function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Record<string, unknown>, funcionariosMap: Record<string, FuncionarioInfo>, getFuncNome: (mat: string) => string }>) {
-  const { data: record } = useQuery({
-    queryKey: ["record-details", log?.tabela_afetada, log?.registro_id],
-    queryFn: () => getRecordDetails(log.tabela_afetada as string, log.registro_id as string),
-    enabled: !!log?.registro_id && !!log?.tabela_afetada
-  });
+function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Record<string, unknown>, funcionariosMap: Record<string, FuncionarioInfo>, getFuncNome: (mat: unknown) => string | undefined }>) {
+  const record = (typeof log.detalhes === "object" ? log.detalhes : null) as any;
 
-  if (!record || !log) return null;
+  if (!log) return null;
 
-  const funcName = toTitleCase(getFuncNome(log.matricula as string) || "Desconhecido");
+  const matStr = String(log.matricula ?? "");
+  const funcName = toTitleCase(getFuncNome(matStr) || "Desconhecido");
   let texto: React.ReactNode = null;
 
   // Tenta extrair status novo se houver
@@ -93,8 +111,7 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
   }
   
   const cargo = (() => {
-    const mat = log.matricula as string;
-    const firstName = funcName.split(" ")[0].toLowerCase();
+    const firstName = String(funcName.split(" ")[0] || "").toLowerCase();
     
     let isFeminino = false;
     if (firstName.endsWith('a') || firstName.endsWith('elle') || firstName.endsWith('ele') || firstName.endsWith('ete') || firstName.endsWith('y') || firstName.endsWith('i') || firstName.endsWith('is')) {
@@ -106,8 +123,8 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
       isFeminino = true;
     }
 
-    if (mat === 'admin123' || mat === 'admin') return isFeminino ? "A Administradora do Sistema" : "O Administrador do Sistema";
-    const func = funcionariosMap[mat];
+    if (matStr === 'admin123' || matStr === 'admin') return isFeminino ? "A Administradora do Sistema" : "O Administrador do Sistema";
+    const func = funcionariosMap[matStr];
     if (!func) return isFeminino ? "A Funcionária" : "O Funcionário";
     if (func.diretoria_id && !func.gerencia_id) return isFeminino ? "A Diretora" : "O Diretor";
     if (func.gerencia_id) return isFeminino ? "A Gerente" : "O Gerente";
@@ -183,6 +200,10 @@ export function AdminLogsAtividades() {
 
   const [activeTab, setActiveTab] = useState("ativos");
 
+  // Estado para o AlertDialog de confirmação de exclusão permanente
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteBulk, setConfirmDeleteBulk] = useState(false);
+
   const { data: logs = [], isLoading: isLoadingLogs } = useQuery({
     queryKey: ["logs-atividades"],
     queryFn: getLogsAtividades,
@@ -198,24 +219,31 @@ export function AdminLogsAtividades() {
     queryFn: getFuncionariosNomes,
   });
 
-  const funcionariosMap = (funcionarios as FuncionarioInfo[]).reduce((acc: Record<string, FuncionarioInfo>, func: FuncionarioInfo & { matricula?: string }) => {
-    if (func.matricula) acc[func.matricula] = func;
+  const funcionariosMap = (funcionarios as FuncionarioInfo[]).reduce((acc: Record<string, FuncionarioInfo>, func: FuncionarioInfo & { matricula?: string | number }) => {
+    if (func && func.matricula !== undefined && func.matricula !== null && String(func.matricula).trim() !== "") {
+      acc[String(func.matricula).trim()] = func;
+    }
     return acc;
   }, {});
 
-  const getFuncNome = (matricula: string) => funcionariosMap[matricula]?.nome;
+  const getFuncNome = (matricula: unknown): string | undefined => {
+    if (matricula === null || matricula === undefined || String(matricula).trim() === "") return undefined;
+    const cleanMat = String(matricula).trim();
+    return funcionariosMap[cleanMat]?.nome;
+  };
 
-  const getHierarquia = (matricula: string) => {
-    if (matricula === 'admin123' || matricula === 'admin') return "Administrador do Sistema";
-    const func = funcionariosMap[matricula];
+  const getHierarquia = (matricula: unknown) => {
+    const matStr = String(matricula ?? "").trim();
+    if (matStr === 'admin123' || matStr === 'admin') return "Administrador do Sistema";
+    const func = funcionariosMap[matStr];
     if (!func) return "Desconhecido";
     if (func.diretoria_id && !func.gerencia_id) return "Diretoria";
     if (func.gerencia_id) return "Gerência";
     return "Funcionário";
   };
 
-  const getActionBadgeColor = (acao: string) => {
-    switch (acao) {
+  const getActionBadgeColor = (acao: unknown) => {
+    switch (String(acao ?? "").toUpperCase()) {
       case "CRIAR":
         return "bg-green-100 text-green-800";
       case "EDITAR":
@@ -227,16 +255,18 @@ export function AdminLogsAtividades() {
     }
   };
 
-  const getTableNameFriendly = (tableName: string) => {
-    switch (tableName) {
+  const getTableNameFriendly = (tableName: unknown) => {
+    const name = String(tableName ?? "");
+    switch (name) {
       case "itens_catalogo": return "Catálogo";
       case "solicitacoes": return "Solicitações";
       case "servicos_catalogo": return "Serviços";
-      default: return tableName;
+      default: return name;
     }
   };
 
-  const getFieldNameFriendly = (fieldName: string) => {
+  const getFieldNameFriendly = (fieldName: unknown) => {
+    const name = String(fieldName ?? "");
     const fieldMap: Record<string, string> = {
       "qtd_estimada": "Quantidade Estimada",
       "valor_estimado": "Valor Estimado",
@@ -264,7 +294,7 @@ export function AdminLogsAtividades() {
       "status_novo": "Novo Status",
       "status_anterior": "Status Anterior"
     };
-    return fieldMap[fieldName] || toTitleCase(fieldName.replaceAll(/_/g, " "));
+    return fieldMap[name] || toTitleCase(name.replaceAll(/_/g, " "));
   };
 
   const getFieldValueFriendly = (key: string, value: unknown) => {
@@ -273,11 +303,11 @@ export function AdminLogsAtividades() {
         updateSolicitacaoStatusBulk: "Atualização em Massa de Status",
         updateSolicitacaoStatus: "Atualização de Status",
       };
-      return actionMap[value as string] || String(value);
+      return actionMap[String(value ?? "")] || String(value ?? "");
     }
     
-    const keyLower = key.toLowerCase();
-    if ((keyLower.includes("valor") || keyLower.includes("dotacao")) && !Number.isNaN(Number.parseFloat(value as string))) {
+    const keyLower = String(key ?? "").toLowerCase();
+    if ((keyLower.includes("valor") || keyLower.includes("dotacao")) && !Number.isNaN(Number.parseFloat(String(value ?? "")))) {
       return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value as string | number));
     }
 
@@ -287,7 +317,7 @@ export function AdminLogsAtividades() {
       if (value === "rascunho") return "Rascunho";
       if (value === "reprovado") return "Reprovado";
     }
-    return typeof value === 'object' ? JSON.stringify(value) : String(value);
+    return typeof value === 'object' ? JSON.stringify(value) : String(value ?? "");
   };
 
   const currentLogs = activeTab === "ativos" ? logs : lixeiraLogs;
@@ -295,10 +325,10 @@ export function AdminLogsAtividades() {
 
   const filteredLogs = currentLogs.filter((log: Record<string, unknown>) => {
     const term = searchTerm.toLowerCase();
-    const mat = (log.matricula as string) || "";
-    const acao = (log.acao as string) || "";
-    const tab = (log.tabela_afetada as string) || "";
-    const funcName = getFuncNome(mat)?.toLowerCase() || "";
+    const mat = String(log.matricula ?? "");
+    const acao = String(log.acao ?? "");
+    const tab = String(log.tabela_afetada ?? "");
+    const funcName = String(getFuncNome(mat) ?? "").toLowerCase();
     return (
       mat.toLowerCase().includes(term) ||
       funcName.includes(term) ||
@@ -353,9 +383,31 @@ export function AdminLogsAtividades() {
       queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
       toast.success(activeTab === "ativos" ? "Log movido para lixeira" : "Log excluído permanentemente");
       setSelectedIds([]);
+      setConfirmDeleteId(null);
     },
-    onError: () => toast.error("Erro ao excluir log")
+    onError: () => {
+      toast.error("Erro ao excluir log");
+      setConfirmDeleteId(null);
+    }
   });
+
+  // Handler para iniciar exclusão: na Lixeira pede confirmação, nos Ativos soft-deleta direto
+  const handleDeleteSingle = (id: string) => {
+    if (activeTab === "lixeira") {
+      setConfirmDeleteId(id);
+    } else {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  // Handler para exclusão em massa: na Lixeira pede confirmação
+  const handleDeleteBulk = () => {
+    if (activeTab === "lixeira") {
+      setConfirmDeleteBulk(true);
+    } else {
+      deleteBulkMutation.mutate(selectedIds);
+    }
+  };
 
   const deleteBulkMutation = useMutation({
     mutationFn: activeTab === "ativos" ? deleteLogsAtividadeBulk : hardDeleteLogsAtividadeBulk,
@@ -364,8 +416,12 @@ export function AdminLogsAtividades() {
       queryClient.invalidateQueries({ queryKey: ["lixeira-logs-atividades"] });
       toast.success(`${selectedIds.length} logs ${activeTab === "ativos" ? "movidos para lixeira" : "excluídos permanentemente"}`);
       setSelectedIds([]);
+      setConfirmDeleteBulk(false);
     },
-    onError: () => toast.error("Erro ao excluir logs")
+    onError: () => {
+      toast.error("Erro ao excluir logs");
+      setConfirmDeleteBulk(false);
+    }
   });
 
   const restoreMutation = useMutation({
@@ -393,15 +449,18 @@ export function AdminLogsAtividades() {
   // Funções de Exportação
   const exportToExcel = () => {
     try {
-      const dataToExport = filteredLogs.map((log: Record<string, unknown>) => ({
-        "Data/Hora": format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss"),
-        "Funcionário": log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador do Sistema" : (toTitleCase(getFuncNome(log.matricula as string) || "Nome não encontrado")),
-        "Matrícula": log.matricula,
-        "Ação": toTitleCase(log.acao as string),
-        "Tabela Afetada": getTableNameFriendly(log.tabela_afetada as string),
-        "ID Registro": log.registro_id || "",
-        "Detalhes Payload": JSON.stringify(log.detalhes || {})
-      }));
+      const dataToExport = filteredLogs.map((log: Record<string, unknown>) => {
+        const mat = String(log.matricula ?? "");
+        return {
+          "Data/Hora": formatSafeDate(log.created_at, "dd/MM/yyyy HH:mm:ss"),
+          "Funcionário": mat === 'admin123' || mat === 'admin' ? "Administrador do Sistema" : (toTitleCase(getFuncNome(mat) || "Nome não encontrado")),
+          "Matrícula": mat,
+          "Ação": toTitleCase(log.acao),
+          "Tabela Afetada": getTableNameFriendly(log.tabela_afetada),
+          "ID Registro": String(log.registro_id ?? ""),
+          "Detalhes Payload": JSON.stringify(log.detalhes || {})
+        };
+      });
 
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
       const workbook = XLSX.utils.book_new();
@@ -421,12 +480,13 @@ export function AdminLogsAtividades() {
       
       const tableColumn = ["Data/Hora", "Funcionário", "Ação", "Tabela", "ID Registro"];
       const tableRows = filteredLogs.map((log: Record<string, unknown>) => {
-        const nome = log.matricula === 'admin123' || log.matricula === 'admin' ? "Administrador" : (toTitleCase(getFuncNome(log.matricula as string) || "Desconhecido"));
+        const mat = String(log.matricula ?? "");
+        const nome = mat === 'admin123' || mat === 'admin' ? "Administrador" : (toTitleCase(getFuncNome(mat) || "Desconhecido"));
         return [
-          format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss"),
+          formatSafeDate(log.created_at, "dd/MM/yyyy HH:mm:ss"),
           nome,
-          toTitleCase(log.acao as string),
-          getTableNameFriendly(log.tabela_afetada as string),
+          toTitleCase(log.acao),
+          getTableNameFriendly(log.tabela_afetada),
           log.registro_id ? String(log.registro_id).substring(0, 8) + "..." : "-"
         ];
       });
@@ -503,11 +563,11 @@ export function AdminLogsAtividades() {
               variant="destructive" 
               size="sm" 
               className="h-8 flex items-center gap-1"
-              onClick={() => deleteBulkMutation.mutate(selectedIds)}
+              onClick={handleDeleteBulk}
               disabled={deleteBulkMutation.isPending}
             >
               <Trash2 className="h-4 w-4" />
-              Excluir Selecionados
+              {activeTab === "lixeira" ? "Excluir Permanentemente" : "Excluir Selecionados"}
             </Button>
           </div>
         </div>
@@ -562,12 +622,12 @@ export function AdminLogsAtividades() {
                     />
                   </TableCell>
                   <TableCell className="font-medium whitespace-nowrap">
-                    {format(new Date(log.created_at as string), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                    {formatSafeDate(log.created_at, "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
                       <span className="font-semibold text-sm flex items-center gap-2">
-                          {log.matricula === 'admin123' || log.matricula === 'admin' ? (
+                          {String(log.matricula ?? "") === 'admin123' || String(log.matricula ?? "") === 'admin' ? (
                             <span className="text-primary flex items-center gap-1">
                               Administrador do Sistema
                             </span>
@@ -575,28 +635,28 @@ export function AdminLogsAtividades() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <span className="text-primary flex items-center gap-1 cursor-help">
-                                  {toTitleCase(getFuncNome(log.matricula as string) || "Nome não encontrado")}
+                                  {toTitleCase(getFuncNome(String(log.matricula ?? "")) || "Nome não encontrado")}
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>{getHierarquia(log.matricula as string)}</p>
+                                <p>{getHierarquia(String(log.matricula ?? ""))}</p>
                               </TooltipContent>
                             </Tooltip>
                           )}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        Mat: {log.matricula as string}
+                        Mat: {String(log.matricula ?? "")}
                       </span>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={getActionBadgeColor(log.acao as string)}>
-                      {toTitleCase(log.acao as string)}
+                    <Badge variant="outline" className={getActionBadgeColor(log.acao)}>
+                      {toTitleCase(log.acao)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{getTableNameFriendly(log.tabela_afetada as string)}</TableCell>
-                  <TableCell className="text-xs max-w-[150px] truncate" title={log.registro_id as string}>
-                    {(log.registro_id as string) || "-"}
+                  <TableCell>{getTableNameFriendly(log.tabela_afetada)}</TableCell>
+                  <TableCell className="text-xs max-w-[150px] truncate" title={String(log.registro_id ?? "")}>
+                    {String(log.registro_id ?? "-")}
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
@@ -629,10 +689,10 @@ export function AdminLogsAtividades() {
                         )}
                         <DropdownMenuItem 
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
-                          onClick={() => deleteMutation.mutate(log.id as string)}
+                          onClick={() => handleDeleteSingle(log.id as string)}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
-                          Excluir Registro
+                          {activeTab === "lixeira" ? "Excluir Permanentemente" : "Mover para Lixeira"}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -665,41 +725,41 @@ export function AdminLogsAtividades() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-semibold">Ação</p>
-                  <Badge variant="outline" className={getActionBadgeColor(selectedLog.acao as string)}>
-                    {toTitleCase(selectedLog.acao as string)}
+                  <Badge variant="outline" className={getActionBadgeColor(selectedLog.acao)}>
+                    {toTitleCase(selectedLog.acao)}
                   </Badge>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Data</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {format(new Date(selectedLog.created_at as string), "dd/MM/yyyy HH:mm:ss")}
+                    {formatSafeDate(selectedLog.created_at, "dd/MM/yyyy HH:mm:ss")}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Funcionário</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {selectedLog.matricula === 'admin123' || selectedLog.matricula === 'admin' 
+                    {String(selectedLog.matricula ?? "") === 'admin123' || String(selectedLog.matricula ?? "") === 'admin' 
                       ? "Administrador do Sistema" 
-                      : toTitleCase(getFuncNome(selectedLog.matricula as string) || "Desconhecido")}
+                      : toTitleCase(getFuncNome(String(selectedLog.matricula ?? "")) || "Desconhecido")}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Nível / Hierarquia</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {selectedLog.matricula === 'admin123' || selectedLog.matricula === 'admin' 
+                    {String(selectedLog.matricula ?? "") === 'admin123' || String(selectedLog.matricula ?? "") === 'admin' 
                       ? "Administração do Sistema"
-                      : getHierarquia(selectedLog.matricula as string)}
+                      : getHierarquia(String(selectedLog.matricula ?? ""))}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Matrícula</p>
                   <p className="mt-1 text-primary font-medium text-sm">
-                    {selectedLog.matricula as string}
+                    {String(selectedLog.matricula ?? "")}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Tabela Afetada</p>
-                  <p className="mt-1 text-primary font-medium text-sm">{selectedLog.tabela_afetada as string}</p>
+                  <p className="mt-1 text-primary font-medium text-sm">{String(selectedLog.tabela_afetada ?? "")}</p>
                 </div>
                 
                 {(() => {
@@ -749,6 +809,56 @@ export function AdminLogsAtividades() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* AlertDialog de confirmação para exclusão permanente individual */}
+      <AlertDialog open={!!confirmDeleteId} onOpenChange={(open) => !open && setConfirmDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Excluir Permanentemente?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação é <strong>irreversível</strong>. O registro de log será excluído permanentemente da base de dados e não poderá ser recuperado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={() => confirmDeleteId && deleteMutation.mutate(confirmDeleteId)}
+            >
+              {deleteMutation.isPending ? "Excluindo..." : "Sim, Excluir Permanentemente"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog de confirmação para exclusão permanente em massa */}
+      <AlertDialog open={confirmDeleteBulk} onOpenChange={(open) => !open && setConfirmDeleteBulk(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Excluir {selectedIds.length} registro(s) permanentemente?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação é <strong>irreversível</strong>. Os {selectedIds.length} registro(s) de log selecionados serão excluídos permanentemente e não poderão ser recuperados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBulkMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteBulkMutation.isPending}
+              onClick={() => deleteBulkMutation.mutate(selectedIds)}
+            >
+              {deleteBulkMutation.isPending ? "Excluindo..." : `Sim, Excluir ${selectedIds.length} Permanentemente`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </Tabs>
     </Card>
   );

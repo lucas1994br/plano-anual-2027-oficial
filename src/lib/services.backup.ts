@@ -1,143 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
 import { supabase } from "./supabaseClient.ts";
-import * as gs from "./googleSheetsClient.ts";
-
-function normalizePeriodo(p: any) {
-  if (!p) return p;
-  return {
-    ...p,
-    nome: p.nome || (p.ano ? `PAC ${p.ano}` : "Plano Anual 2027"),
-    inicio: p.inicio ? String(p.inicio).split("T")[0] : "",
-    fim: p.fim ? String(p.fim).split("T")[0] : "",
-    ativo: p.ativo === true || p.ativo === "true" || p.ativo === 1,
-  };
-}
-
-export function parseSafeNumber(val: any, fallback = 0): number {
-  if (val === undefined || val === null || val === "") return fallback;
-  if (typeof val === "number") return isNaN(val) ? fallback : val;
-  if (typeof val === "string") {
-    const trimmed = val.trim();
-    if (!trimmed) return fallback;
-    // Recupera datas geradas erroneamente pelo Excel/Sheets a partir de números (ex: "3329-10-01T03:00:00.000Z" -> 3329.10)
-    if (trimmed.includes("T") && (trimmed.includes("Z") || trimmed.includes("+"))) {
-      const match = trimmed.match(/^(\d{1,6})-(\d{2})/);
-      if (match) {
-        const recovered = parseFloat(`${match[1]}.${match[2]}`);
-        if (!isNaN(recovered)) return recovered;
-      }
-      return fallback;
-    }
-    // Remove R$ e espaços
-    const clean = trimmed.replace(/[R$\s]/g, "");
-    if (!clean) return fallback;
-    // Formato brasileiro "1.234,56" ou "88,51"
-    if (clean.includes(",")) {
-      const normalized = clean.replace(/\./g, "").replace(",", ".");
-      const num = parseFloat(normalized);
-      return isNaN(num) ? fallback : num;
-    }
-    const num = parseFloat(clean);
-    return isNaN(num) ? fallback : num;
-  }
-  const n = Number(val);
-  return isNaN(n) ? fallback : n;
-}
-
-export function formatCurrency(value: any): string {
-  const num = parseSafeNumber(value, 0);
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num);
-}
-
-// Cache em memória do catálogo de materiais para hidratação defensiva instantânea
-const memoryCatalogById = new Map<string, any>();
-const memoryCatalogByCode = new Map<number, any>();
-
-// Cache em memória de gerências para garantir sigla sempre resolvida (ex: 'GSAD', 'GESL', 'DG' em vez de UUID)
-const memoryGerenciasById = new Map<string, string>();
-
-export function updateGerenciasCache(gerencias: any[]) {
-  if (!Array.isArray(gerencias)) return;
-  gerencias.forEach(g => {
-    if (g && g.id && g.sigla) {
-      memoryGerenciasById.set(String(g.id).trim().toLowerCase(), String(g.sigla).trim());
-    }
-  });
-}
-
-export function updateCatalogCache(items: any[]) {
-  if (!Array.isArray(items)) return;
-  items.forEach(it => {
-    if (it.id) memoryCatalogById.set(String(it.id).trim().toLowerCase(), it);
-    const c = Number(it.codigo);
-    if (!isNaN(c) && c > 0) memoryCatalogByCode.set(c, it);
-  });
-}
-
-function mapDbToPlanItem(s: any): PlanItem {
-  if (!s) return s;
-  const unitVal = parseSafeNumber(s.valor_unitario ?? s.item?.valor_unitario, 0);
-  const qtdVal = parseSafeNumber(s.qtd_estimada ?? s.qtdEstimada, 0);
-
-  // Busca no cache em memória se codigo ou descricao estiverem faltando
-  let catItem = null;
-  if (s.item_id) {
-    catItem = memoryCatalogById.get(String(s.item_id).trim().toLowerCase());
-  }
-  const rawCode = s.codigo ?? s.item?.codigo ?? (catItem ? catItem.codigo : 0);
-  const code = Number(rawCode) || 0;
-  if (!catItem && code > 0) {
-    catItem = memoryCatalogByCode.get(code);
-  }
-
-  const rawDesc = s.descricao || s.item?.descricao || (catItem ? catItem.descricao : "");
-  const isDescDefault = !rawDesc || rawDesc.toLowerCase() === "material não especificado" || rawDesc.toLowerCase() === "diversos";
-  const desc = (!isDescDefault) ? rawDesc : ((catItem && catItem.descricao) ? catItem.descricao : rawDesc);
-
-  const cat = (s.categoria && s.categoria !== "diversos")
-    ? s.categoria
-    : ((catItem && catItem.categoria) ? catItem.categoria : (s.item?.categoria || "MATERIAIS DE CUSTEIO"));
-  const un = s.unidade || (catItem && catItem.unidade) || s.item?.unidade || "un";
-
-  const resolvedGerencia = s.gerencias?.sigla 
-    || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined)
-    || memoryGerenciasById.get(String(s.gerencia_id || s.gerencia || "").trim().toLowerCase()) 
-    || s.gerencia 
-    || "";
-
-  return {
-    id: s.id,
-    item_id: s.item_id,
-    codigo: code,
-    descricao: desc,
-    categoria: cat,
-    unidade: un,
-    valorUnitario: unitVal > 0 ? unitVal : (catItem?.valor_unitario || 0),
-    valor_unitario: unitVal > 0 ? unitVal : (catItem?.valor_unitario || 0),
-    qtdEstimada: qtdVal,
-    qtd_estimada: qtdVal,
-    prioridade: s.prioridade || s.grau_prioridade || "Baixa",
-    observacao: s.observacao || "",
-    status: s.status as SolicitacaoStatus,
-    justificativaRejeicao: s.justificativa_rejeicao || "",
-    justificativa_rejeicao: s.justificativa_rejeicao || "",
-    gerencia: resolvedGerencia,
-    gerencia_id: s.gerencia_id,
-    diretoria_id: s.diretoria_id,
-    diretoriaSigla: s.diretoriaSigla || s.diretorias?.sigla,
-    periodo_id: s.periodo_id,
-    created_at: s.created_at,
-    updated_at: s.updated_at,
-    item: {
-      id: s.item_id || catItem?.id || s.item?.id || s.id,
-      codigo: code,
-      descricao: desc,
-      categoria: cat,
-      unidade: un,
-      valor_unitario: unitVal > 0 ? unitVal : (catItem?.valor_unitario || 0),
-    },
-  } as unknown as PlanItem;
-}
 import type {
   PlanItem,
   SolicitacaoStatus,
@@ -192,11 +54,6 @@ export async function registrarLogAtividade(
       ? accessCode 
       : (accessCode.replace(/\D/g, "") || "desconhecido");
 
-    if (gs.isGoogleSheetsActive()) {
-      await gs.gsRegistrarLogAtividade(matricula, acao, tabelaAfetada, registroId, detalhes);
-      return;
-    }
-
     // Upsert to ensure FK constraint is satisfied without overwriting existing names
     await supabase.from("funcionarios").upsert([{
       matricula,
@@ -246,13 +103,6 @@ export async function registrarLogAtividadeBulk(
     const matricula = (accessCode.startsWith("admin") || accessCode.startsWith("compras"))
       ? accessCode 
       : (accessCode.replace(/\D/g, "") || "desconhecido");
-
-    if (gs.isGoogleSheetsActive()) {
-      for (const id of registrosIds) {
-        await gs.gsRegistrarLogAtividade(matricula, acao, tabelaAfetada, id, detalhes);
-      }
-      return;
-    }
 
     // Upsert to ensure FK constraint is satisfied without overwriting existing names
     await supabase.from("funcionarios").upsert([{
@@ -381,20 +231,6 @@ export async function getDiretorias(): Promise<DiretoriaRow[]> {
     return cached;
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const data = await gs.gsGetDiretorias();
-      if (data && data.length > 0) {
-        const normalized = normalizeDiretorias(data as DiretoriaRow[]);
-        const filtered = normalized.filter((dir) => dir.ativa !== false);
-        saveDiretoriasCache(filtered);
-        return filtered;
-      }
-    } catch (e) {
-      console.warn("Erro ao buscar diretorias no Google Sheets:", e);
-    }
-  }
-
   const query = await supabase
     .from("diretorias")
     .select("*")
@@ -423,13 +259,6 @@ export async function getDiretorias(): Promise<DiretoriaRow[]> {
 export async function getGerenciasByDiretoria(
   diretoriaId: string
 ): Promise<Record<string, unknown>[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const data = await gs.gsGetGerencias(diretoriaId);
-    const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
-  }
-
   const { data, error } = await supabase
     .from("gerencias")
     .select("*")
@@ -438,70 +267,32 @@ export async function getGerenciasByDiretoria(
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
   return data || [];
 }
 
 export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const data = await gs.gsGetGerencias();
-    const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
-  }
-
   const { data, error } = await supabase
     .from("gerencias")
     .select("*")
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
   return data || [];
 }
 
 export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const data = await gs.gsGetGerencias();
-    const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
-  }
-
   const { data, error } = await supabase
     .from("gerencias")
     .select("*")
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
   return data || [];
 }
 
 export async function getDiretoriasComDetalhes(): Promise<
   (Diretoria & { totalGerencias: number; totalItens: number })[]
 > {
-  if (gs.isGoogleSheetsActive()) {
-    const [diretorias, gerencias, solicitacoesCounts, servicos] = await Promise.all([
-      gs.gsGetDiretorias(),
-      gs.gsGetGerencias(),
-      gs.gsGetSolicitacoesCountByDiretoria().catch(() => ({} as Record<string, number>)),
-      gs.gsGetServicos()
-    ]);
-    return (diretorias || []).map((dir: any) => {
-      const gCount = (gerencias || []).filter((g: any) => String(g.diretoria_id) === String(dir.id) && g.ativa !== false).length;
-      const sCount = Number((solicitacoesCounts as Record<string, number>)?.[dir.id] || 0);
-      const servCount = (servicos || []).filter((s: any) => String(s.diretoria_id) === String(dir.id)).length;
-      return {
-        id: dir.id,
-        sigla: dir.sigla,
-        nome: dir.nome,
-        totalGerencias: gCount,
-        totalItens: sCount + servCount,
-      } as Diretoria & { totalGerencias: number; totalItens: number };
-    });
-  }
-
   const { data: diretorias, error: errDir } = await supabase
     .from("diretorias")
     .select("*")
@@ -542,11 +333,6 @@ export async function getDiretoriasComDetalhes(): Promise<
 // ============ PERÍODOS ============
 
 export async function getPeriodosAtivos(): Promise<Record<string, unknown>[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const list = await gs.gsGetPeriodos();
-    return (list || []).map(normalizePeriodo).filter((p: any) => p.ativo);
-  }
-
   const { data, error } = await supabase
     .from("periodos")
     .select("*")
@@ -558,11 +344,6 @@ export async function getPeriodosAtivos(): Promise<Record<string, unknown>[]> {
 }
 
 export async function getTodosPeriodos(): Promise<Record<string, unknown>[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const list = await gs.gsGetPeriodos();
-    return (list || []).map(normalizePeriodo);
-  }
-
   const { data, error } = await supabase
     .from("periodos")
     .select("*")
@@ -577,12 +358,6 @@ export async function createPeriodo(periodo: {
   inicio: string;
   fim: string;
 }): Promise<Record<string, unknown>> {
-  if (gs.isGoogleSheetsActive()) {
-    const saved = await gs.gsCreatePeriodo({ ...periodo, ativo: false });
-    await registrarLogAtividade("CRIAR", "periodos", saved.id || "novo", { periodo });
-    return saved || {};
-  }
-
   const { data, error } = await supabase
     .from("periodos")
     .insert([{ ...periodo, ativo: false }])
@@ -606,12 +381,6 @@ export async function updatePeriodo(
     ativo?: boolean;
   }
 ): Promise<Record<string, unknown>> {
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdatePeriodo(periodoId, updates);
-    await registrarLogAtividade("EDITAR", "periodos", periodoId, { updates });
-    return updated || {};
-  }
-
   const { data, error } = await supabase
     .from("periodos")
     .update(updates)
@@ -634,10 +403,6 @@ export async function updatePeriodo(
 }
 
 export async function cleanupDuplicatePeriodos(): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    return true;
-  }
-
   const { data: allPeriodos, error: fetchError } = await supabase
     .from("periodos")
     .select("*")
@@ -673,11 +438,6 @@ export async function getSolicitacoesByGerencia(
   gerenciaId: string,
   periodoId: string
 ): Promise<PlanItem[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetSolicitacoes({ gerencia_id: gerenciaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
@@ -720,12 +480,6 @@ export async function deleteSolicitacao(itemId: string | number): Promise<boolea
     modulo: "aquisicao",
     atividade: "excluir_item",
   });
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteSolicitacao(String(itemId));
-    await registrarLogAtividade("EXCLUIR", "solicitacoes", String(itemId));
-    return true;
-  }
 
   const idStr = String(itemId);
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr);
@@ -774,12 +528,6 @@ export async function deleteSolicitacoesBulk(itemIds: (string | number)[]): Prom
     atividade: "excluir_item",
   });
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteSolicitacoesBulk(itemIds.map(String));
-    await registrarLogAtividade("EXCLUIR", "solicitacoes", "BULK", { ids: itemIds });
-    return true;
-  }
-
   const stringIds = itemIds.map(String);
   const uuidIds = stringIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
   const numericItems = itemIds.filter(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))).map(Number);
@@ -827,11 +575,6 @@ export async function getSolicitacoesByDiretoria(
   diretoriaId: string,
   periodoId: string
 ): Promise<PlanItem[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetSolicitacoes({ diretoria_id: diretoriaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
@@ -882,11 +625,6 @@ export async function getSolicitacoesByPeriodo({
 }: {
   periodoId: string;
 }): Promise<PlanItem[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetSolicitacoes({ periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
@@ -927,11 +665,6 @@ export async function getServicosByPeriodo({
 }: {
   periodoId: string;
 }): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetServicos({ periodo_id: periodoId });
-    return (rows || []).map(mapDbToServicoItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("servicos")
@@ -950,10 +683,6 @@ export async function getSolicitacoesResumoByPeriodo({
 }: {
   periodoId: string;
 }): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetSolicitacoes({ periodo_id: periodoId })) || [];
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
@@ -970,10 +699,6 @@ export async function getServicosResumoByPeriodo({
 }: {
   periodoId: string;
 }): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetServicos({ periodo_id: periodoId })) || [];
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("servicos")
@@ -989,14 +714,6 @@ export async function getServicosResumoByPeriodo({
 export async function getSolicitacoesCompras(
   periodoId: string
 ): Promise<unknown[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetSolicitacoes({
-      periodo_id: periodoId,
-      status: "aprovado,em_compra,concluido",
-    });
-    return (rows || []).map(mapDbToPlanItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("solicitacoes")
@@ -1034,14 +751,6 @@ export async function getSolicitacoesCompras(
 }
 
 export async function getServicosCompras(periodoId: string): Promise<unknown[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetServicos({
-      periodo_id: periodoId,
-      status: "aprovado,em_compra,concluido",
-    });
-    return (rows || []).map(mapDbToServicoItem);
-  }
-
   return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos")
@@ -1095,12 +804,6 @@ export async function createSolicitacao(solicitacao: Partial<PlanItem> & {
     observacao: solicitacao.observacao || null,
     status: solicitacao.status || "rascunho",
   };
-
-  if (gs.isGoogleSheetsActive()) {
-    const created = await gs.gsCreateSolicitacao({ ...payload, codigo: solicitacao.codigo, descricao: solicitacao.descricao, categoria: solicitacao.categoria, unidade: solicitacao.unidade });
-    await registrarLogAtividade("CRIAR", "solicitacoes", created.id, payload);
-    return mapDbToPlanItem(created);
-  }
 
   const { data, error } = await supabase
     .from("solicitacoes")
@@ -1164,12 +867,6 @@ export async function updateSolicitacao(
   }
 
   dbUpdates.updated_at = new Date().toISOString();
-
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateSolicitacao(id, dbUpdates);
-    await registrarLogAtividade("EDITAR", "solicitacoes", id, dbUpdates);
-    return mapDbToPlanItem(updated);
-  }
 
   const { data, error } = await supabase
     .from("solicitacoes")
@@ -1256,12 +953,6 @@ export async function updateSolicitacaoStatus(
     updates.justificativa_rejeicao = justificativa;
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateSolicitacaoStatus(id, status, justificativa);
-    await registrarLogAtividade("STATUS", "solicitacoes", id, { acao: "updateSolicitacaoStatus", status_novo: status, justificativa });
-    return mapDbToPlanItem(updated);
-  }
-
   const { data, error } = await supabase
     .from("solicitacoes")
     .update(updates)
@@ -1329,12 +1020,6 @@ export async function updateSolicitacaoStatusBulk(
     updates.aprovado_em = new Date().toISOString();
   } else if (status === "rejeitado" && justificativa) {
     updates.justificativa_rejeicao = justificativa;
-  }
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsUpdateSolicitacaoStatusBulk(ids, status, justificativa);
-    await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
-    return;
   }
 
   const { error } = await supabase
@@ -1433,12 +1118,6 @@ export async function updateServicoStatusBulk(
     updates.justificativa_rejeicao = justificativa;
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsUpdateServicoStatusBulk(ids, status, justificativa);
-    await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicoStatusBulk", status_novo: status, justificativa });
-    return;
-  }
-
   const { error } = await supabase
     .from("servicos")
     .update(updates)
@@ -1491,47 +1170,6 @@ export async function validateAccessCode(
     throw new Error("Código de acesso vazio");
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const res = await gs.gsValidateAccessCode(normalizedCode, scope);
-      if (res && res.scope) {
-        return res as AccessCodeResponse;
-      }
-    } catch {
-      // continua para fallback padrão
-    }
-
-    const normLower = normalizedCode.toLowerCase();
-    if (scope === "admin" && (normLower === "admin123" || normLower === "admin")) {
-      return { scope: "admin" };
-    }
-    if (scope === "compras" && (normLower === "compras123" || normLower === "compras")) {
-      return { scope: "compras" };
-    }
-    if (scope === "diretoria") {
-      const diretorias = await getDiretorias();
-      const matchDir = (diretorias || []).find(d => {
-        const s = d.sigla.toLowerCase();
-        return normLower === `${s}1234` || normLower === `${s}123` || normLower === `1234${s}` || normLower === s;
-      });
-      if (matchDir) {
-        return { scope: "diretoria", diretoria_id: matchDir.id };
-      }
-    }
-    if (scope === "gerencia") {
-      const gerencias = await getTodasGerencias();
-      const matchGer = (gerencias as any[] || []).find((g: any) => {
-        const s = String(g.sigla || "").toLowerCase();
-        return normLower === `${s}1234` || normLower === `${s}123` || normLower === `1234${s}` || normLower === s;
-      });
-      if (matchGer) {
-        return { scope: "gerencia", gerencia_id: matchGer.id, diretoria_id: matchGer.diretoria_id };
-      }
-    }
-
-    throw new Error("Código de acesso inválido ou inativo");
-  }
-
   try {
     // Busca direta no banco de dados (ignorando a Edge Function)
     const { data, error } = await supabase
@@ -1573,102 +1211,36 @@ export async function validateAccessCode(
 // ============ ITENS CATÁLOGO ============
 
 export default async function getItensCatalogo(): Promise<unknown[]> {
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const items = await gs.gsGetItensCatalogo();
-      if (Array.isArray(items) && items.length > 0) {
-        updateCatalogCache(items);
-        return items;
-      }
-    } catch (_err) {
-      console.warn("Falha ao buscar catálogo da planilha, carregando dados locais...", _err);
-    }
-
-    // Fallback defensivo: carrega itens a partir de materialDescriptionByCode.json
-    try {
-      if (typeof window !== "undefined") {
-        const res = await fetch("/data/materialDescriptionByCode.json");
-        if (res.ok) {
-          const dict = await res.json();
-          const fallbackItems = Object.entries(dict).map(([code, desc]) => ({
-            id: `item-${code}`,
-            codigo: Number(code),
-            descricao: String(desc),
-            categoria: "MATERIAIS DE CUSTEIO",
-            unidade: "UND",
-            valor_unitario: 0,
-          }));
-          updateCatalogCache(fallbackItems);
-          return fallbackItems;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  }
-
-  try {
-    const data = await fetchAllPages<unknown>((from, to) =>
-      supabase
-        .from("itens_catalogo")
-        .select("*")
-        .order("codigo")
-        .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
-    );
-    if (Array.isArray(data)) {
-      updateCatalogCache(data);
-    }
-    return data;
-  } catch (err) {
-    console.warn("Falha ao buscar catálogo no Supabase:", err);
-    return [];
-  }
+  return await fetchAllPages<unknown>((from, to) =>
+    supabase
+      .from("itens_catalogo")
+      .select("*")
+      .order("codigo")
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
+  );
 }
 
 export async function getCategoryBudgetOwnerRules(): Promise<
   Record<string, string>
 > {
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const config = await gs.gsGetAdminConfig();
-      if (config?.category_budget_owners) {
-        return config.category_budget_owners as Record<string, string>;
-      }
-    } catch {
-      // ignore
+  const { data, error } = await supabase
+    .from("categoria_diretoria_orcamentaria")
+    .select("categoria, diretoria_orcamentaria_id")
+    .eq("ativo", true);
+
+  if (error) throw error;
+
+  const rules: Record<string, string> = {};
+  (data || []).forEach(
+    (row: { categoria: string; diretoria_orcamentaria_id: string }) => {
+      rules[row.categoria] = row.diretoria_orcamentaria_id;
     }
-    return {};
-  }
+  );
 
-  try {
-    const { data, error } = await supabase
-      .from("categoria_diretoria_orcamentaria")
-      .select("categoria, diretoria_orcamentaria_id")
-      .eq("ativo", true);
-
-    if (error) throw error;
-
-    const rules: Record<string, string> = {};
-    (data || []).forEach(
-      (row: { categoria: string; diretoria_orcamentaria_id: string }) => {
-        rules[row.categoria] = row.diretoria_orcamentaria_id;
-      }
-    );
-
-    return rules;
-  } catch (err) {
-    console.warn("Falha ao buscar regras orçamentárias de categoria:", err);
-    return {};
-  }
+  return rules;
 }
 
-export async function getAdminMiniErpConfigDb(): Promise<Partial<AdminBudgetConfig> | null> {
-  if (gs.isGoogleSheetsActive()) {
-    const config = await gs.gsGetAdminConfig();
-    return (config?.admin_mini_erp_config as Partial<AdminBudgetConfig>) || null;
-  }
-
+export async function getAdminMiniErpConfigDb() {
   const { data: orcamentos } = await supabase
     .from("admin_orcamento_config")
     .select("escopo, referencia_id, tipo, valor");
@@ -1812,12 +1384,6 @@ export async function saveAdminMiniErpConfigDb(config: {
   gerenciaBudgetsOrcamentoGeral?: Record<string, number>;
   routingRules: Record<string, RoutingRule>;
 }): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsSaveAdminConfig("admin_mini_erp_config", config);
-    await registrarLogAtividade("EDITAR", "configuracoes", "admin-mini-erp-config", { acao: "saveAdminMiniErpConfigDb" });
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -1848,10 +1414,6 @@ export async function saveAdminMiniErpConfigDb(config: {
 // ============ SERVIÇOS CATÁLOGO ============
 
 export async function getServicosCatalogo(): Promise<unknown[]> {
-  if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetServicosCatalogo()) || [];
-  }
-
   return await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos_catalogo")
@@ -1874,12 +1436,6 @@ export async function createServicoCatalogoAndDistribuir(servico: {
   diretoria_id: string;
   gerencia_id: string;
 }): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const created = await gs.gsCreateServicoCatalogo(servico);
-    await registrarLogAtividade("CRIAR", "servicos_catalogo", (created as any)?.id || "novo", servico);
-    return { success: true, data: created };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -1952,12 +1508,6 @@ export async function updateServicoCatalogoAdmin(
     item?: number;
   }
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateServicoCatalogo(servicoId, updates);
-    await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, updates);
-    return { success: true, data: updated };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -1987,12 +1537,6 @@ export async function updateServicoCatalogoAdmin(
 export async function deleteServicoCatalogoAdmin(
   servicoId: string
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicoCatalogo(servicoId);
-    await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -2017,33 +1561,6 @@ export async function deleteServicoCatalogoAdmin(
   return data;
 }
 
-export async function deleteServicosCatalogoBulkAdmin(
-  servicoIds: string[]
-): Promise<unknown> {
-  if (!servicoIds || servicoIds.length === 0) return { success: true };
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicosCatalogoBulk(servicoIds);
-    await registrarLogAtividadeBulk("EXCLUIR", "servicos_catalogo", servicoIds, { acao: "deleteServicosCatalogoBulkAdmin" });
-    return { success: true };
-  }
-  return Promise.all(servicoIds.map(id => deleteServicoCatalogoAdmin(id)));
-}
-
-export async function deleteServicoCatalogo(
-  servicoId: string
-): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicoCatalogo(servicoId);
-    await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
-    return { success: true };
-  }
-
-  const { error } = await supabase.from("servicos_catalogo").delete().eq("id", servicoId);
-  if (error) throw error;
-  await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
-  return { success: true };
-}
-
 export async function saveCategoryBudgetOwnerRules(
   rules: Record<string, string>
 ): Promise<unknown> {
@@ -2060,12 +1577,6 @@ export async function saveCategoryBudgetOwnerRules(
   const filteredRules = Object.fromEntries(
     Object.entries(rules).filter(([, v]) => uuidPattern.test(v))
   );
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsSaveAdminConfig("category_budget_owners", filteredRules);
-    await registrarLogAtividade("EDITAR", "configuracoes", "category_budget_owner_rules", { acao: "saveCategoryBudgetOwnerRules" });
-    return { success: true };
-  }
 
   const { data, error } = await supabase.functions.invoke(
     "admin-upsert-category-budget-owners",
@@ -2092,12 +1603,6 @@ export async function createItemCatalogoAndDistribuir(item: {
   unidade: string;
   valorUnitario: number;
 }): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const created = await gs.gsCreateItemCatalogo({ ...item, valor_unitario: item.valorUnitario });
-    await registrarLogAtividade("CRIAR", "itens_catalogo", (created as any)?.id || "novo", item);
-    return { success: true, data: created };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -2141,35 +1646,6 @@ export async function createSolicitacoesFromCatalogo(
   periodoId: string,
   codigosCatalogo: number[]
 ): Promise<unknown[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const catalogo = await gs.gsGetItensCatalogo();
-    const codigosSet = new Set(codigosCatalogo.map(Number));
-    const itens = (catalogo || []).filter((c: any) => codigosSet.has(Number(c.codigo)));
-
-    const solicitacoes = itens.map((itemTyped: any) => ({
-      id: crypto.randomUUID ? crypto.randomUUID() : "sol-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9),
-      item_id: itemTyped.id || null,
-      periodo_id: periodoId,
-      diretoria_id: diretoriaId,
-      gerencia_id: gerenciaId,
-      codigo: Number(itemTyped.codigo),
-      descricao: itemTyped.descricao,
-      categoria: itemTyped.categoria,
-      unidade: itemTyped.unidade,
-      valor_unitario: Number(itemTyped.valor_unitario || 0),
-      qtd_estimada: 0,
-      prioridade: "Média",
-      status: "rascunho",
-      created_at: new Date().toISOString()
-    }));
-
-    if (solicitacoes.length > 0) {
-      await gs.gsBulkInsert("solicitacoes", solicitacoes);
-      await registrarLogAtividadeBulk("CRIAR", "solicitacoes", solicitacoes.map((s: any) => s.id), { origem: "catalogo" });
-    }
-    return solicitacoes;
-  }
-
   const itens = await supabase
     .from("itens_catalogo")
     .select("*")
@@ -2207,26 +1683,20 @@ export async function createSolicitacoesFromCatalogo(
 
 function mapDbToServicoItem(row: any): ServicoItem {
   if (!row) return row;
-  const rawEstimativa = row.estimativa_valor ?? row.estimativaValor;
-  const rawDotacao = row.dotacao_orcamentaria ?? row.dotacaoOrcamentaria;
   return {
     id: row.id,
-    item: row.item !== undefined && row.item !== null && row.item !== "" ? Number(row.item) : row.item,
+    item: row.item,
     tipoContratacao: row.tipo_contratacao ?? row.tipoContratacao,
     unidadeDemandante: row.unidade_demandante ?? row.unidadeDemandante,
     objeto: row.objeto,
     justificativa: row.justificativa,
     previsaoInicio: row.previsao_inicio ?? row.previsaoInicio,
-    estimativaValor: rawEstimativa !== undefined && rawEstimativa !== null && rawEstimativa !== "" ? Number(rawEstimativa) : 0,
-    dotacaoOrcamentaria: rawDotacao !== undefined && rawDotacao !== null && rawDotacao !== "" ? Number(rawDotacao) : 0,
+    estimativaValor: row.estimativa_valor ?? row.estimativaValor,
+    dotacaoOrcamentaria: row.dotacao_orcamentaria ?? row.dotacaoOrcamentaria,
     grauPrioridade: row.grau_prioridade ?? row.grauPrioridade,
     vinculacao: row.vinculacao,
     dependenciaDescricao: row.dependencia_descricao ?? row.dependenciaDescricao,
-    gerencia: row.gerencias?.sigla
-      ?? (row.gerencia && !String(row.gerencia).includes("-") ? row.gerencia : undefined)
-      ?? memoryGerenciasById.get(String(row.gerencia_id || row.gerencia || "").trim().toLowerCase())
-      ?? row.gerencia
-      ?? row.gerencia_id,
+    gerencia: row.gerencias?.sigla ?? row.gerencia ?? row.gerencia_id,
     diretoriaSigla: row.diretorias?.sigla ?? row.diretoriaSigla ?? row.diretoria_id,
     status: row.status,
     observacao: row.observacao,
@@ -2296,11 +1766,6 @@ export async function getServicosByGerencia(
   gerenciaId: string,
   periodoId: string
 ): Promise<ServicoItem[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetServicos({ gerencia_id: gerenciaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToServicoItem);
-  }
-
   const { data, error } = await supabase
     .from("servicos")
     .select("*")
@@ -2328,11 +1793,6 @@ export async function getServicosByDiretoria(
   diretoriaId: string,
   periodoId: string
 ): Promise<ServicoItem[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetServicos({ diretoria_id: diretoriaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToServicoItem);
-  }
-
   const data = await fetchAllPages<any>((from, to) =>
     supabase
       .from("servicos")
@@ -2351,13 +1811,6 @@ export async function updateServico(
   servicoId: string,
   updates: Partial<ServicoItem> | any
 ): Promise<ServicoItem | undefined> {
-  if (gs.isGoogleSheetsActive()) {
-    const dbUpdates = mapServicoItemToDb(updates);
-    const updated = await gs.gsUpdateServico(servicoId, dbUpdates);
-    await registrarLogAtividade("EDITAR", "servicos", servicoId, updates);
-    return mapDbToServicoItem(updated);
-  }
-
   const isNovo = (updates.tipo_contratacao || updates.tipoContratacao) === "Novo";
   const modulo: ModuloTipo = isNovo ? "servicos_novos" : "servicos_existentes";
 
@@ -2405,12 +1858,6 @@ export async function createServico(
   });
 
   const dbRow = mapServicoItemToDb(servico);
-  if (gs.isGoogleSheetsActive()) {
-    const created = await gs.gsCreateServico(dbRow);
-    await registrarLogAtividade("CRIAR", "servicos", created.id, servico);
-    return mapDbToServicoItem(created);
-  }
-
   const { data, error } = await supabase
     .from("servicos")
     .insert([dbRow])
@@ -2426,12 +1873,6 @@ export async function createServico(
 
 export const deleteServico = async (idOrItem: string | number): Promise<boolean> => {
   if (!idOrItem) throw new Error("ID inválido para exclusão");
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServico(String(idOrItem));
-    await registrarLogAtividade("EXCLUIR", "servicos", String(idOrItem));
-    return true;
-  }
 
   const idStr = String(idOrItem);
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr);
@@ -2480,12 +1921,6 @@ export const deleteServico = async (idOrItem: string | number): Promise<boolean>
 
 export async function deleteServicosBulk(itemIds: (string | number)[]): Promise<boolean> {
   if (!itemIds || itemIds.length === 0) return false;
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicosBulk(itemIds.map(String));
-    await registrarLogAtividadeBulk("EXCLUIR", "servicos", itemIds.map(String));
-    return true;
-  }
 
   await assertActivityAllowed({
     modulo: "servicos_existentes",
@@ -2539,13 +1974,6 @@ export async function updateSolicitacoesBulkData(
   ids: string[],
   updates: Partial<PlanItem> | any
 ): Promise<void> {
-  if (gs.isGoogleSheetsActive()) {
-    const items = ids.map(id => ({ id, ...updates }));
-    await gs.gsUpdateSolicitacoesBulkData(items);
-    await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacoesBulkData" });
-    return;
-  }
-
   const dbUpdates: Record<string, unknown> = {};
 
   if (updates.qtdEstimada !== undefined) dbUpdates.qtd_estimada = updates.qtdEstimada;
@@ -2579,14 +2007,6 @@ export async function updateServicosBulkData(
   ids: string[],
   updates: Partial<ServicoItem> | any
 ): Promise<void> {
-  if (gs.isGoogleSheetsActive()) {
-    const dbUpdates = mapServicoItemToDb(updates);
-    const items = ids.map(id => ({ id, ...dbUpdates }));
-    await gs.gsUpdateServicosBulkData(items);
-    await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicosBulkData" });
-    return;
-  }
-
   const dbUpdates = mapServicoItemToDb(updates);
   dbUpdates.updated_at = new Date().toISOString();
   delete dbUpdates.id;
@@ -2612,11 +2032,6 @@ async function invokeAdminFunction(
   functionName: string,
   body: Record<string, unknown>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    console.warn(`invokeAdminFunction: redirecionando chamada de '${functionName}' para Google Sheets.`);
-    return { success: true };
-  }
-
   try {
     const { data, error } = await supabase.functions.invoke(functionName, {
       body,
@@ -2652,12 +2067,6 @@ async function invokeAdminFunction(
 export async function createServicoAdmin(
   item: Record<string, unknown>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const created = await gs.gsCreateServicoCatalogo(item);
-    await registrarLogAtividade("CRIAR", "servicos_catalogo", (created as any)?.id || "novo", item);
-    return { success: true, data: created };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2671,12 +2080,6 @@ export async function updateServicoAdmin(
   servicoId: string,
   item: Record<string, unknown>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateServicoCatalogo(servicoId, item);
-    await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, item);
-    return { success: true, data: updated };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2688,12 +2091,6 @@ export async function updateServicoAdmin(
 }
 
 export async function deleteServicoAdmin(servicoId: string): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicoCatalogo(servicoId);
-    await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2713,12 +2110,6 @@ export async function updateItemCatalogoAdmin(
     valor_unitario: number;
   }>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateItemCatalogo(itemId, updates);
-    await registrarLogAtividade("EDITAR", "itens_catalogo", itemId, updates);
-    return { success: true, data: updated };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -2748,12 +2139,6 @@ export async function updateItemCatalogoAdmin(
 export async function deleteItemCatalogoAdmin(
   itemId: string
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteItemCatalogo(itemId);
-    await registrarLogAtividade("EXCLUIR", "itens_catalogo", itemId);
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
 
   if (!adminAccessCode) {
@@ -2778,47 +2163,12 @@ export async function deleteItemCatalogoAdmin(
   return data;
 }
 
-export async function deleteItensCatalogoBulkAdmin(
-  itemIds: string[]
-): Promise<unknown> {
-  if (!itemIds || itemIds.length === 0) return { success: true };
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteItensCatalogoBulk(itemIds);
-    await registrarLogAtividadeBulk("EXCLUIR", "itens_catalogo", itemIds, { acao: "deleteItensCatalogoBulkAdmin" });
-    return { success: true };
-  }
-  return Promise.all(itemIds.map(id => deleteItemCatalogoAdmin(id)));
-}
-
 export async function criarOrcamento(
   diretoriaId: string,
   tipo: "aquisicao" | "servicos",
   retidoDiretoria: number,
   repassesGerencias: Record<string, number>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const currentConfig = (await gs.gsGetAdminConfig()) || {};
-    const miniConfig = (currentConfig.admin_mini_erp_config || {}) as any;
-    if (tipo === "aquisicao") {
-      miniConfig.diretoriaBudgetsAquisicao = miniConfig.diretoriaBudgetsAquisicao || {};
-      miniConfig.diretoriaBudgetsAquisicao[diretoriaId] = retidoDiretoria;
-      miniConfig.gerenciaBudgetsAquisicao = miniConfig.gerenciaBudgetsAquisicao || {};
-      Object.entries(repassesGerencias || {}).forEach(([gId, val]) => {
-        miniConfig.gerenciaBudgetsAquisicao[gId] = val;
-      });
-    } else {
-      miniConfig.diretoriaBudgetsServicos = miniConfig.diretoriaBudgetsServicos || {};
-      miniConfig.diretoriaBudgetsServicos[diretoriaId] = retidoDiretoria;
-      miniConfig.gerenciaBudgetsServicos = miniConfig.gerenciaBudgetsServicos || {};
-      Object.entries(repassesGerencias || {}).forEach(([gId, val]) => {
-        miniConfig.gerenciaBudgetsServicos[gId] = val;
-      });
-    }
-    await gs.gsSaveAdminConfig("admin_mini_erp_config", miniConfig);
-    await registrarLogAtividade("CRIAR", "admin_orcamento_config", diretoriaId, { acao: "criarOrcamento", tipo, retidoDiretoria });
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2846,29 +2196,6 @@ export async function enviarOrcamento(
   retidoDiretoria: number,
   repassesGerencias: Record<string, number>
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const currentConfig = (await gs.gsGetAdminConfig()) || {};
-    const miniConfig = (currentConfig.admin_mini_erp_config || {}) as any;
-    if (tipo === "aquisicao") {
-      miniConfig.diretoriaBudgetsAquisicao = miniConfig.diretoriaBudgetsAquisicao || {};
-      miniConfig.diretoriaBudgetsAquisicao[diretoriaId] = retidoDiretoria;
-      miniConfig.gerenciaBudgetsAquisicao = miniConfig.gerenciaBudgetsAquisicao || {};
-      Object.entries(repassesGerencias || {}).forEach(([gId, val]) => {
-        miniConfig.gerenciaBudgetsAquisicao[gId] = val;
-      });
-    } else {
-      miniConfig.diretoriaBudgetsServicos = miniConfig.diretoriaBudgetsServicos || {};
-      miniConfig.diretoriaBudgetsServicos[diretoriaId] = retidoDiretoria;
-      miniConfig.gerenciaBudgetsServicos = miniConfig.gerenciaBudgetsServicos || {};
-      Object.entries(repassesGerencias || {}).forEach(([gId, val]) => {
-        miniConfig.gerenciaBudgetsServicos[gId] = val;
-      });
-    }
-    await gs.gsSaveAdminConfig("admin_mini_erp_config", miniConfig);
-    await registrarLogAtividade("EDITAR", "admin_orcamento_config", diretoriaId, { acao: "enviarOrcamento", tipo, retidoDiretoria });
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2895,25 +2222,6 @@ export async function deletarOrcamento(
   tipo: "aquisicao" | "servicos",
   gerenciasIds: string[]
 ): Promise<unknown> {
-  if (gs.isGoogleSheetsActive()) {
-    const currentConfig = (await gs.gsGetAdminConfig()) || {};
-    const miniConfig = (currentConfig.admin_mini_erp_config || {}) as any;
-    if (tipo === "aquisicao") {
-      if (miniConfig.diretoriaBudgetsAquisicao) delete miniConfig.diretoriaBudgetsAquisicao[diretoriaId];
-      if (miniConfig.gerenciaBudgetsAquisicao) {
-        (gerenciasIds || []).forEach(gId => delete miniConfig.gerenciaBudgetsAquisicao[gId]);
-      }
-    } else {
-      if (miniConfig.diretoriaBudgetsServicos) delete miniConfig.diretoriaBudgetsServicos[diretoriaId];
-      if (miniConfig.gerenciaBudgetsServicos) {
-        (gerenciasIds || []).forEach(gId => delete miniConfig.gerenciaBudgetsServicos[gId]);
-      }
-    }
-    await gs.gsSaveAdminConfig("admin_mini_erp_config", miniConfig);
-    await registrarLogAtividade("EXCLUIR", "admin_orcamento_config", diretoriaId, { acao: "deletarOrcamento", tipo, gerenciasIds });
-    return { success: true };
-  }
-
   const adminAccessCode = sessionStorage.getItem("access-code:admin");
   if (!adminAccessCode) throw new Error("Sessão admin não encontrada.");
 
@@ -2934,11 +2242,7 @@ export async function deletarOrcamento(
   return data;
 }
 
-export async function getLogsAtividades(): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetLogsAtividades(false)) || [];
-  }
-
+export async function getLogsAtividades() {
   const { data, error } = await supabase
     .from("logs_atividades")
     .select("*")
@@ -2949,11 +2253,7 @@ export async function getLogsAtividades(): Promise<any[]> {
   return data || [];
 }
 
-export async function getLixeiraLogsAtividades(): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetLogsAtividades(true)) || [];
-  }
-
+export async function getLixeiraLogsAtividades() {
   const { data, error } = await supabase
     .from("logs_atividades")
     .select("*")
@@ -2965,39 +2265,12 @@ export async function getLixeiraLogsAtividades(): Promise<any[]> {
 }
 
 export async function getFuncionariosNomes() {
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const data = await gs.gsGetFuncionarios();
-      if (Array.isArray(data) && data.length > 0) {
-        return data;
-      }
-    } catch (_e) {
-      console.warn("Aviso ao buscar funcionários via gsGetFuncionarios, tentando fallback por GID:", _e);
-      try {
-        const fallback = await gs.gsGetDataByGid("553474173");
-        if (fallback && Array.isArray(fallback.data) && fallback.data.length > 0) {
-          return fallback.data;
-        }
-      } catch (_e2) {
-        console.error("Falha no fallback de funcionários por GID:", _e2);
-      }
-    }
-  }
-
   const { data, error } = await supabase
     .from("funcionarios")
     .select("matricula, nome, diretoria_id, gerencia_id");
 
   if (error) {
-    console.warn("Erro ao buscar funcionários no Supabase, tentando fallback Google Sheets:", error);
-    try {
-      const fallback = await gs.gsGetDataByGid("553474173");
-      if (fallback && Array.isArray(fallback.data) && fallback.data.length > 0) {
-        return fallback.data;
-      }
-    } catch (_e3) {
-      console.warn("Falha ao recuperar funcionários:", _e3);
-    }
+    console.error("Erro ao buscar funcionários:", error);
     return [];
   }
   return data || [];
@@ -3009,22 +2282,6 @@ export async function registrarLogOrcamentario(
   acao: 'reservar' | 'estornar_reserva' | 'executar' | 'estornar_execucao',
   valor: number
 ) {
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      await gs.gsRegistrarLogOrcamentario({
-        ano: 2027,
-        centro_custo_id: diretoriaId,
-        referencia_tipo: 'solicitacao',
-        referencia_id: solicitacaoId,
-        acao,
-        valor
-      });
-    } catch (e) {
-      console.warn("Aviso ao registrar log orçamentário no Google Sheets:", e);
-    }
-    return;
-  }
-
   try {
     // 1. Achar o centro_custo da diretoria
     const { data: centros, error: centroError } = await supabase
@@ -3072,23 +2329,6 @@ export async function registrarLogsOrcamentariosBulk(
   }[]
 ) {
   if (logs.length === 0) return;
-
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      const prepared = logs.map(l => ({
-        ano: 2027,
-        centro_custo_id: l.diretoriaId,
-        referencia_tipo: 'solicitacao',
-        referencia_id: l.solicitacaoId,
-        acao: l.acao,
-        valor: l.valor
-      }));
-      await gs.gsRegistrarLogsOrcamentariosBulk(prepared);
-    } catch (e) {
-      console.warn("Aviso ao registrar logs orçamentários em lote no Google Sheets:", e);
-    }
-    return;
-  }
 
   try {
     const uniqueDiretoriaIds = Array.from(new Set(logs.map(log => log.diretoriaId)));
@@ -3141,10 +2381,6 @@ export async function registrarLogsOrcamentariosBulk(
 }
 
 export async function deleteLogAtividade(id: string): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    return await gs.gsDeleteLogAtividade(id);
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .update({ is_deleted: true })
@@ -3157,11 +2393,6 @@ export async function deleteLogAtividade(id: string): Promise<boolean> {
 }
 
 export async function deleteLogsAtividadeBulk(ids: string[]) {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteLogsAtividadeBulk(ids);
-    return true;
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .update({ is_deleted: true })
@@ -3174,10 +2405,6 @@ export async function deleteLogsAtividadeBulk(ids: string[]) {
 }
 
 export async function restoreLogAtividade(id: string): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    return await gs.gsRestoreLogAtividade(id);
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .update({ is_deleted: false })
@@ -3190,11 +2417,6 @@ export async function restoreLogAtividade(id: string): Promise<boolean> {
 }
 
 export async function restoreLogsAtividadeBulk(ids: string[]) {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsRestoreLogsAtividadeBulk(ids);
-    return true;
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .update({ is_deleted: false })
@@ -3207,11 +2429,6 @@ export async function restoreLogsAtividadeBulk(ids: string[]) {
 }
 
 export async function hardDeleteLogAtividade(id: string): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsHardDeleteLogsAtividadeBulk([id]);
-    return true;
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .delete()
@@ -3224,11 +2441,6 @@ export async function hardDeleteLogAtividade(id: string): Promise<boolean> {
 }
 
 export async function hardDeleteLogsAtividadeBulk(ids: string[]) {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsHardDeleteLogsAtividadeBulk(ids);
-    return true;
-  }
-
   const { error } = await supabase
     .from("logs_atividades")
     .delete()
@@ -3241,21 +2453,18 @@ export async function hardDeleteLogsAtividadeBulk(ids: string[]) {
 }
 
 export async function getRecordDetails(tableName: string, id: string) {
-  if (!tableName || !id || gs.isGoogleSheetsActive()) return null;
-  try {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select("*")
-      .eq("id", id)
-      .single();
-      
-    if (error) {
-      return null;
-    }
-    return data;
-  } catch {
+  if (!tableName || !id) return null;
+  const { data, error } = await supabase
+    .from(tableName)
+    .select("*")
+    .eq("id", id)
+    .single();
+    
+  if (error) {
+    console.error(`Erro ao buscar detalhes de ${tableName} com ID ${id}:`, error);
     return null;
   }
+  return data;
 }
 
 export async function updateLogAtividade(id: string, updates: any): Promise<boolean> {
@@ -3287,39 +2496,22 @@ export async function updateLogsAtividadeBulk(ids: string[], updates: any): Prom
 // --------------------------------------------------------------------------------
 
 export async function getLogsOrcamentarios(): Promise<any[]> {
-  if (gs.isGoogleSheetsActive()) {
-    try {
-      return (await gs.gsGetLogsOrcamentarios()) || [];
-    } catch {
-      return [];
-    }
-  }
+  const { data, error } = await supabase
+    .from("log_orcamentario")
+    .select(`
+      *,
+      centro_custo:centro_custo_id(codigo, nome, diretoria_id)
+    `)
+    .order("created_at", { ascending: false });
 
-  try {
-    const { data, error } = await supabase
-      .from("log_orcamentario")
-      .select(`
-        *,
-        centro_custo:centro_custo_id(codigo, nome, diretoria_id)
-      `)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.warn("Erro ao buscar logs orçamentários:", error);
-      return [];
-    }
-    return data || [];
-  } catch {
-    return [];
+  if (error) {
+    console.error("Erro ao buscar logs orçamentários:", error);
+    throw error;
   }
+  return data || [];
 }
 
 export async function deleteLogOrcamentario(id: string): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteLogsOrcamentarioBulk([id]);
-    return true;
-  }
-
   const { error } = await supabase
     .from("log_orcamentario")
     .delete()
@@ -3332,11 +2524,6 @@ export async function deleteLogOrcamentario(id: string): Promise<boolean> {
 }
 
 export async function deleteLogsOrcamentarioBulk(ids: string[]): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteLogsOrcamentarioBulk(ids);
-    return true;
-  }
-
   const { error } = await supabase
     .from("log_orcamentario")
     .delete()
@@ -3367,33 +2554,6 @@ export async function updateLogOrcamentario(id: string, updates: any): Promise<b
 export async function getRestricoesAtividades(
   periodoId?: string
 ): Promise<RestricaoAtividade[]> {
-  if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetRestricoesAtividades();
-    let list = rows || [];
-    if (periodoId) {
-      list = list.filter((r: any) => String(r.periodo_id) === String(periodoId));
-    }
-    return list.map((r: any) => ({
-      id: r.id,
-      periodo_id: r.periodo_id,
-      escopo_tipo: r.escopo_tipo || r.escopo,
-      diretoria_id: r.diretoria_id,
-      gerencia_id: r.gerencia_id,
-      perfil: r.perfil,
-      modulo: r.modulo,
-      atividade: r.atividade,
-      status: r.status,
-      ativo: r.ativo !== false && r.ativo !== "false",
-      observacao: r.observacao || r.mensagem || "",
-      criado_por: r.criado_por || r.bloqueado_por || "",
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      periodo_nome: r.periodo_nome || "",
-      diretoria_sigla: r.diretoria_sigla || "",
-      gerencia_sigla: r.gerencia_sigla || "",
-    }));
-  }
-
   let query = supabase
     .from("restricoes_atividades")
     .select(`
@@ -3453,19 +2613,6 @@ export async function createRestricaoAtividade(
     criado_por: payload.criado_por || null,
   };
 
-  if (gs.isGoogleSheetsActive()) {
-    const res = await gs.gsCreateRestricaoAtividade(insertPayload);
-    const newId = (res as any)?.data?.id || (res as any)?.id || ("res-" + Date.now());
-    await registrarLogAtividade("CRIAR", "restricoes_atividades", newId, insertPayload);
-    return {
-      id: newId,
-      ...insertPayload,
-      periodo_nome: "",
-      diretoria_sigla: "",
-      gerencia_sigla: "",
-    } as RestricaoAtividade;
-  }
-
   const { data, error } = await supabase
     .from("restricoes_atividades")
     .insert([insertPayload])
@@ -3520,11 +2667,6 @@ export async function createRestricoesAtividadesBulk(
     criado_por: payload.criado_por || null,
   }));
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsCreateRestricoesAtividadesBulk(insertPayloads);
-    return true;
-  }
-
   const { error } = await supabase
     .from("restricoes_atividades")
     .insert(insertPayloads);
@@ -3555,18 +2697,6 @@ export async function updateRestricaoAtividade(
   if (updates.status !== undefined) updatePayload.status = updates.status;
   if (updates.ativo !== undefined) updatePayload.ativo = updates.ativo;
   if (updates.observacao !== undefined) updatePayload.observacao = updates.observacao || null;
-
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsUpdateRestricaoAtividade(id, updatePayload);
-    await registrarLogAtividade("EDITAR", "restricoes_atividades", id, updatePayload);
-    return {
-      id,
-      ...updates,
-      periodo_nome: updates.periodo_nome || "",
-      diretoria_sigla: updates.diretoria_sigla || "",
-      gerencia_sigla: updates.gerencia_sigla || "",
-    } as RestricaoAtividade;
-  }
 
   const { data, error } = await supabase
     .from("restricoes_atividades")
@@ -3609,17 +2739,6 @@ export async function toggleRestricaoAtividade(
   id: string,
   ativo: boolean
 ): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsToggleRestricaoAtividade(id, String(ativo));
-    await registrarLogAtividade(
-      ativo ? "ATIVAR" : "DESATIVAR",
-      "restricoes_atividades",
-      id,
-      { ativo }
-    );
-    return true;
-  }
-
   const { data, error } = await supabase
     .from("restricoes_atividades")
     .update({ ativo, updated_at: new Date().toISOString() })
@@ -3649,12 +2768,6 @@ export async function toggleRestricaoAtividade(
 }
 
 export async function deleteRestricaoAtividade(id: string): Promise<boolean> {
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteRestricaoAtividade(id);
-    await registrarLogAtividade("EXCLUIR", "restricoes_atividades", id);
-    return true;
-  }
-
   const { data } = await supabase
     .from("restricoes_atividades")
     .select(`*, periodos:periodo_id(nome)`)
@@ -3686,16 +2799,6 @@ export async function deleteRestricaoAtividade(id: string): Promise<boolean> {
 export async function deleteRestricoesAtividadesBulk(ids: string[]): Promise<boolean> {
   if (!ids || ids.length === 0) return true;
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteRestricoesAtividadesBulk(ids);
-    try {
-      await registrarLogAtividadeBulk("EXCLUIR", "restricoes_atividades", ids, { total: ids.length });
-    } catch (logErr) {
-      console.warn("Aviso ao registrar log de exclusão em massa de restrições:", logErr);
-    }
-    return true;
-  }
-
   const { error } = await supabase
     .from("restricoes_atividades")
     .delete()
@@ -3723,36 +2826,6 @@ export async function upsertPerfilRestricao(params: {
   bloqueado: boolean;
   observacao?: string;
 }): Promise<RestricaoAtividade> {
-  if (gs.isGoogleSheetsActive()) {
-    const list = await getRestricoesAtividades(params.periodo_id);
-    const existing = list.find(r => 
-      String(r.periodo_id) === String(params.periodo_id) &&
-      r.escopo_tipo === "perfil" &&
-      r.perfil === params.perfil &&
-      r.modulo === params.modulo &&
-      r.atividade === params.atividade
-    );
-
-    if (existing) {
-      return updateRestricaoAtividade(existing.id, {
-        ativo: params.bloqueado,
-        status: "bloqueado",
-        observacao: params.observacao || null,
-      });
-    } else {
-      return createRestricaoAtividade({
-        periodo_id: params.periodo_id,
-        escopo_tipo: "perfil",
-        perfil: params.perfil,
-        modulo: params.modulo,
-        atividade: params.atividade,
-        status: "bloqueado",
-        ativo: params.bloqueado,
-        observacao: params.observacao || null,
-      });
-    }
-  }
-
   const { data: existing } = await supabase
     .from("restricoes_atividades")
     .select(`*, periodos:periodo_id(nome)`)
@@ -3805,79 +2878,6 @@ export async function upsertMultiplosEscoposRestricao(params: {
         observacao: params.observacao,
       });
     }
-    return true;
-  }
-
-  if (gs.isGoogleSheetsActive()) {
-    const list = await getRestricoesAtividades(params.periodo_id);
-
-    if (params.escopo_tipo === "gerencia") {
-      await Promise.all(
-        params.target_ids.map(async (gerencia_id) => {
-          const existing = list.find(r => 
-            String(r.periodo_id) === String(params.periodo_id) &&
-            r.escopo_tipo === "gerencia" &&
-            String(r.gerencia_id) === String(gerencia_id) &&
-            r.modulo === params.modulo &&
-            r.atividade === params.atividade
-          );
-
-          if (existing) {
-            await updateRestricaoAtividade(existing.id, {
-              ativo: params.bloqueado,
-              status: "bloqueado",
-              observacao: params.observacao || null,
-            });
-          } else {
-            await createRestricaoAtividade({
-              periodo_id: params.periodo_id,
-              escopo_tipo: "gerencia",
-              gerencia_id,
-              modulo: params.modulo,
-              atividade: params.atividade,
-              status: "bloqueado",
-              ativo: params.bloqueado,
-              observacao: params.observacao || null,
-            });
-          }
-        })
-      );
-    }
-
-    if (params.escopo_tipo === "diretoria") {
-      await Promise.all(
-        params.target_ids.map(async (diretoria_id) => {
-          const existing = list.find(r => 
-            String(r.periodo_id) === String(params.periodo_id) &&
-            r.escopo_tipo === "diretoria" &&
-            String(r.diretoria_id) === String(diretoria_id) &&
-            r.modulo === params.modulo &&
-            r.atividade === params.atividade
-          );
-
-          if (existing) {
-            await updateRestricaoAtividade(existing.id, {
-              ativo: params.bloqueado,
-              status: "bloqueado",
-              observacao: params.observacao || null,
-            });
-          } else {
-            await createRestricaoAtividade({
-              periodo_id: params.periodo_id,
-              escopo_tipo: "diretoria",
-              diretoria_id,
-              perfil: "diretoria",
-              modulo: params.modulo,
-              atividade: params.atividade,
-              status: "bloqueado",
-              ativo: params.bloqueado,
-              observacao: params.observacao || null,
-            });
-          }
-        })
-      );
-    }
-
     return true;
   }
 
@@ -4322,18 +3322,6 @@ export async function transferirSolicitacoesParaGerenciaBulk(
   targetGerenciaId: string
 ): Promise<void> {
   if (ids.length === 0) return;
-  if (gs.isGoogleSheetsActive()) {
-    const gerencias = await gs.gsGetGerencias();
-    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(targetGerenciaId));
-    const targetDirId = targetGer?.diretoria_id || "";
-    await gs.gsTransferirSolicitacoesParaGerenciaBulk(ids, targetGerenciaId, targetDirId);
-    await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
-      acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: targetGerenciaId,
-    });
-    return;
-  }
-
   const { error } = await supabase
     .from("solicitacoes")
     .update({
@@ -4359,18 +3347,6 @@ export async function transferirServicosParaGerenciaBulk(
   targetGerenciaId: string
 ): Promise<void> {
   if (ids.length === 0) return;
-  if (gs.isGoogleSheetsActive()) {
-    const gerencias = await gs.gsGetGerencias();
-    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(targetGerenciaId));
-    const targetDirId = targetGer?.diretoria_id || "";
-    await gs.gsTransferirServicosParaGerenciaBulk(ids, targetGerenciaId, targetDirId);
-    await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
-      acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: targetGerenciaId,
-    });
-    return;
-  }
-
   const { error } = await supabase
     .from("servicos")
     .update({

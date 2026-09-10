@@ -46,6 +46,7 @@ import {
   createServicoCatalogoAndDistribuir,
   updateServicoCatalogoAdmin,
   deleteServicoCatalogoAdmin,
+  deleteServicosCatalogoBulkAdmin,
   getDiretorias,
   getGerenciasByDiretoria,
   getTodasGerencias,
@@ -450,7 +451,7 @@ export function AdminServicosControl() {
 
     setIsDeletingBulk(true);
     try {
-      await Promise.all(selectedIds.map(id => deleteServicoCatalogoAdmin(id)));
+      await deleteServicosCatalogoBulkAdmin(selectedIds);
       setSelectedIds([]);
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
