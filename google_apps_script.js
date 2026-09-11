@@ -301,7 +301,7 @@ function doPost(e) {
     }
 
     if (action === "validateAccessCode") {
-      const result = handleValidateAccessCode(body.code, body.scope);
+      const result = handleValidateAccessCode(body.code, body.scope, body.diretoria_id, body.gerencia_id);
       return jsonResponse(result);
     }
 
@@ -1620,25 +1620,67 @@ function sha256(str) {
   return txtHash;
 }
 
-function handleValidateAccessCode(code, scope) {
+function handleValidateAccessCode(code, scope, diretoria_id, gerencia_id) {
   if (!code) return { success: false, error: "Código de acesso vazio" };
-  const normalized = String(code).trim().toLowerCase();
+  const rawCode = String(code).trim();
+  const normalized = rawCode.toLowerCase();
   const hash = sha256(normalized);
+  const rawHash = sha256(rawCode);
 
   const codes = getSheetData(SHEETS.CODIGOS_ACESSO);
+  if (!codes || codes.length === 0) {
+    return { success: false, error: "Tabela de códigos de acesso vazia ou não encontrada na planilha" };
+  }
+
   const match = codes.find(c => {
-    // Aceitar ativo flexível: true, "true", "TRUE", "VERDADEIRO", 1, "t"
+    // Aceitar ativo flexível: true, "true", "TRUE", "VERDADEIRO", 1, "t", "sim", "s" ou vazio/indefinido
     const isAtivo = c.ativo === true || 
                     String(c.ativo).toLowerCase() === "true" || 
                     String(c.ativo).toUpperCase() === "VERDADEIRO" || 
                     String(c.ativo) === "1" || 
-                    String(c.ativo).toLowerCase() === "t";
+                    String(c.ativo).toLowerCase() === "t" ||
+                    String(c.ativo).toLowerCase() === "sim" ||
+                    String(c.ativo).toLowerCase() === "s" ||
+                    c.ativo === "" || c.ativo === undefined || c.ativo === null;
     if (!isAtivo) return false;
 
     if (scope && String(c.scope || "").toLowerCase() !== String(scope).toLowerCase()) return false;
 
-    const dbHash = String(c.codigo_hash || c.codigo || "").toLowerCase().trim();
-    return dbHash === hash || dbHash === normalized;
+    // Obtém o valor configurado na coluna codigo_hash da guia codigos_acesso
+    const dbHash = String(c.codigo_hash || c["código_hash"] || c.codigo || c.hash || "").trim();
+    if (!dbHash) return false;
+
+    const dbHashLower = dbHash.toLowerCase();
+
+    // Valida diretamente contra a coluna codigo_hash:
+    // Suporta tanto texto direto/senha simples quanto hash SHA-256
+    const isCodeMatch = (
+      dbHashLower === hash || 
+      dbHashLower === rawHash.toLowerCase() || 
+      dbHashLower === normalized || 
+      dbHash === rawCode
+    );
+    if (!isCodeMatch) return false;
+
+    // Se especificada a diretoria_id, valida correspondência
+    if (diretoria_id && c.diretoria_id) {
+      const rowDir = String(c.diretoria_id).trim().toLowerCase();
+      const targetDir = String(diretoria_id).trim().toLowerCase();
+      if (rowDir && rowDir !== targetDir) {
+        return false;
+      }
+    }
+
+    // Se especificada a gerencia_id, valida correspondência
+    if (gerencia_id && c.gerencia_id) {
+      const rowGer = String(c.gerencia_id).trim().toLowerCase();
+      const targetGer = String(gerencia_id).trim().toLowerCase();
+      if (rowGer && rowGer !== targetGer) {
+        return false;
+      }
+    }
+
+    return true;
   });
 
   if (!match) {
@@ -1652,6 +1694,7 @@ function handleValidateAccessCode(code, scope) {
   return {
     success: true,
     data: {
+      id: match.id || null,
       scope: match.scope,
       diretoria_id: match.diretoria_id || null,
       gerencia_id: match.gerencia_id || null,

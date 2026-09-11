@@ -701,6 +701,13 @@ const DiretoriaAprovacao = () => {
     ? (orcamentoConfig as any)?.diretoriaBudgetsOrcamentoGeral?.[diretoria.id] || 0
     : 0;
 
+  const isEnviadoOuAprovado = (status?: SolicitacaoStatus | string) =>
+    status === "enviado" ||
+    status === "em_analise" ||
+    status === "aprovado" ||
+    status === "em_compra" ||
+    status === "concluido";
+
   const isAprovado = (status?: SolicitacaoStatus) =>
     status === "aprovado" || status === "em_compra" || status === "concluido";
 
@@ -726,7 +733,7 @@ const DiretoriaAprovacao = () => {
       return totalSelected;
     }
     return [...items, ...itensProprios]
-      .filter((item) => isAprovado(item.status) && item.qtdEstimada > 0)
+      .filter((item) => isEnviadoOuAprovado(item.status) && item.qtdEstimada > 0)
       .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
   }, [items, itensProprios, filteredOwnItems, selectedOwnItems, selectedItems]);
 
@@ -741,7 +748,7 @@ const DiretoriaAprovacao = () => {
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isAprovado(s.status) && servicosCatalogoSet.has(s.item as any))
+      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && servicosCatalogoSet.has(s.item as any))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
   }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
@@ -756,7 +763,7 @@ const DiretoriaAprovacao = () => {
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isAprovado(s.status) && !servicosCatalogoSet.has(s.item as any))
+      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && !servicosCatalogoSet.has(s.item as any))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
   }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
@@ -2420,6 +2427,7 @@ const DiretoriaAprovacao = () => {
         onBack={() => navigate("/")}
         scope="diretoria"
         targetSigla={diretoria.sigla}
+        targetDiretoriaId={diretoria.id}
       />
     );
   }
@@ -2640,18 +2648,19 @@ const DiretoriaAprovacao = () => {
       setSelectedServicos(newSelection);
     };
 
-    const renderServicosTable = (titulo: string, listaBase: ServicoItem[]) => {
+    const renderServicosTable = (titulo: string, listaBase: ServicoItem[], fullLista?: ServicoItem[]) => {
+      const targetLista = fullLista || listaBase;
       return (
         <SortableWrapper
           items={listaBase}
           render={(lista, sortConfig, requestSort) => {
-            const ids = lista.map((s) => s.id || String(s.item));
+            const ids = targetLista.map((s) => s.id || String(s.item));
             const allSelected = ids.length > 0 && ids.every((id) => selectedServicos.has(id));
 
       return (
         <div className="bg-white rounded-lg border overflow-hidden mb-4">
           <div className="px-4 py-3 border-b bg-gray-50">
-            <h3 className="text-sm font-semibold text-gray-800">{titulo} ({lista.length})</h3>
+            <h3 className="text-sm font-semibold text-gray-800">{titulo} ({targetLista.length})</h3>
           </div>
           <div className="overflow-x-auto">
           <table className="w-full">
@@ -2661,7 +2670,7 @@ const DiretoriaAprovacao = () => {
                   <input
                     type="checkbox"
                     checked={allSelected}
-                    onChange={() => toggleSelectAllServicosLista(lista)}
+                    onChange={() => toggleSelectAllServicosLista(targetLista)}
                     className="rounded"
                   />
                 </th>
@@ -3074,7 +3083,7 @@ const DiretoriaAprovacao = () => {
                 </div>
               ) : (
                 <>
-                  {renderServicosTable(selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", ownServicosPaginationData.paginatedItems)}
+                  {renderServicosTable(selectedOption === "servicos_existentes" ? "Serviços Existentes" : "Novos Serviços", ownServicosPaginationData.paginatedItems, servicosProprios)}
                   {ownServicosPaginationData.totalPages > 1 && (
                     <SmartPagination
                       currentPage={ownServicosCurrentPage}
@@ -3345,7 +3354,7 @@ const DiretoriaAprovacao = () => {
                   
                   {(() => {
                     const titulo = selectedOption === "servicos_novos" ? "Serviços Novos" : "Serviços Existentes";
-                    return renderServicosTable(titulo, servicosPaginados);
+                    return renderServicosTable(titulo, servicosPaginados, servicosFiltradasPorStatus);
                   })()}
 
                   {/* Paginação Serviços */}
@@ -3862,7 +3871,7 @@ const DiretoriaAprovacao = () => {
                 setSelectedOwnItems(newSet);
               }}
               onToggleSelectAll={() => {
-                const validIds = ownPaginationData.paginatedItems.map(i => i.id || i.codigo).filter(Boolean);
+                const validIds = filteredOwnItems.map(i => i.id || i.codigo).filter(Boolean);
                 const allSelected = validIds.length > 0 && validIds.every(id => selectedOwnItems.has(id));
                 const newSet = new Set(selectedOwnItems);
                 if (allSelected) {
@@ -4202,7 +4211,7 @@ const DiretoriaAprovacao = () => {
                     <tr>
                       <th className="p-3 text-left w-12">
                         <Checkbox 
-                          checked={selectedItems.size === selectableItems.length && selectableItems.length > 0}
+                          checked={selectableItems.length > 0 && selectableItems.every(item => item.id && selectedItems.has(item.id))}
                           onCheckedChange={toggleSelectAll}
                           disabled={selectableItems.length === 0}
                         />

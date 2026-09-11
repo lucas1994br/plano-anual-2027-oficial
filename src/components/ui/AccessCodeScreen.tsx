@@ -15,6 +15,8 @@ interface AccessCodeScreenProps {
   onBack: () => void;
   scope: "diretoria" | "gerencia" | "admin" | "compras";
   targetSigla?: string;
+  targetDiretoriaId?: string;
+  targetGerenciaId?: string;
 }
 
 export function AccessCodeScreen({
@@ -26,6 +28,8 @@ export function AccessCodeScreen({
   onBack,
   scope,
   targetSigla,
+  targetDiretoriaId,
+  targetGerenciaId,
 }: AccessCodeScreenProps) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -40,37 +44,50 @@ export function AccessCodeScreen({
       const normalizedCode = code.trim().toLowerCase();
       const isDeveloper = normalizedCode.endsWith("76643");
 
-      // Validar se o código pertence à gerência/diretoria acessada
-      if (targetSigla) {
-        if (!normalizedCode.startsWith(targetSigla.toLowerCase())) {
-          setError("Código de acesso não pertence a esta área.");
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Se for desenvolvedor e passou na validação da sigla acima (se houver), 
-      // permite acesso sem validar no banco.
+      // Se for desenvolvedor, permite acesso direto sem validar na planilha
       if (isDeveloper) {
         sessionStorage.setItem(`access-code:${scope}`, code.trim());
         onAccessGranted({ scope });
         return;
       }
 
-      const result = await validateAccessCode(code, scope);
+      // Validação do código de acesso na tabela/guia codigos_acesso (coluna codigo_hash)
+      const result = await validateAccessCode(code, scope, targetDiretoriaId, targetGerenciaId);
 
       if (!result || result.scope !== scope) {
         setError("Código de acesso inválido para este painel.");
         return;
       }
 
+      // Se o código for de diretoria, valida se pertence à diretoria acessada
+      if (scope === "diretoria" && targetDiretoriaId && result.diretoria_id) {
+        const rowDir = String(result.diretoria_id).toLowerCase().trim();
+        const tgtDir = String(targetDiretoriaId).toLowerCase().trim();
+        const tgtSig = targetSigla ? String(targetSigla).toLowerCase().trim() : "";
+        if (rowDir !== tgtDir && rowDir !== tgtSig) {
+          setError("Código de acesso não pertence a esta diretoria.");
+          return;
+        }
+      }
+
+      // Se o código for de gerência, valida se pertence à gerência acessada
+      if (scope === "gerencia" && targetGerenciaId && result.gerencia_id) {
+        const rowGer = String(result.gerencia_id).toLowerCase().trim();
+        const tgtGer = String(targetGerenciaId).toLowerCase().trim();
+        const tgtSig = targetSigla ? String(targetSigla).toLowerCase().trim() : "";
+        if (rowGer !== tgtGer && rowGer !== tgtSig) {
+          setError("Código de acesso não pertence a esta gerência.");
+          return;
+        }
+      }
+
       sessionStorage.setItem(`access-code:${scope}`, code.trim());
       onAccessGranted(result);
     } catch (err) {
       const message =
-        err instanceof Error && err.message.toLowerCase().includes("expired")
+        err instanceof Error && (err.message.toLowerCase().includes("expir") || err.message.toLowerCase().includes("expired"))
           ? "Código expirado. Solicite um novo código."
-          : "Código de acesso inválido. Tente novamente.";
+          : (err instanceof Error && err.message) || "Código de acesso inválido. Tente novamente.";
       setError(message);
     } finally {
       setLoading(false);

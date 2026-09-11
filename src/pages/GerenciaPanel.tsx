@@ -348,6 +348,13 @@ import {
     : 0;
   const orcamentoGeralAtivo = orcamentoGeralGerencia > 0 ? orcamentoGeralGerencia : orcamentoGeralDiretoria;
 
+  const isEnviadoOuAprovado = (status?: SolicitacaoStatus | string) =>
+    status === "enviado" ||
+    status === "em_analise" ||
+    status === "aprovado" ||
+    status === "em_compra" ||
+    status === "concluido";
+
   const isAprovado = (status?: SolicitacaoStatus) =>
     status === "aprovado" || status === "em_compra" || status === "concluido";
 
@@ -362,7 +369,7 @@ import {
         .reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0);
     }
     return items
-      .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && isAprovado(item.status) && item.qtdEstimada > 0)
+      .filter((item) => item.diretoriaOrcamentariaId === diretoria?.id && isEnviadoOuAprovado(item.status) && item.qtdEstimada > 0)
       .reduce((acc, item) => acc + (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0), 0);
   }, [items, diretoria?.id, selectedAquisicaoIds]);
 
@@ -376,7 +383,11 @@ import {
     const resumoOrcamentoPorDiretoria = useMemo(() => {
       const grupos = new Map<string, { sigla: string; total: number; itens: number }>();
 
-      items
+      const targetItems = selectedAquisicaoIds.size > 0
+        ? items.filter((item) => (item.id && selectedAquisicaoIds.has(item.id)) || selectedAquisicaoIds.has(item.codigo as any) || selectedAquisicaoIds.has(String(item.codigo) as any))
+        : items.filter((item) => isEnviadoOuAprovado(item.status) && item.qtdEstimada > 0);
+
+      targetItems
         .filter((item) => item.qtdEstimada > 0)
         .forEach((item) => {
           const siglaDestino = diretoria?.sigla || "N/D";
@@ -388,7 +399,7 @@ import {
         });
 
       return Array.from(grupos.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
-    }, [items, diretoria?.sigla]);
+    }, [items, diretoria?.sigla, selectedAquisicaoIds]);
 
     const resumoEnvioPorDiretoria = useMemo(() => {
       const grupos = new Map<string, { sigla: string; total: number; itens: number }>();
@@ -419,7 +430,7 @@ import {
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)) && isAprovado(s.status))
+      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
   }, [servicosData, servicosCatalogoData, selectedServicos]);
 
@@ -435,7 +446,7 @@ import {
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)) && isAprovado(s.status))
+      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
   }, [servicosData, servicosCatalogoData, selectedServicos]);
 
@@ -1450,6 +1461,8 @@ import {
         onBack={() => navigate(`/diretoria/${sigla}`)}
         scope="gerencia"
         targetSigla={gerenciaUpper}
+        targetGerenciaId={gerenciaAtual?.id}
+        targetDiretoriaId={diretoria.id}
       />
     );
   }
@@ -1871,8 +1884,8 @@ import {
                   <th className="p-3 text-left w-10">
                     {(() => {
                       const servicosSelecionaveis = showOnlySent
-                        ? paginatedLista.filter(s => Boolean(s.id))
-                        : paginatedLista.filter(s => !isServicoReadOnly(s));
+                        ? sortedItems.filter(s => Boolean(s.id))
+                        : sortedItems.filter(s => !isServicoReadOnly(s));
                       const allChecked = servicosSelecionaveis.length > 0 && servicosSelecionaveis.every(s => selectedServicos.has(s.item));
                       return (
                         <Checkbox
@@ -2688,7 +2701,11 @@ import {
       {resumoOrcamentoPorDiretoria.length > 0 && (
         <div className="px-6 pb-2">
           <Card className="p-4 card-shadow border-l-4 border-l-blue-500">
-            <h3 className="font-semibold text-foreground mb-3">Diretoria orçamentária dos itens selecionados</h3>
+            <h3 className="font-semibold text-foreground mb-3">
+              {selectedAquisicaoIds.size > 0
+                ? "Diretoria orçamentária dos itens selecionados"
+                : "Diretoria orçamentária dos itens enviados / aprovados"}
+            </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
               {resumoOrcamentoPorDiretoria.map((grupo) => (
                 <div key={grupo.sigla} className="rounded border p-3 bg-muted/20">
@@ -2702,7 +2719,9 @@ import {
                   <p className="text-xs text-muted-foreground">
                     {grupo.sigla === diretoria?.sigla
                       ? "Sai do orçamento da própria diretoria"
-                      : `Será enviado para aprovação da diretoria ${grupo.sigla}`}
+                      : selectedAquisicaoIds.size > 0
+                      ? `Será enviado para aprovação da diretoria ${grupo.sigla}`
+                      : `Enviado para aprovação da diretoria ${grupo.sigla}`}
                   </p>
                 </div>
               ))}
@@ -2892,8 +2911,8 @@ import {
                     <th className="p-3 text-left w-10">
                       {(() => {
                         const selectableItems = showOnlySent
-                          ? paginationData.paginatedItems.filter(i => Boolean(i.id))
-                          : paginationData.paginatedItems.filter(i => (i.status === "rascunho" || i.status === "rejeitado") && Boolean(i.id));
+                          ? sortedFilteredItems.filter(i => Boolean(i.id))
+                          : sortedFilteredItems.filter(i => (i.status === "rascunho" || i.status === "rejeitado") && Boolean(i.id));
                         const allSelectableChecked = selectableItems.length > 0 && selectableItems.every(i => selectedAquisicaoIds.has(i.id!));
                         return (
                           <input

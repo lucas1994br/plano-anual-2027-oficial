@@ -496,12 +496,12 @@ export function AdminServicosControl() {
   };
 
   const toggleSelectAll = () => {
-    const pageIds = paginationData.paginatedItems.map((s: ServicoCatalogo) => s.id);
-    const allPageSelected = pageIds.length > 0 && pageIds.every((id: string) => selectedIds.includes(id));
-    if (allPageSelected) {
-      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+    const allIds = sortedItems.map((s: ServicoCatalogo) => s.id);
+    const allSelected = allIds.length > 0 && allIds.every((id: string) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !allIds.includes(id)));
     } else {
-      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
+      setSelectedIds(prev => Array.from(new Set([...prev, ...allIds])));
     }
   };
 
@@ -708,9 +708,9 @@ export function AdminServicosControl() {
                 <TableRow>
                   <TableHead className="w-12 text-center">
                     <Checkbox 
-                      checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every((s: ServicoCatalogo) => selectedIds.includes(s.id))}
+                      checked={sortedItems.length > 0 && sortedItems.every((s: ServicoCatalogo) => selectedIds.includes(s.id))}
                       onCheckedChange={toggleSelectAll}
-                      aria-label="Selecionar todos os serviços da página"
+                      aria-label="Selecionar todos os serviços"
                     />
                   </TableHead>
                   <SortableTableHead className="w-16 cursor-pointer hover:text-slate-900" field="item" sortConfig={sortConfig} onRequestSort={requestSort}>Item</SortableTableHead>

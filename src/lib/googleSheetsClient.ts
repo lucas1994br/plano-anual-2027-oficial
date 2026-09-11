@@ -170,8 +170,12 @@ export const gsUpdatePeriodo = (id: string, updates: any) =>
   gsPost("updatePeriodo", { id, updates });
 
 // Códigos de Acesso
-export const gsValidateAccessCode = (code: string, scope: string) =>
-  gsPost("validateAccessCode", { code, scope });
+export const gsValidateAccessCode = (
+  code: string,
+  scope: string,
+  diretoria_id?: string,
+  gerencia_id?: string
+) => gsPost("validateAccessCode", { code, scope, diretoria_id, gerencia_id });
 
 // Solicitações (Aquisições)
 export const gsGetSolicitacoes = (filters?: {

@@ -1483,7 +1483,9 @@ interface AccessCodeResponse {
 
 export async function validateAccessCode(
   code: string,
-  scope: "diretoria" | "gerencia" | "admin" | "compras"
+  scope: "diretoria" | "gerencia" | "admin" | "compras",
+  diretoria_id?: string,
+  gerencia_id?: string
 ): Promise<AccessCodeResponse> {
   const normalizedCode = code.trim();
 
@@ -1493,43 +1495,14 @@ export async function validateAccessCode(
 
   if (gs.isGoogleSheetsActive()) {
     try {
-      const res = await gs.gsValidateAccessCode(normalizedCode, scope);
+      const res = await gs.gsValidateAccessCode(normalizedCode, scope, diretoria_id, gerencia_id);
       if (res && res.scope) {
         return res as AccessCodeResponse;
       }
-    } catch {
-      // continua para fallback padrão
+      throw new Error("Código de acesso inválido ou inativo");
+    } catch (err: any) {
+      throw new Error(err?.message || "Código de acesso inválido ou inativo");
     }
-
-    const normLower = normalizedCode.toLowerCase();
-    if (scope === "admin" && (normLower === "admin123" || normLower === "admin")) {
-      return { scope: "admin" };
-    }
-    if (scope === "compras" && (normLower === "compras123" || normLower === "compras")) {
-      return { scope: "compras" };
-    }
-    if (scope === "diretoria") {
-      const diretorias = await getDiretorias();
-      const matchDir = (diretorias || []).find(d => {
-        const s = d.sigla.toLowerCase();
-        return normLower === `${s}1234` || normLower === `${s}123` || normLower === `1234${s}` || normLower === s;
-      });
-      if (matchDir) {
-        return { scope: "diretoria", diretoria_id: matchDir.id };
-      }
-    }
-    if (scope === "gerencia") {
-      const gerencias = await getTodasGerencias();
-      const matchGer = (gerencias as any[] || []).find((g: any) => {
-        const s = String(g.sigla || "").toLowerCase();
-        return normLower === `${s}1234` || normLower === `${s}123` || normLower === `1234${s}` || normLower === s;
-      });
-      if (matchGer) {
-        return { scope: "gerencia", gerencia_id: matchGer.id, diretoria_id: matchGer.diretoria_id };
-      }
-    }
-
-    throw new Error("Código de acesso inválido ou inativo");
   }
 
   try {

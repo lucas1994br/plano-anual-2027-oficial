@@ -308,12 +308,12 @@ export function AdminCatalogItemControl() {
   };
 
   const toggleSelectAll = () => {
-    const pageIds = paginationData.paginatedItems.map(item => item.id);
-    const allPageSelected = pageIds.length > 0 && pageIds.every((id: string) => selectedIds.includes(id));
-    if (allPageSelected) {
-      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+    const allIds = (sortedItems as ItemCatalogo[]).map(item => item.id);
+    const allSelected = allIds.length > 0 && allIds.every((id: string) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !allIds.includes(id)));
     } else {
-      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
+      setSelectedIds(prev => Array.from(new Set([...prev, ...allIds])));
     }
   };
 
@@ -495,9 +495,9 @@ export function AdminCatalogItemControl() {
                 <TableRow>
                   <TableHead className="w-12 text-center">
                     <Checkbox 
-                      checked={paginationData.paginatedItems.length > 0 && paginationData.paginatedItems.every(item => selectedIds.includes(item.id))}
+                      checked={sortedItems.length > 0 && (sortedItems as ItemCatalogo[]).every(item => selectedIds.includes(item.id))}
                       onCheckedChange={toggleSelectAll}
-                      aria-label="Selecionar todos os itens da página"
+                      aria-label="Selecionar todos os itens"
                     />
                   </TableHead>
                   <SortableTableHead className="w-24 cursor-pointer hover:text-slate-900" field="codigo" sortConfig={sortConfig} onRequestSort={requestSort}>Código</SortableTableHead>
