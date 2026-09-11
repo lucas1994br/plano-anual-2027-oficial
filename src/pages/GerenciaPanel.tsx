@@ -667,11 +667,28 @@ import {
   const handleSendToDiretoria = async () => {
     if (!gerenciaAtual || !periodAtivo || isSendingAquisicao) return;
 
-    const idsParaEnviar = Array.from(selectedAquisicaoIds);
-    if (idsParaEnviar.length === 0) {
+    const idsValidosParaEnviar = items
+      .filter(i => i.id && selectedAquisicaoIds.has(i.id) && i.qtdEstimada > 0)
+      .map(i => i.id!);
+
+    if (idsValidosParaEnviar.length === 0) {
       setConfirmSendOpen(false);
+      toast({
+        title: "Quantidade não informada",
+        description: "Nenhum dos itens selecionados possui quantidade informada. Preencha a quantidade antes de enviar para a diretoria.",
+        variant: "destructive"
+      });
       return;
     }
+
+    if (idsValidosParaEnviar.length < selectedAquisicaoIds.size) {
+      toast({
+        title: "Aviso de Envio",
+        description: `${selectedAquisicaoIds.size - idsValidosParaEnviar.length} item(ns) com quantidade zerada foram ignorados. Apenas ${idsValidosParaEnviar.length} item(ns) com quantidade válida foram encaminhados.`
+      });
+    }
+
+    const idsParaEnviar = idsValidosParaEnviar;
 
     setIsSendingAquisicao(true);
 

@@ -738,11 +738,11 @@ const DiretoriaAprovacao = () => {
           const matchId = s.id && selectedServicos.has(s.id as any);
           return servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
         })
-        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
       .filter((s: ServicoItem) => isAprovado(s.status) && servicosCatalogoSet.has(s.item as any))
-      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
   }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
   const gastoServicosNovosDiretoria = useMemo(() => {
@@ -753,11 +753,11 @@ const DiretoriaAprovacao = () => {
           const matchId = s.id && selectedServicos.has(s.id as any);
           return !servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
         })
-        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+        .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
       .filter((s: ServicoItem) => isAprovado(s.status) && !servicosCatalogoSet.has(s.item as any))
-      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0), 0);
+      .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
   }, [servicosData, servicosCatalogoSet, selectedServicos]);
 
   const gastoServicosDiretoria = useMemo(() => {
@@ -944,14 +944,19 @@ const DiretoriaAprovacao = () => {
   // Listas únicas de categorias
   const categorias = useMemo(() => [...new Set(items.map(i => i.categoria))].sort(), [items]);
   const resumoDiretoriasSolicitantes = useMemo(() => {
-    const grupos = new Map<string, { sigla: string; total: number; itens: number }>();
+    const grupos = new Map<string, { sigla: string; total: number; itens: number; itensZerados: number }>();
 
     items.forEach((item) => {
       const siglaOrigem = item.diretoriaSigla || siglaUpper;
-      const atual = grupos.get(siglaOrigem) || { sigla: siglaOrigem, total: 0, itens: 0 };
-      const itemTotal = (Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0);
+      const atual = grupos.get(siglaOrigem) || { sigla: siglaOrigem, total: 0, itens: 0, itensZerados: 0 };
+      const qtd = Number(item.qtdEstimada) || 0;
+      const val = Number(item.valorUnitario) || 0;
+      const itemTotal = qtd * val;
       atual.total += isNaN(itemTotal) ? 0 : itemTotal;
       atual.itens += 1;
+      if (qtd <= 0) {
+        atual.itensZerados += 1;
+      }
       grupos.set(siglaOrigem, atual);
     });
 
@@ -3898,6 +3903,13 @@ const DiretoriaAprovacao = () => {
                       ? "Solicitações da própria diretoria"
                       : `Solicitações recebidas de ${grupo.sigla} por regra orçamentária`}
                   </p>
+                  {grupo.total === 0 && grupo.itensZerados > 0 && (
+                    <div className="mt-1.5">
+                      <span className="inline-flex items-center text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200/80 font-medium">
+                        ⚠️ {grupo.itensZerados} item(ns) com quantidade zerada
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -4097,7 +4109,7 @@ const DiretoriaAprovacao = () => {
                   Rejeitar ({selectedItems.size})
                 </Button>
 
-                {(recebidosStatusTab === "pendentes" || recebidosStatusTab === "rejeitados") && (
+                {(recebidosStatusTab === "pendentes" || recebidosStatusTab === "rejeitados" || recebidosStatusTab === "aprovados") && (
                   <>
                     <Button 
                       size="sm" 
@@ -4108,9 +4120,10 @@ const DiretoriaAprovacao = () => {
                         setBulkEditAquisicaoOpen(true);
                       }}
                       disabled={selectedItems.size === 0 || isEditarAquisicaoBlocked || isPeriodExpired}
+                      title="Editar quantidades e campos dos itens selecionados em lote"
                     >
                       <Pencil className="h-4 w-4" />
-                      Editar Selecionados
+                      Editar Selecionados ({selectedItems.size})
                     </Button>
                     <Button 
                       size="sm" 
@@ -4268,19 +4281,29 @@ const DiretoriaAprovacao = () => {
                         </td>
                         <td className="p-3 text-sm">
                           {isItemReadOnly(item) ? (
-                            item.qtdEstimada
+                            <span className={item.qtdEstimada === 0 ? "text-amber-600 font-medium" : ""}>
+                              {item.qtdEstimada}
+                            </span>
                           ) : (
                             <Input
+                              key={`${item.id}-${item.qtdEstimada}`}
                               type="number"
                               min={0}
+                              placeholder="0"
                               defaultValue={item.qtdEstimada === 0 ? "" : item.qtdEstimada}
-                              onBlur={(e) => handleUpdateQtdEstimada(item.id!, Number(e.target.value))}
+                              onBlur={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                if (val !== item.qtdEstimada) {
+                                  handleUpdateQtdEstimada(item.id!, val);
+                                }
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.currentTarget.blur();
                                 }
                               }}
-                              className="w-16 h-8 text-sm"
+                              className={`w-16 h-8 text-sm ${item.qtdEstimada === 0 ? "border-amber-400 bg-amber-50/40 text-amber-900 placeholder:text-amber-400 font-medium focus:border-amber-500" : ""}`}
+                              title={item.qtdEstimada === 0 ? "Quantidade zerada. Digite um valor para calcular o total." : undefined}
                             />
                           )}
                         </td>
@@ -4289,7 +4312,13 @@ const DiretoriaAprovacao = () => {
                           {formatCurrency(item.valorUnitario)}
                         </td>
                         <td className="p-3 text-right text-sm font-medium">
-                          {formatCurrency((Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0))}
+                          {item.qtdEstimada === 0 ? (
+                            <span className="text-amber-600 text-xs font-normal" title="Preencha a quantidade para calcular o total">
+                              R$ 0,00 <span className="text-[10px] text-amber-500">(qtd: 0)</span>
+                            </span>
+                          ) : (
+                            formatCurrency((Number(item.qtdEstimada) || 0) * (Number(item.valorUnitario) || 0))
+                          )}
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1">
@@ -4582,6 +4611,11 @@ const DiretoriaAprovacao = () => {
               Enviar {selectedApprovedItems.length} item(ns) aprovado(s) para o setor de Compras?
               Após o envio os itens não poderão ser editados.
             </DialogDescription>
+            {selectedApprovedItems.filter(i => (Number(i.qtdEstimada) || 0) <= 0).length > 0 && (
+              <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                ⚠️ <strong>Atenção:</strong> {selectedApprovedItems.filter(i => (Number(i.qtdEstimada) || 0) <= 0).length} item(ns) selecionado(s) possuem <strong>quantidade zerada (Total R$ 0,00)</strong>. Recomenda-se informar as quantidades antes de encaminhar para Compras.
+              </div>
+            )}
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmComprasOpen(false)}>Cancelar</Button>
