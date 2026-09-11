@@ -252,6 +252,17 @@ function doGet(e) {
       return jsonResponse({ success: true, data });
     }
 
+    if (action === "getTable" || action === "getTableData") {
+      const tableName = params.table || params.sheet || SHEETS.SOLICITACOES;
+      const data = getSheetData(tableName);
+      return jsonResponse({
+        success: true,
+        table: tableName,
+        count: data.length,
+        data
+      });
+    }
+
     return jsonResponse({ success: false, error: "Ação desconhecida no GET: " + action }, 400);
   } catch (error) {
     return jsonResponse({ success: false, error: error.message || String(error) }, 500);

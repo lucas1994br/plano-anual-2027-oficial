@@ -26,6 +26,7 @@ import { AdminLogsOrcamentarios } from "../components/features/admin/AdminLogsOr
 import { AdminImportCsv } from "../components/features/admin/AdminImportCsv.tsx";
 import { AdminVisaoGeral } from "../components/features/admin/AdminVisaoGeral.tsx";
 import { AdminRestricoesControl } from "../components/features/admin/AdminRestricoesControl.tsx";
+import { AdminRestApiBuilder } from "../components/features/admin/AdminRestApiBuilder.tsx";
 import { getDiretoriasComDetalhes, getTodosPeriodos, createPeriodo, updatePeriodo, cleanupDuplicatePeriodos } from "../lib/services.ts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -63,6 +64,7 @@ const AdminPanel = () => {
     logs: "Logs de Atividades",
     "logs-orcamentarios": "Trilha Financeira",
     restricoes: "Restrições",
+    "api-rest": "API REST & Power BI",
   };
 
   const [expandedDir, setExpandedDir] = useState<string | null>(null);
@@ -254,6 +256,7 @@ const AdminPanel = () => {
               <TabsTrigger value="logs" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Logs de Atividades</TabsTrigger>
               <TabsTrigger value="logs-orcamentarios" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Trilha Financeira</TabsTrigger>
               <TabsTrigger value="restricoes" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm">Restrições</TabsTrigger>
+              <TabsTrigger value="api-rest" className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 shrink-0 data-[state=active]:bg-white data-[state=active]:font-semibold data-[state=active]:shadow-sm text-indigo-700 font-medium">API REST & Power BI</TabsTrigger>
             </TabsList>
 
             <TabsContent value="visao-geral">
@@ -529,6 +532,10 @@ const AdminPanel = () => {
 
             <TabsContent value="restricoes">
               <AdminRestricoesControl defaultPeriodoId={periodoAtivo?.id} />
+            </TabsContent>
+
+            <TabsContent value="api-rest">
+              <AdminRestApiBuilder />
             </TabsContent>
           </Tabs>
         </div>
