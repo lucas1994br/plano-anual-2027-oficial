@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 const OFFICIAL_DEFAULT_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbDfO2wQoN-i7u1NlR_k5IK64WwlthyY0JgebAq3fH0Q56fLjcTXDic1iMUTTmKvl4/exec";
+  "https://script.google.com/macros/s/AKfycbzDfO2wQoN-i7u1NlR_k5IK64WwlthyY0JgebAq3fH0Q56fLjcTXDic1iMUTTmKvl4/exec";
 
 const GOOGLE_SCRIPT_URL =
   (import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined)?.trim() ||
