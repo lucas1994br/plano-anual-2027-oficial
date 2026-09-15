@@ -3,7 +3,7 @@
  * PLANO ANUAL 2027 - BACKEND GOOGLE APPS SCRIPT (CUSTO ZERO)
  * =========================================================================
  * Planilha Oficial:
- * https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470
+ * https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512
  *
  * Instruções de Implantação:
  * 1. Abra a sua Planilha Google oficial acima
@@ -17,9 +17,13 @@
  */
 
 // ================= CONSTANTES E CONFIGURAÇÃO =================
-const SPREADSHEET_ID = "10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o";
-const SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470";
-const OFFICIAL_GID = "1160734470";
+const SPREADSHEET_ID = "1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc";
+const SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512";
+const OFFICIAL_GID = "604009512";
+
+// Planilha de Origem para Migração
+const ORIGIN_SPREADSHEET_ID = "10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o";
+const ORIGIN_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?usp=sharing";
 
 const SHEETS = {
   DIRETORIAS: "diretorias",
@@ -97,13 +101,44 @@ function doGet(e) {
       return jsonResponse({ success: true, result });
     }
 
+    if (action === "migrateAllDataFromOldSpreadsheet" || action === "migrateFromOldSpreadsheet") {
+      const result = migrateAllDataFromOldSpreadsheet();
+      return jsonResponse({ success: true, result });
+    }
+
+    if (action === "deduplicateSpreadsheet" || action === "cleanDuplicates") {
+      const result = deduplicateAllSheets();
+      return jsonResponse({ success: true, result });
+    }
+
     if (action === "getDiretorias") {
-      const data = getSheetData(SHEETS.DIRETORIAS);
+      const rawData = getSheetData(SHEETS.DIRETORIAS);
+      const seen = {};
+      const data = [];
+      rawData.forEach(d => {
+        const sigla = String(d.sigla || "").trim().toUpperCase();
+        const key = sigla || String(d.id || "").trim().toLowerCase();
+        if (key && !seen[key]) {
+          seen[key] = true;
+          data.push(d);
+        }
+      });
       return jsonResponse({ success: true, data });
     }
 
     if (action === "getGerencias") {
-      let data = getSheetData(SHEETS.GERENCIAS);
+      const rawData = getSheetData(SHEETS.GERENCIAS);
+      const seenGer = {};
+      let data = [];
+      rawData.forEach(g => {
+        const dId = String(g.diretoria_id || "").trim().toLowerCase();
+        const s = String(g.sigla || "").trim().toUpperCase();
+        const key = (dId && s) ? `${dId}-${s}` : String(g.id || s).trim().toLowerCase();
+        if (key && !seenGer[key]) {
+          seenGer[key] = true;
+          data.push(g);
+        }
+      });
       if (params.diretoria_id) {
         const targetDir = String(params.diretoria_id).trim().toLowerCase();
         // Permite buscar por UUID ou por sigla da diretoria
@@ -119,7 +154,16 @@ function doGet(e) {
     }
 
     if (action === "getPeriodos") {
-      const data = getSheetData(SHEETS.PERIODOS);
+      const rawData = getSheetData(SHEETS.PERIODOS);
+      const seenPer = {};
+      const data = [];
+      rawData.forEach(p => {
+        const key = String(p.id || p.nome || "").trim().toLowerCase();
+        if (key && !seenPer[key]) {
+          seenPer[key] = true;
+          data.push(p);
+        }
+      });
       return jsonResponse({ success: true, data });
     }
 
@@ -200,7 +244,17 @@ function doGet(e) {
     }
 
     if (action === "getServicosCatalogo") {
-      let data = getSheetData(SHEETS.SERVICOS_CATALOGO);
+      const rawData = getSheetData(SHEETS.SERVICOS_CATALOGO);
+      const seenSc = {};
+      let data = [];
+      rawData.forEach(s => {
+        const itemNum = parseInt(s.item, 10);
+        const key = (!isNaN(itemNum) && itemNum > 0) ? String(itemNum) : String(s.id || "").toLowerCase();
+        if (key && !seenSc[key]) {
+          seenSc[key] = true;
+          data.push(s);
+        }
+      });
       if (params.gerencia_id) {
         const targetGer = String(params.gerencia_id).trim().toLowerCase();
         data = data.filter(s => !s.gerencia_id || String(s.gerencia_id).trim().toLowerCase() === targetGer);
@@ -209,7 +263,17 @@ function doGet(e) {
     }
 
     if (action === "getItensCatalogo") {
-      const data = getSheetData(SHEETS.ITENS_CATALOGO);
+      const rawData = getSheetData(SHEETS.ITENS_CATALOGO);
+      const seenIc = {};
+      const data = [];
+      rawData.forEach(i => {
+        const code = parseInt(i.codigo, 10);
+        const key = (!isNaN(code) && code > 0) ? String(code) : String(i.id || "").toLowerCase();
+        if (key && !seenIc[key]) {
+          seenIc[key] = true;
+          data.push(i);
+        }
+      });
       return jsonResponse({ success: true, data });
     }
 
@@ -248,7 +312,16 @@ function doGet(e) {
     }
 
     if (action === "getCodigosAcesso") {
-      const data = getSheetData(SHEETS.CODIGOS_ACESSO);
+      const rawData = getSheetData(SHEETS.CODIGOS_ACESSO);
+      const seenCa = {};
+      const data = [];
+      rawData.forEach(c => {
+        const key = `${c.scope || ""}-${c.diretoria_id || ""}-${c.gerencia_id || ""}-${c.codigo_hash || c.codigo || ""}`.toLowerCase();
+        if (key && !seenCa[key]) {
+          seenCa[key] = true;
+          data.push(c);
+        }
+      });
       return jsonResponse({ success: true, data });
     }
 
@@ -297,6 +370,16 @@ function doPost(e) {
 
     if (action === "initSpreadsheet") {
       const result = initSpreadsheet();
+      return jsonResponse({ success: true, result });
+    }
+
+    if (action === "migrateAllDataFromOldSpreadsheet" || action === "migrateFromOldSpreadsheet") {
+      const result = migrateAllDataFromOldSpreadsheet();
+      return jsonResponse({ success: true, result });
+    }
+
+    if (action === "deduplicateSpreadsheet" || action === "cleanDuplicates") {
+      const result = deduplicateAllSheets();
       return jsonResponse({ success: true, result });
     }
 
@@ -774,14 +857,21 @@ function doPost(e) {
 // ================= HELPERS DE BANCO NA PLANILHA =================
 
 function getSs() {
+  // 1. Sempre prioriza a planilha oficial indicada por SPREADSHEET_ID
+  if (typeof SPREADSHEET_ID !== "undefined" && SPREADSHEET_ID && SPREADSHEET_ID.trim() !== "") {
+    try {
+      const explicitSs = SpreadsheetApp.openById(SPREADSHEET_ID.trim());
+      if (explicitSs) return explicitSs;
+    } catch (e) {
+      console.warn("Aviso ao abrir por SPREADSHEET_ID (" + SPREADSHEET_ID + "): " + e.message);
+    }
+  }
+  // 2. Fallback para a planilha ativa do container onde o script está rodando
   try {
     const active = SpreadsheetApp.getActiveSpreadsheet();
     if (active) return active;
   } catch (e) {}
-  if (typeof SPREADSHEET_ID !== "undefined" && SPREADSHEET_ID) {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
-  }
-  throw new Error("Planilha não encontrada pelo ID " + SPREADSHEET_ID);
+  throw new Error("Planilha não encontrada pelo ID: " + (typeof SPREADSHEET_ID !== "undefined" ? SPREADSHEET_ID : "não definido"));
 }
 
 function getSheetByGid(gid) {
@@ -1708,6 +1798,257 @@ function jsonResponse(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// ================= REMOÇÃO DE DUPLICATAS NA PLANILHA =================
+
+/**
+ * Remove linhas duplicadas em uma aba com base em uma ou mais colunas-chave.
+ * Preserva a primeira ocorrência encontrada e remove fisicamente as subsequentes na planilha.
+ */
+function deduplicateSheetByKey(sheetName, keyColNames) {
+  try {
+    const sheet = getSs().getSheetByName(sheetName);
+    if (!sheet) return { sheet: sheetName, removed: 0, message: "Aba não encontrada" };
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 2 || lastCol === 0) return { sheet: sheetName, removed: 0, message: "Sem duplicatas possíveis" };
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+    const cols = Array.isArray(keyColNames) ? keyColNames : [keyColNames];
+    const colIndices = cols.map(c => headers.indexOf(String(c).trim().toLowerCase())).filter(idx => idx !== -1);
+
+    if (colIndices.length === 0) {
+      return { sheet: sheetName, removed: 0, message: "Coluna chave não encontrada nos cabeçalhos" };
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const seen = {};
+    const rowsToDelete = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const key = colIndices.map(ci => String(row[ci] || "").trim().toLowerCase()).join("|");
+      if (!key) continue;
+      if (seen[key]) {
+        rowsToDelete.push(i + 2); // +2: índice 1-based e pula o cabeçalho
+      } else {
+        seen[key] = true;
+      }
+    }
+
+    if (rowsToDelete.length === 0) {
+      return { sheet: sheetName, removed: 0, message: "Nenhuma duplicata encontrada" };
+    }
+
+    // Deleta de trás para frente para preservar a integridade dos índices
+    for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+      sheet.deleteRow(rowsToDelete[k]);
+    }
+
+    return { sheet: sheetName, removed: rowsToDelete.length, message: "Duplicatas removidas com sucesso" };
+  } catch (err) {
+    return { sheet: sheetName, removed: 0, error: err.message || String(err) };
+  }
+}
+
+function deduplicateAllSheets() {
+  const results = {};
+  results[SHEETS.DIRETORIAS] = deduplicateSheetByKey(SHEETS.DIRETORIAS, "sigla");
+  results[SHEETS.PERIODOS] = deduplicateSheetByKey(SHEETS.PERIODOS, "id");
+  results[SHEETS.GERENCIAS] = deduplicateSheetByKey(SHEETS.GERENCIAS, ["diretoria_id", "sigla"]);
+  results[SHEETS.CODIGOS_ACESSO] = deduplicateSheetByKey(SHEETS.CODIGOS_ACESSO, ["scope", "diretoria_id", "gerencia_id", "codigo_hash"]);
+  return results;
+}
+
+// ================= MIGRAÇÃO DA PLANILHA ANTIGA =================
+
+/**
+ * Migra todos os dados de todas as abas da planilha anterior para a nova planilha oficial.
+ * Origem: 10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o
+ * Destino: 1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc
+ * 
+ * - Preserva a integridade de todas as 26 abas.
+ * - Aplica deduplicação automática em diretorias, gerencias, periodos e codigos_acesso.
+ * - Copia dados completos com cabeçalhos e valores preservados.
+ */
+/**
+ * OPÇÃO 1: Executar a partir da Planilha Nova (Puxar da Antiga)
+ * Caso dê erro de permissão: Certifique-se de que a planilha antiga está com
+ * acesso de Editor concedido para a sua conta Google atual.
+ */
+function migrateAllDataFromOldSpreadsheet() {
+  let originSs;
+  try {
+    // Força o escopo do Google Drive para permitir acesso entre planilhas
+    DriveApp.getRootFolder();
+    originSs = SpreadsheetApp.openById(ORIGIN_SPREADSHEET_ID);
+  } catch (permErr) {
+    throw new Error(
+      "Sem permissão para acessar a planilha antiga (" + ORIGIN_SPREADSHEET_ID + ").\n" +
+      "SOLUÇÃO RECOMENDADA:\n" +
+      "1. Abra a planilha antiga e clique em 'Compartilhar' > adicione sua conta Google como Editor, OU\n" +
+      "2. Execute a função 'exportDataFromOldToNewSpreadsheet' diretamente na Planilha Antiga (Extensões > Apps Script nela)."
+    );
+  }
+  const targetSs = getSs();
+  
+  const originSheets = originSs.getSheets();
+  const report = {
+    startedAt: new Date().toISOString(),
+    originSpreadsheetId: ORIGIN_SPREADSHEET_ID,
+    targetSpreadsheetId: SPREADSHEET_ID,
+    migratedSheets: [],
+    errors: []
+  };
+
+  for (let i = 0; i < originSheets.length; i++) {
+    const originSheet = originSheets[i];
+    const sheetName = originSheet.getName();
+    const lastRow = originSheet.getLastRow();
+    const lastCol = originSheet.getLastColumn();
+
+    try {
+      if (lastRow <= 0 || lastCol <= 0) {
+        report.migratedSheets.push({ name: sheetName, rows: 0, status: "Vazia ignorada" });
+        continue;
+      }
+
+      // Lê todos os dados da aba de origem em bloco
+      const originValues = originSheet.getRange(1, 1, lastRow, lastCol).getValues();
+      let targetSheet = targetSs.getSheetByName(sheetName);
+      if (!targetSheet) {
+        targetSheet = targetSs.insertSheet(sheetName);
+      }
+
+      // Aplica deduplicação inteligente em tabelas estruturais conhecidas
+      let finalValues = originValues;
+      const lowerName = sheetName.toLowerCase().trim();
+
+      if (lowerName === "diretorias" && originValues.length > 1) {
+        const headers = originValues[0].map(h => String(h).trim().toLowerCase());
+        const siglaIdx = headers.indexOf("sigla");
+        if (siglaIdx !== -1) {
+          const seen = {};
+          finalValues = [originValues[0]];
+          for (let r = 1; r < originValues.length; r++) {
+            const row = originValues[r];
+            const sigla = String(row[siglaIdx] || "").trim().toUpperCase();
+            if (!sigla || seen[sigla]) continue;
+            seen[sigla] = true;
+            finalValues.push(row);
+          }
+        }
+      } else if (lowerName === "gerencias" && originValues.length > 1) {
+        const headers = originValues[0].map(h => String(h).trim().toLowerCase());
+        const siglaIdx = headers.indexOf("sigla");
+        const dirIdx = headers.indexOf("diretoria_id");
+        if (siglaIdx !== -1) {
+          const seen = {};
+          finalValues = [originValues[0]];
+          for (let r = 1; r < originValues.length; r++) {
+            const row = originValues[r];
+            const sigla = String(row[siglaIdx] || "").trim().toUpperCase();
+            const dirId = dirIdx !== -1 ? String(row[dirIdx] || "").trim().toLowerCase() : "";
+            const key = (dirId && sigla) ? (dirId + "-" + sigla) : sigla;
+            if (!key || seen[key]) continue;
+            seen[key] = true;
+            finalValues.push(row);
+          }
+        }
+      } else if (lowerName === "periodos" && originValues.length > 1) {
+        const headers = originValues[0].map(h => String(h).trim().toLowerCase());
+        const idIdx = headers.indexOf("id");
+        const nomeIdx = headers.indexOf("nome");
+        const seen = {};
+        finalValues = [originValues[0]];
+        for (let r = 1; r < originValues.length; r++) {
+          const row = originValues[r];
+          const key = (idIdx !== -1 && row[idIdx]) ? String(row[idIdx]).trim().toLowerCase() : ((nomeIdx !== -1 && row[nomeIdx]) ? String(row[nomeIdx]).trim().toLowerCase() : "");
+          if (!key || seen[key]) continue;
+          seen[key] = true;
+          finalValues.push(row);
+        }
+      } else if (lowerName === "codigos_acesso" && originValues.length > 1) {
+        const headers = originValues[0].map(h => String(h).trim().toLowerCase());
+        const scopeIdx = headers.indexOf("scope");
+        const dirIdx = headers.indexOf("diretoria_id");
+        const gerIdx = headers.indexOf("gerencia_id");
+        const hashIdx = headers.indexOf("codigo_hash");
+        const seen = {};
+        finalValues = [originValues[0]];
+        for (let r = 1; r < originValues.length; r++) {
+          const row = originValues[r];
+          const sc = scopeIdx !== -1 ? String(row[scopeIdx] || "").trim().toLowerCase() : "";
+          const dir = dirIdx !== -1 ? String(row[dirIdx] || "").trim().toLowerCase() : "";
+          const ger = gerIdx !== -1 ? String(row[gerIdx] || "").trim().toLowerCase() : "";
+          const hash = hashIdx !== -1 ? String(row[hashIdx] || "").trim().toLowerCase() : "";
+          const key = sc + "-" + dir + "-" + ger + "-" + hash;
+          if (!key || seen[key]) continue;
+          seen[key] = true;
+          finalValues.push(row);
+        }
+      }
+
+      // Escreve os dados na aba de destino
+      targetSheet.clear();
+      const numRows = finalValues.length;
+      const numCols = finalValues[0].length;
+      targetSheet.getRange(1, 1, numRows, numCols).setValues(finalValues);
+
+      report.migratedSheets.push({
+        name: sheetName,
+        originRows: lastRow,
+        migratedRows: numRows,
+        deduplicated: lastRow - numRows,
+        status: "Sucesso"
+      });
+    } catch (sheetErr) {
+      report.errors.push({ sheet: sheetName, error: sheetErr.message || String(sheetErr) });
+    }
+  }
+
+  report.finishedAt = new Date().toISOString();
+  return report;
+}
+
+/**
+ * OPÇÃO 2: Executar diretamente na PLANILHA ANTIGA (Enviar para a Nova)
+ * Como você já é proprietário/editor da planilha antiga, ela nunca dará erro de leitura!
+ * Basta abrir a Planilha Antiga > Extensões > Apps Script > colar esta função e clicar em Executar!
+ */
+function exportDataFromOldToNewSpreadsheet() {
+  const originSs = SpreadsheetApp.getActiveSpreadsheet();
+  const targetSs = SpreadsheetApp.openById(SPREADSHEET_ID);
+  
+  const originSheets = originSs.getSheets();
+  const report = {
+    startedAt: new Date().toISOString(),
+    originSpreadsheet: originSs.getName(),
+    targetSpreadsheet: targetSs.getName(),
+    migratedSheets: []
+  };
+
+  for (let i = 0; i < originSheets.length; i++) {
+    const originSheet = originSheets[i];
+    const sheetName = originSheet.getName();
+    const lastRow = originSheet.getLastRow();
+    const lastCol = originSheet.getLastColumn();
+
+    if (lastRow <= 0 || lastCol <= 0) continue;
+
+    const values = originSheet.getRange(1, 1, lastRow, lastCol).getValues();
+    let targetSheet = targetSs.getSheetByName(sheetName);
+    if (!targetSheet) {
+      targetSheet = targetSs.insertSheet(sheetName);
+    }
+    targetSheet.clear();
+    targetSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+    report.migratedSheets.push({ name: sheetName, rows: values.length, status: "OK" });
+  }
+
+  report.finishedAt = new Date().toISOString();
+  return report;
+}
+
 // ================= INICIALIZAÇÃO / CARGA ESTRUTURAL =================
 
 function initSpreadsheet() {
@@ -1727,6 +2068,8 @@ function initSpreadsheet() {
     sDir.clear();
     sDir.getRange(1, 1, 1, headers.length).setValues([headers]);
     sDir.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  } else {
+    deduplicateSheetByKey(SHEETS.DIRETORIAS, "sigla");
   }
 
   // 2. GERÊNCIAS
@@ -1766,6 +2109,8 @@ function initSpreadsheet() {
     sGer.clear();
     sGer.getRange(1, 1, 1, headers.length).setValues([headers]);
     sGer.getRange(2, 1, gerencias.length, headers.length).setValues(gerencias);
+  } else {
+    deduplicateSheetByKey(SHEETS.GERENCIAS, ["diretoria_id", "sigla"]);
   }
 
   // 3. PERÍODOS
@@ -1778,6 +2123,8 @@ function initSpreadsheet() {
     sPer.clear();
     sPer.getRange(1, 1, 1, headers.length).setValues([headers]);
     sPer.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  } else {
+    deduplicateSheetByKey(SHEETS.PERIODOS, "id");
   }
 
   // 4. CÓDIGOS DE ACESSO

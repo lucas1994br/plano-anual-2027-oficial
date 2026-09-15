@@ -89,7 +89,16 @@ const Home = () => {
     refetchOnWindowFocus: false,
   });
 
-  const diretorias = (diretoriasDb.length > 0 ? diretoriasDb : diretoriasFallback) as any[];
+  const diretorias = useMemo(() => {
+    const list = (diretoriasDb.length > 0 ? diretoriasDb : diretoriasFallback) as any[];
+    const seen = new Set<string>();
+    return list.filter((dir) => {
+      const sigla = String(dir.sigla || dir.id || "").trim().toUpperCase();
+      if (!sigla || seen.has(sigla)) return false;
+      seen.add(sigla);
+      return true;
+    });
+  }, [diretoriasDb, diretoriasFallback]);
 
   const { data: periodos = [] } = useQuery<any[]>({
     queryKey: ["periodos"],

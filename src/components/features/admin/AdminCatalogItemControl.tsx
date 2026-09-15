@@ -119,16 +119,29 @@ export function AdminCatalogItemControl() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Deduplica itens por código único para proteger contra duplicações na planilha/banco
+  const uniqueItens = useMemo(() => {
+    const seen = new Set<number>();
+    return (itens as ItemCatalogo[]).filter(item => {
+      const cod = Number(item.codigo);
+      if (!isNaN(cod) && cod > 0) {
+        if (seen.has(cod)) return false;
+        seen.add(cod);
+      }
+      return true;
+    });
+  }, [itens]);
+
   // Filtrar itens
   const filteredItens = useMemo(() => {
-    if (!searchTerm) return itens;
+    if (!searchTerm) return uniqueItens;
     const term = searchTerm.toLowerCase();
-    return (itens as ItemCatalogo[]).filter(item => 
+    return uniqueItens.filter(item => 
       String(item.codigo).toLowerCase().includes(term) ||
       item.descricao.toLowerCase().includes(term) ||
       item.categoria.toLowerCase().includes(term)
     );
-  }, [itens, searchTerm]);
+  }, [uniqueItens, searchTerm]);
 
   const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredItens as ItemCatalogo[]);
 
@@ -141,8 +154,8 @@ export function AdminCatalogItemControl() {
   }, [sortedItems, currentPage]);
 
   const summary = useMemo(() => {
-    const totalItens = itens.length;
-    const somaValores = (itens as ItemCatalogo[]).reduce((acc, item) => acc + (item.valor_unitario || 0), 0);
+    const totalItens = uniqueItens.length;
+    const somaValores = uniqueItens.reduce((acc, item) => acc + (item.valor_unitario || 0), 0);
     const mediaValor = totalItens > 0 ? somaValores / totalItens : 0;
     
     return {
@@ -150,7 +163,7 @@ export function AdminCatalogItemControl() {
       mediaValor,
       somaTotal: somaValores,
     };
-  }, [itens]);
+  }, [uniqueItens]);
 
   const resetForm = () => {
     setNovoItem({ codigo: "", descricao: "", categoria: "", unidade: "", valorUnitario: "" });

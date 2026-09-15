@@ -300,7 +300,7 @@ function loadDiretoriasCache(): DiretoriaRow[] | null {
     if (!parsed?.updatedAt || !Array.isArray(parsed.data)) return null;
 
     const isFresh = Date.now() - parsed.updatedAt <= DIRETORIAS_CACHE_TTL_MS;
-    return isFresh ? parsed.data : null;
+    return isFresh ? normalizeDiretorias(parsed.data) : null;
   } catch {
     return null;
   }
@@ -312,7 +312,7 @@ function saveDiretoriasCache(data: DiretoriaRow[]): void {
   try {
     globalThis.localStorage.setItem(
       DIRETORIAS_CACHE_KEY,
-      JSON.stringify({ updatedAt: Date.now(), data })
+      JSON.stringify({ updatedAt: Date.now(), data: normalizeDiretorias(data) })
     );
   } catch {
     // Ignora falhas de storage para não impactar o fluxo principal.
@@ -320,10 +320,73 @@ function saveDiretoriasCache(data: DiretoriaRow[]): void {
 }
 
 function normalizeDiretorias(rows: DiretoriaRow[] | null | undefined): DiretoriaRow[] {
-  return (rows || []).map((dir) => ({
-    ...dir,
-    sigla: String(dir.sigla || "").trim().toUpperCase(),
-  }));
+  const seen = new Set<string>();
+  const unique: DiretoriaRow[] = [];
+  for (const dir of rows || []) {
+    const sigla = String(dir.sigla || "").trim().toUpperCase();
+    const key = sigla || String(dir.id || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push({
+      ...dir,
+      sigla,
+    });
+  }
+  return unique;
+}
+
+export function deduplicateGerencias<T extends Record<string, any>>(rows: T[] | null | undefined): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const g of rows || []) {
+    const sigla = String(g.sigla || "").trim().toUpperCase();
+    const dirId = String(g.diretoria_id || "").trim().toLowerCase();
+    const key = (dirId && sigla) ? `${dirId}-${sigla}` : String(g.id || sigla).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(g);
+  }
+  return unique;
+}
+
+export function deduplicatePeriodos<T extends Record<string, any>>(rows: T[] | null | undefined): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const p of rows || []) {
+    const key = String(p.id || p.nome || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(p);
+  }
+  return unique;
+}
+
+export function deduplicateById<T extends { id?: any }>(items: T[] | null | undefined): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const it of items || []) {
+    const id = String(it?.id || "").trim().toLowerCase();
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    unique.push(it);
+  }
+  return unique;
+}
+
+export function deduplicateItensCatalogo<T extends Record<string, any>>(items: T[] | null | undefined): T[] {
+  const seen = new Set<number>();
+  const unique: T[] = [];
+  for (const it of items || []) {
+    const cod = Number(it?.codigo);
+    if (!isNaN(cod) && cod > 0) {
+      if (seen.has(cod)) continue;
+      seen.add(cod);
+    }
+    unique.push(it);
+  }
+  return unique;
 }
 
 async function fetchAllPages<T>(
@@ -426,8 +489,9 @@ export async function getGerenciasByDiretoria(
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias(diretoriaId);
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
+    const deduplicated = deduplicateGerencias(filtered);
+    updateGerenciasCache(deduplicated);
+    return deduplicated;
   }
 
   const { data, error } = await supabase
@@ -438,16 +502,18 @@ export async function getGerenciasByDiretoria(
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
-  return data || [];
+  const deduplicated = deduplicateGerencias(data || []);
+  updateGerenciasCache(deduplicated);
+  return deduplicated;
 }
 
 export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias();
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
+    const deduplicated = deduplicateGerencias(filtered);
+    updateGerenciasCache(deduplicated);
+    return deduplicated;
   }
 
   const { data, error } = await supabase
@@ -456,16 +522,18 @@ export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
-  return data || [];
+  const deduplicated = deduplicateGerencias(data || []);
+  updateGerenciasCache(deduplicated);
+  return deduplicated;
 }
 
 export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias();
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
-    updateGerenciasCache(filtered);
-    return filtered;
+    const deduplicated = deduplicateGerencias(filtered);
+    updateGerenciasCache(deduplicated);
+    return deduplicated;
   }
 
   const { data, error } = await supabase
@@ -474,8 +542,9 @@ export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
     .order("sigla");
 
   if (error) throw error;
-  updateGerenciasCache(data || []);
-  return data || [];
+  const deduplicated = deduplicateGerencias(data || []);
+  updateGerenciasCache(deduplicated);
+  return deduplicated;
 }
 
 export async function getDiretoriasComDetalhes(): Promise<
@@ -488,8 +557,10 @@ export async function getDiretoriasComDetalhes(): Promise<
       gs.gsGetSolicitacoesCountByDiretoria().catch(() => ({} as Record<string, number>)),
       gs.gsGetServicos()
     ]);
-    return (diretorias || []).map((dir: any) => {
-      const gCount = (gerencias || []).filter((g: any) => String(g.diretoria_id) === String(dir.id) && g.ativa !== false).length;
+    const uniqueDirs = normalizeDiretorias(diretorias as any);
+    const uniqueGers = deduplicateGerencias(gerencias as any);
+    return uniqueDirs.map((dir: any) => {
+      const gCount = uniqueGers.filter((g: any) => String(g.diretoria_id) === String(dir.id) && g.ativa !== false).length;
       const sCount = Number((solicitacoesCounts as Record<string, number>)?.[dir.id] || 0);
       const servCount = (servicos || []).filter((s: any) => String(s.diretoria_id) === String(dir.id)).length;
       return {
@@ -509,9 +580,10 @@ export async function getDiretoriasComDetalhes(): Promise<
     .order("sigla");
 
   if (errDir) throw errDir;
+  const uniqueDirs = normalizeDiretorias(diretorias as any);
 
   const diretoriasComDetalhes = await Promise.all(
-    (diretorias || []).map(async (dir: unknown) => {
+    uniqueDirs.map(async (dir: unknown) => {
       const dirTyped = dir as Diretoria & { id: string };
       
       const { data: gerencias } = await supabase
@@ -530,7 +602,7 @@ export async function getDiretoriasComDetalhes(): Promise<
 
       return {
         ...dirTyped,
-        totalGerencias: (gerencias || []).length,
+        totalGerencias: deduplicateGerencias(gerencias || []).length,
         totalItens: totalItens || 0,
       };
     })
@@ -544,7 +616,8 @@ export async function getDiretoriasComDetalhes(): Promise<
 export async function getPeriodosAtivos(): Promise<Record<string, unknown>[]> {
   if (gs.isGoogleSheetsActive()) {
     const list = await gs.gsGetPeriodos();
-    return (list || []).map(normalizePeriodo).filter((p: any) => p.ativo);
+    const periodos = (list || []).map(normalizePeriodo).filter((p: any) => p.ativo);
+    return deduplicatePeriodos(periodos);
   }
 
   const { data, error } = await supabase
@@ -554,13 +627,14 @@ export async function getPeriodosAtivos(): Promise<Record<string, unknown>[]> {
     .order("fim", { ascending: false });
 
   if (error) throw error;
-  return data || [];
+  return deduplicatePeriodos(data || []);
 }
 
 export async function getTodosPeriodos(): Promise<Record<string, unknown>[]> {
   if (gs.isGoogleSheetsActive()) {
     const list = await gs.gsGetPeriodos();
-    return (list || []).map(normalizePeriodo);
+    const periodos = (list || []).map(normalizePeriodo);
+    return deduplicatePeriodos(periodos);
   }
 
   const { data, error } = await supabase
@@ -569,7 +643,7 @@ export async function getTodosPeriodos(): Promise<Record<string, unknown>[]> {
     .order("created_at", { ascending: true });
 
   if (error) throw error;
-  return data || [];
+  return deduplicatePeriodos(data || []);
 }
 
 export async function createPeriodo(periodo: {
@@ -675,7 +749,7 @@ export async function getSolicitacoesByGerencia(
 ): Promise<PlanItem[]> {
   if (gs.isGoogleSheetsActive()) {
     const rows = await gs.gsGetSolicitacoes({ gerencia_id: gerenciaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
+    return deduplicateById((rows || []).map(mapDbToPlanItem));
   }
 
   const data = await fetchAllPages<any>((from, to) =>
@@ -688,7 +762,7 @@ export async function getSolicitacoesByGerencia(
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
   );
 
-  return data.map((s: any) => ({
+  return deduplicateById(data.map((s: any) => ({
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
@@ -710,7 +784,7 @@ export async function getSolicitacoesByGerencia(
     periodo_id: s.periodo_id,
     created_at: s.created_at,
     updated_at: s.updated_at,
-  } as unknown as PlanItem));
+  } as unknown as PlanItem)));
 }
 
 export async function deleteSolicitacao(itemId: string | number): Promise<boolean> {
@@ -829,7 +903,7 @@ export async function getSolicitacoesByDiretoria(
 ): Promise<PlanItem[]> {
   if (gs.isGoogleSheetsActive()) {
     const rows = await gs.gsGetSolicitacoes({ diretoria_id: diretoriaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
+    return deduplicateById((rows || []).map(mapDbToPlanItem));
   }
 
   const data = await fetchAllPages<any>((from, to) =>
@@ -851,7 +925,7 @@ export async function getSolicitacoesByDiretoria(
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
   );
 
-  return data.map((s: any) => ({
+  return deduplicateById(data.map((s: any) => ({
     id: s.id,
     item_id: s.item_id,
     codigo: s.item?.codigo ?? (s.codigo ? Number(s.codigo) : 0),
@@ -874,7 +948,7 @@ export async function getSolicitacoesByDiretoria(
     periodo_id: s.periodo_id,
     created_at: s.created_at,
     updated_at: s.updated_at,
-  } as PlanItem));
+  } as PlanItem)));
 }
 
 export async function getSolicitacoesByPeriodo({
@@ -884,7 +958,7 @@ export async function getSolicitacoesByPeriodo({
 }): Promise<PlanItem[]> {
   if (gs.isGoogleSheetsActive()) {
     const rows = await gs.gsGetSolicitacoes({ periodo_id: periodoId });
-    return (rows || []).map(mapDbToPlanItem);
+    return deduplicateById((rows || []).map(mapDbToPlanItem));
   }
 
   const data = await fetchAllPages<any>((from, to) =>
@@ -1550,8 +1624,9 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
     try {
       const items = await gs.gsGetItensCatalogo();
       if (Array.isArray(items) && items.length > 0) {
-        updateCatalogCache(items);
-        return items;
+        const uniqueItems = deduplicateItensCatalogo(items);
+        updateCatalogCache(uniqueItems);
+        return uniqueItems;
       }
     } catch (_err) {
       console.warn("Falha ao buscar catálogo da planilha, carregando dados locais...", _err);
@@ -1571,8 +1646,9 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
             unidade: "UND",
             valor_unitario: 0,
           }));
-          updateCatalogCache(fallbackItems);
-          return fallbackItems;
+          const uniqueFallback = deduplicateItensCatalogo(fallbackItems);
+          updateCatalogCache(uniqueFallback);
+          return uniqueFallback;
         }
       }
     } catch {
@@ -1590,9 +1666,11 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
         .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
     );
     if (Array.isArray(data)) {
-      updateCatalogCache(data);
+      const uniqueData = deduplicateItensCatalogo(data as any[]);
+      updateCatalogCache(uniqueData);
+      return uniqueData;
     }
-    return data;
+    return [];
   } catch (err) {
     console.warn("Falha ao buscar catálogo no Supabase:", err);
     return [];
@@ -1822,16 +1900,18 @@ export async function saveAdminMiniErpConfigDb(config: {
 
 export async function getServicosCatalogo(): Promise<unknown[]> {
   if (gs.isGoogleSheetsActive()) {
-    return (await gs.gsGetServicosCatalogo()) || [];
+    const list = (await gs.gsGetServicosCatalogo()) || [];
+    return deduplicateById(list as any[]);
   }
 
-  return await fetchAllPages<unknown>((from, to) =>
+  const list = await fetchAllPages<unknown>((from, to) =>
     supabase
       .from("servicos_catalogo")
       .select("*")
       .order("item")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
   );
+  return deduplicateById(list as any[]);
 }
 
 export async function createServicoCatalogoAndDistribuir(servico: {
@@ -2282,7 +2362,7 @@ export async function getServicosByGerencia(
     .order("item");
 
   if (error) throw error;
-  return (data || []).map(mapDbToServicoItem);
+  return deduplicateById((data || []).map(mapDbToServicoItem));
 }
 
 export async function getServicosCatalogoByGerencia(
@@ -2294,7 +2374,7 @@ export async function getServicosCatalogoByGerencia(
     .or(`gerencia_id.eq.${gerenciaId},gerencia_id.is.null`);
 
   if (error) throw error;
-  return data || [];
+  return deduplicateById(data || []);
 }
 
 export async function getServicosByDiretoria(
@@ -2303,7 +2383,7 @@ export async function getServicosByDiretoria(
 ): Promise<ServicoItem[]> {
   if (gs.isGoogleSheetsActive()) {
     const rows = await gs.gsGetServicos({ diretoria_id: diretoriaId, periodo_id: periodoId });
-    return (rows || []).map(mapDbToServicoItem);
+    return deduplicateById((rows || []).map(mapDbToServicoItem));
   }
 
   const data = await fetchAllPages<any>((from, to) =>
@@ -2317,7 +2397,7 @@ export async function getServicosByDiretoria(
       .order("item")
       .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
   );
-  return data.map(mapDbToServicoItem);
+  return deduplicateById(data.map(mapDbToServicoItem));
 }
 
 export async function updateServico(

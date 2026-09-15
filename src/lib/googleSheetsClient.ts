@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 const OFFICIAL_DEFAULT_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxoNkRj9R_iwwuu-JEIEFPpTCB4GV0qkau3YVaz19jH9BwExvGWn38SSFNuEiu8eEfJIg/exec";
+  "https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec";
 
 const GOOGLE_SCRIPT_URL =
   (import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined)?.trim() ||
@@ -9,18 +9,18 @@ const GOOGLE_SCRIPT_URL =
 
 export const GOOGLE_SPREADSHEET_URL =
   (import.meta.env.VITE_GOOGLE_SPREADSHEET_URL as string | undefined)?.trim() ||
-  "https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470";
+  "https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512";
 
 export const GOOGLE_SPREADSHEET_ID =
   (import.meta.env.VITE_GOOGLE_SPREADSHEET_ID as string | undefined)?.trim() ||
-  "10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o";
+  "1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc";
 
 export const GOOGLE_SPREADSHEET_GID =
   (import.meta.env.VITE_GOOGLE_SPREADSHEET_GID as string | undefined)?.trim() ||
-  "1160734470";
+  "604009512";
 
 /**
- * Retorna o link completo da Planilha Google apontando para a aba desejada (ou padrão gid=1160734470)
+ * Retorna o link completo da Planilha Google apontando para a aba desejada (ou padrão gid=604009512)
  */
 export function getSpreadsheetUrl(gid?: string | number): string {
   const targetGid = gid !== undefined ? String(gid) : GOOGLE_SPREADSHEET_GID;

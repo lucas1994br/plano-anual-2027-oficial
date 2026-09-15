@@ -8,10 +8,10 @@ Este documento descreve a integração da **Planilha Google Oficial** na arquite
 
 | Parâmetro | Valor |
 | :--- | :--- |
-| **URL da Planilha Oficial** | `https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470` |
-| **Spreadsheet ID** | `10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o` |
-| **Aba Alvo (GID)** | `1160734470` |
-| **Google Apps Script Web App** | `https://script.google.com/macros/s/AKfycbxoNkRj9R_iwwuu-JEIEFPpTCB4GV0qkau3YVaz19jH9BwExvGWn38SSFNuEiu8eEfJIg/exec` |
+| **URL da Planilha Oficial** | `https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512` |
+| **Spreadsheet ID** | `1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc` |
+| **Aba Alvo (GID)** | `604009512` |
+| **Google Apps Script Web App** | `https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec` |
 
 ---
 
@@ -24,15 +24,15 @@ graph TD
     A[Frontend React / Vite] --> B[Cliente googleSheetsClient.ts]
     A --> C[Cliente Supabase]
     B -->|HTTP GET / POST| D[Google Apps Script Web App]
-    D -->|Apps Script API| E["Google Planilhas Oficial<br/>(ID: 10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o)"]
-    E --> F["Aba Ativa Oficial<br/>(GID: 1160734470)"]
+    D -->|Apps Script API| E["Google Planilhas Oficial<br/>(ID: 1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc)"]
+    E --> F["Aba Ativa Oficial<br/>(GID: 604009512)"]
     E --> G["Abas de Domínio<br/>(diretorias, gerencias, servicos, etc.)"]
 ```
 
 ### Principais Características:
 1. **Custo Zero**: Não requer servidores dedicados para a camada de persistência em planilha.
 2. **Execução sem Preflight CORS**: O cliente `googleSheetsClient.ts` envia requisições `POST` usando formato padrão para compatibilidade com os redirecionamentos HTTP 302 do Google Apps Script.
-3. **Resolução Dinâmica por GID**: Suporte à localização e consulta direta da aba `1160734470` via método `getSheetByGid(gid)`.
+3. **Resolução Dinâmica por GID**: Suporte à localização e consulta direta da aba `604009512` via método `getSheetByGid(gid)`.
 4. **Resiliência e Fallback Transparente**: Se o backend do Google Sheets estiver indisponível ou uma ação retornar erro, as operações de leitura e fallback continuam garantidas sem interromper a aplicação.
 
 ---
@@ -45,10 +45,10 @@ VITE_SUPABASE_URL=https://icyawlvdmlcndsjpudle.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_...
 
 # Google Apps Script & Planilha Oficial
-VITE_GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbxoNkRj9R_iwwuu-JEIEFPpTCB4GV0qkau3YVaz19jH9BwExvGWn38SSFNuEiu8eEfJIg/exec
-VITE_GOOGLE_SPREADSHEET_URL=https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470
-VITE_GOOGLE_SPREADSHEET_ID=10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o
-VITE_GOOGLE_SPREADSHEET_GID=1160734470
+VITE_GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec
+VITE_GOOGLE_SPREADSHEET_URL=https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512
+VITE_GOOGLE_SPREADSHEET_ID=1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc
+VITE_GOOGLE_SPREADSHEET_GID=604009512
 ```
 
 ---
@@ -77,7 +77,7 @@ VITE_GOOGLE_SPREADSHEET_GID=1160734470
 Sempre que o arquivo local `google_apps_script.js` for atualizado:
 
 1. Acesse a planilha oficial:
-   `https://docs.google.com/spreadsheets/d/10av2TSqdF6jOanJ-bBscc3I13vpm1W5RALvsgPAnK-o/edit?gid=1160734470#gid=1160734470`
+   `https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512`
 2. No menu superior, clique em **Extensões** > **Apps Script**.
 3. Selecione todo o código no editor e substitua pelo conteúdo atualizado de [`google_apps_script.js`](file:///c:/Users/noell/Downloads/Projetos/plano-anual-2027-oficial/google_apps_script.js).
 4. No canto superior direito, clique em **Implantar** > **Gerenciar Implantações**.

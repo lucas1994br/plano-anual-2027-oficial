@@ -35,7 +35,7 @@ import {
   GOOGLE_SPREADSHEET_GID 
 } from "@/lib/googleSheetsClient";
 
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxoNkRj9R_iwwuu-JEIEFPpTCB4GV0qkau3YVaz19jH9BwExvGWn38SSFNuEiu8eEfJIg/exec";
+const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec";
 
 interface TableMetadata {
   id: string;
@@ -57,7 +57,7 @@ const TABLES: TableMetadata[] = [
     gid: GOOGLE_SPREADSHEET_GID,
     action: "getSolicitacoes",
     category: "Operacional",
-    description: "Tabela oficial e central de aquisições do PAC 2027 (Aba oficial com GID 1160734470).",
+    description: "Tabela oficial e central de aquisições do PAC 2027 (Aba oficial com GID 604009512).",
     fields: [
       { name: "id", type: "UUID / String", desc: "Identificador único da solicitação" },
       { name: "numero_item", type: "Integer", desc: "Número sequencial do item" },
@@ -885,7 +885,7 @@ curl -L -X GET "${endpointUrl}" \\
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-slate-700">Ou informe o GID numérico</Label>
                     <Input 
-                      placeholder="Ex: 1160734470" 
+                      placeholder="Ex: 604009512" 
                       value={customGid}
                       onChange={(e) => setCustomGid(e.target.value)}
                       className="text-xs h-8 font-mono"
