@@ -1629,10 +1629,28 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
         return uniqueItems;
       }
     } catch (_err) {
-      console.warn("Falha ao buscar catálogo da planilha, carregando dados locais...", _err);
+      console.warn("Falha ao buscar catálogo da planilha, tentando Supabase...", _err);
     }
 
-    // Fallback defensivo: carrega itens a partir de materialDescriptionByCode.json
+    // Fallback defensivo 1: Tentar carregar do Supabase se o Google Sheets falhar ou vier vazio
+    try {
+      const data = await fetchAllPages<unknown>((from, to) =>
+        supabase
+          .from("itens_catalogo")
+          .select("*")
+          .order("codigo")
+          .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
+      );
+      if (Array.isArray(data) && data.length > 0) {
+        const uniqueData = deduplicateItensCatalogo(data as any[]);
+        updateCatalogCache(uniqueData);
+        return uniqueData;
+      }
+    } catch (errDb) {
+      console.warn("Falha ao buscar catálogo no Supabase após falha do Google Sheets:", errDb);
+    }
+
+    // Fallback defensivo 2: carrega itens a partir de materialDescriptionByCode.json caso nem Sheets nem Supabase respondam
     try {
       if (typeof window !== "undefined") {
         const res = await fetch("/data/materialDescriptionByCode.json");
@@ -1900,18 +1918,32 @@ export async function saveAdminMiniErpConfigDb(config: {
 
 export async function getServicosCatalogo(): Promise<unknown[]> {
   if (gs.isGoogleSheetsActive()) {
-    const list = (await gs.gsGetServicosCatalogo()) || [];
-    return deduplicateById(list as any[]);
+    try {
+      const list = (await gs.gsGetServicosCatalogo()) || [];
+      if (Array.isArray(list) && list.length > 0) {
+        return deduplicateById(list as any[]);
+      }
+    } catch (_err) {
+      console.warn("Falha ao buscar serviços da planilha, tentando Supabase...", _err);
+    }
   }
 
-  const list = await fetchAllPages<unknown>((from, to) =>
-    supabase
-      .from("servicos_catalogo")
-      .select("*")
-      .order("item")
-      .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
-  );
-  return deduplicateById(list as any[]);
+  try {
+    const list = await fetchAllPages<unknown>((from, to) =>
+      supabase
+        .from("servicos_catalogo")
+        .select("*")
+        .order("item")
+        .range(from, to) as unknown as Promise<PostgrestSingleResponse<unknown[]>>
+    );
+    if (Array.isArray(list)) {
+      return deduplicateById(list as any[]);
+    }
+    return [];
+  } catch (errDb) {
+    console.warn("Falha ao buscar serviços no Supabase:", errDb);
+    return [];
+  }
 }
 
 export async function createServicoCatalogoAndDistribuir(servico: {
