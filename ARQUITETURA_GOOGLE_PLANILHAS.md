@@ -11,7 +11,7 @@ Este documento descreve a integração da **Planilha Google Oficial** na arquite
 | **URL da Planilha Oficial** | `https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512` |
 | **Spreadsheet ID** | `1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc` |
 | **Aba Alvo (GID)** | `604009512` |
-| **Google Apps Script Web App** | `https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec` |
+| **Google Apps Script Web App** | `https://script.google.com/macros/s/AKfycbzDfO2wQoN-i7u1NlR_k5IK64WwlthyY0JgebAq3fH0Q56fLjcTXDic1iMUTTmKvl4/exec` |
 
 ---
 
@@ -45,7 +45,7 @@ VITE_SUPABASE_URL=https://icyawlvdmlcndsjpudle.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_...
 
 # Google Apps Script & Planilha Oficial
-VITE_GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec
+VITE_GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbzDfO2wQoN-i7u1NlR_k5IK64WwlthyY0JgebAq3fH0Q56fLjcTXDic1iMUTTmKvl4/exec
 VITE_GOOGLE_SPREADSHEET_URL=https://docs.google.com/spreadsheets/d/1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc/edit?gid=604009512#gid=604009512
 VITE_GOOGLE_SPREADSHEET_ID=1iAMhiwnwkKDznVYGjCxr-9lzHTiMMDQzmGUdoPUJfnc
 VITE_GOOGLE_SPREADSHEET_GID=604009512

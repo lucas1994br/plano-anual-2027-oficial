@@ -32,10 +32,11 @@ import { toast } from "sonner";
 import { 
   GOOGLE_SPREADSHEET_URL, 
   GOOGLE_SPREADSHEET_ID, 
-  GOOGLE_SPREADSHEET_GID 
+  GOOGLE_SPREADSHEET_GID,
+  GOOGLE_SCRIPT_URL
 } from "@/lib/googleSheetsClient";
 
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzG6v8-uWmgsie3y1szFFvzKzgIG0tz9pfSpFrfW6Qh1jJbDoj6GR6PevrY7d6zZXtz/exec";
+const DEFAULT_SCRIPT_URL = GOOGLE_SCRIPT_URL;
 
 interface TableMetadata {
   id: string;
@@ -349,7 +350,7 @@ export function AdminRestApiBuilder() {
   const [pingDuration, setPingDuration] = useState<number | null>(null);
   const [isCheckingPing, setIsCheckingPing] = useState<boolean>(false);
 
-  const scriptUrl = ((import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined)?.trim() || DEFAULT_SCRIPT_URL);
+  const scriptUrl = GOOGLE_SCRIPT_URL;
 
   const currentTable = TABLES.find(t => t.id === selectedTableId) || TABLES[0];
 
