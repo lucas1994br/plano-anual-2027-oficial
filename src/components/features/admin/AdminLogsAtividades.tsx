@@ -86,9 +86,21 @@ function formatSafeDate(dateVal: any, formatPattern = "dd/MM/yyyy HH:mm:ss", opt
 type FuncionarioInfo = { nome: string; diretoria_id?: string; gerencia_id?: string; [key: string]: unknown };
 
 function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Record<string, unknown>, funcionariosMap: Record<string, FuncionarioInfo>, getFuncNome: (mat: unknown) => string | undefined }>) {
-  const record = (typeof log.detalhes === "object" ? log.detalhes : null) as any;
-
   if (!log) return null;
+
+  const record: Record<string, any> = (() => {
+    if (!log.detalhes) return {};
+    if (typeof log.detalhes === "object") return log.detalhes as Record<string, any>;
+    if (typeof log.detalhes === "string") {
+      try {
+        const parsed = JSON.parse(log.detalhes);
+        return typeof parsed === "object" && parsed !== null ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  })();
 
   const matStr = String(log.matricula ?? "");
   const funcName = toTitleCase(getFuncNome(matStr) || "Desconhecido");
@@ -96,18 +108,13 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
 
   // Tenta extrair status novo se houver
   let statusText = "";
-  try {
-    const detalhes = typeof log.detalhes === 'string' ? JSON.parse(log.detalhes) : log.detalhes;
-    if (detalhes?.status_novo) {
-      const s = detalhes.status_novo;
-      let statusFriendly = String(s);
-      if (s === 'aprovado') statusFriendly = 'Aprovado';
-      else if (s === 'enviado') statusFriendly = 'Enviado para Aprovação';
-      else if (s === 'reprovado') statusFriendly = 'Reprovado';
-      statusText = statusFriendly;
-    }
-  } catch (_e) {
-    console.warn("Não foi possível parsear detalhes:", _e);
+  if (record.status_novo) {
+    const s = record.status_novo;
+    let statusFriendly = String(s);
+    if (s === 'aprovado') statusFriendly = 'Aprovado';
+    else if (s === 'enviado') statusFriendly = 'Enviado para Aprovação';
+    else if (s === 'reprovado') statusFriendly = 'Reprovado';
+    statusText = statusFriendly;
   }
   
   const cargo = (() => {
@@ -136,11 +143,11 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
   else if (statusText === 'Enviado para Aprovação') actionVerb = "enviou para aprovação";
   else if (statusText === 'Reprovado') actionVerb = "reprovou";
 
-  const gerenciaText = record?.gerencia ? ` da gerência ${record.gerencia}` : "";
+  const gerenciaText = record.gerencia ? ` da gerência ${record.gerencia}` : "";
 
-  if (log.tabela_afetada === "solicitacoes" && record.codigo) {
+  if (log.tabela_afetada === "solicitacoes" && (record.codigo || record.descricao || record.objeto)) {
     const itemName = record.descricao || record.objeto || "Item não especificado";
-    texto = <>{cargo} {funcName} {actionVerb} a solicitação{gerenciaText} referente ao item "{itemName}" do código {record.codigo}, com quantidade {record.qtd_estimada || 1}.</>;
+    texto = <>{cargo} {funcName} {actionVerb} a solicitação{gerenciaText} referente ao item "{itemName}"{record.codigo ? ` do código ${record.codigo}` : ""}, com quantidade {record.qtd_estimada || 1}.</>;
   } else if (log.tabela_afetada === "itens_catalogo" && record.descricao) {
     texto = <>{cargo} {funcName} atualizou o item de catálogo "{record.descricao}"{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   } else if (log.tabela_afetada === "servicos_catalogo" && record.objeto) {
@@ -152,23 +159,17 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
     const itemName = record.objeto || record.descricao || "Aquisição Existente não especificada";
     texto = <>{cargo} {funcName} {actionVerb} a aquisição existente "{itemName}" (Item {record.item || record.id || "N/A"}){statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   } else if (log.tabela_afetada === "restricoes_atividades") {
-    let detalhesObj: any = {};
-    try {
-      detalhesObj = typeof log.detalhes === 'string' ? JSON.parse(log.detalhes) : (log.detalhes || {});
-    } catch {
-      detalhesObj = {};
-    }
-    const mod = detalhesObj.modulo ? (detalhesObj.modulo.replace(/_/g, " ")) : "módulo";
-    const act = detalhesObj.atividade ? (detalhesObj.atividade.replace(/_/g, " ")) : "atividade";
-    const st = detalhesObj.status === "bloqueado" ? "bloqueou" : "liberou";
-    const escopo = detalhesObj.gerencia_sigla
-      ? `para a Gerência ${detalhesObj.gerencia_sigla}`
-      : detalhesObj.diretoria_sigla
-      ? `para a Diretoria ${detalhesObj.diretoria_sigla}`
-      : detalhesObj.escopo_tipo === "perfil"
-      ? `para o Perfil ${detalhesObj.perfil}`
+    const mod = record.modulo ? String(record.modulo).replace(/_/g, " ") : "módulo";
+    const act = record.atividade ? String(record.atividade).replace(/_/g, " ") : "atividade";
+    const st = record.status === "bloqueado" ? "bloqueou" : "liberou";
+    const escopo = record.gerencia_sigla
+      ? `para a Gerência ${record.gerencia_sigla}`
+      : record.diretoria_sigla
+      ? `para a Diretoria ${record.diretoria_sigla}`
+      : record.escopo_tipo === "perfil"
+      ? `para o Perfil ${record.perfil}`
       : "para todos os setores";
-    const per = detalhesObj.periodo_nome ? ` no período "${detalhesObj.periodo_nome}"` : "";
+    const per = record.periodo_nome ? ` no período "${record.periodo_nome}"` : "";
 
     if (log.acao === "ATIVAR") {
       texto = <>{cargo} {funcName} ativou a restrição da atividade "{act}" ({mod}) {escopo}{per}.</>;
@@ -180,7 +181,7 @@ function LogNarrative({ log, funcionariosMap, getFuncNome }: Readonly<{ log: Rec
       texto = <>{cargo} {funcName} {st} a atividade "{act}" ({mod}) {escopo}{per}.</>;
     }
   } else {
-    texto = <>{cargo} {funcName} realizou uma alteração no registro ID {String(log.registro_id).substring(0, 8)}{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
+    texto = <>{cargo} {funcName} realizou uma alteração no registro ID {String(log.registro_id ?? "").substring(0, 8)}{statusText ? <>. O status foi atualizado para <strong>{statusText}</strong></> : ""}.</>;
   }
 
   return (
@@ -765,45 +766,61 @@ export function AdminLogsAtividades() {
                 {(() => {
                   let parsedDetalhes: Record<string, unknown> = {};
                   try {
-                    parsedDetalhes = typeof selectedLog.detalhes === 'string' 
-                      ? JSON.parse(selectedLog.detalhes) 
-                      : selectedLog.detalhes;
+                    if (selectedLog.detalhes) {
+                      if (typeof selectedLog.detalhes === 'object') {
+                        parsedDetalhes = selectedLog.detalhes as Record<string, unknown>;
+                      } else if (typeof selectedLog.detalhes === 'string') {
+                        const parsed = JSON.parse(selectedLog.detalhes);
+                        if (typeof parsed === 'object' && parsed !== null) {
+                          parsedDetalhes = parsed;
+                        } else {
+                          parsedDetalhes = { valor: String(parsed) };
+                        }
+                      }
+                    }
                   } catch (_e) {
-                    parsedDetalhes = { erro_parse: "Não foi possível exibir detalhes estruturados.", original: selectedLog.detalhes };
+                    parsedDetalhes = { erro_parse: "Não foi possível exibir detalhes estruturados.", original: String(selectedLog.detalhes) };
                   }
                   
-                  return parsedDetalhes && Object.keys(parsedDetalhes).length > 0 && (
-                  <div className="col-span-1 md:col-span-2">
-                    <LogNarrative log={selectedLog} funcionariosMap={funcionariosMap} getFuncNome={getFuncNome} />
-                    <p className="text-sm font-semibold mb-2">Dados Modificados / Inseridos</p>
-                    <div className="rounded-md border bg-muted/10 overflow-x-auto">
-                      <Table className="min-w-[400px]">
-                        <TableHeader>
-                          <TableRow className="bg-muted/30 hover:bg-muted/30">
-                            <TableHead className="h-8 py-2 text-sm font-semibold text-foreground">Campo Afetado</TableHead>
-                            <TableHead className="h-8 py-2 text-sm font-semibold text-foreground">Novo Valor Registrado</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {Object.entries(parsedDetalhes)
-                            .filter(([key]) => !key.toLowerCase().endsWith('_id') && key.toLowerCase() !== 'id')
-                            .map(([key, value]) => (
-                            <TableRow key={key}>
-                              <TableCell className="font-semibold text-sm py-2">
-                                {getFieldNameFriendly(key)}
-                              </TableCell>
-                              <TableCell className="text-sm py-2 font-medium text-primary">
-                                {value === null || value === undefined 
-                                  ? <span className="text-muted-foreground italic">Vazio (Nulo)</span> 
-                                  : getFieldValueFriendly(key, value)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                  const hasDetails = parsedDetalhes && typeof parsedDetalhes === 'object' && Object.keys(parsedDetalhes).length > 0;
+                  
+                  return (
+                    <div className="col-span-1 md:col-span-2">
+                      <LogNarrative log={selectedLog} funcionariosMap={funcionariosMap} getFuncNome={getFuncNome} />
+                      {hasDetails && (
+                        <>
+                          <p className="text-sm font-semibold mb-2">Dados Modificados / Inseridos</p>
+                          <div className="rounded-md border bg-muted/10 overflow-x-auto">
+                            <Table className="min-w-[400px]">
+                              <TableHeader>
+                                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                  <TableHead className="h-8 py-2 text-sm font-semibold text-foreground">Campo Afetado</TableHead>
+                                  <TableHead className="h-8 py-2 text-sm font-semibold text-foreground">Novo Valor Registrado</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {Object.entries(parsedDetalhes)
+                                  .filter(([key]) => !key.toLowerCase().endsWith('_id') && key.toLowerCase() !== 'id')
+                                  .map(([key, value]) => (
+                                  <TableRow key={key}>
+                                    <TableCell className="font-semibold text-sm py-2">
+                                      {getFieldNameFriendly(key)}
+                                    </TableCell>
+                                    <TableCell className="text-sm py-2 font-medium text-primary">
+                                      {value === null || value === undefined 
+                                        ? <span className="text-muted-foreground italic">Vazio (Nulo)</span> 
+                                        : getFieldValueFriendly(key, value)}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-                )})()}
+                  );
+                })()}
               </div>
             </div>
           )}

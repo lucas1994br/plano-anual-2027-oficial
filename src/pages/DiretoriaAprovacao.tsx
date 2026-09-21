@@ -83,6 +83,10 @@ const DiretoriaAprovacao = () => {
   const [ownServicosSearchTerm, setOwnServicosSearchTerm] = useState("");
   const debouncedOwnServicosSearchTerm = useDebounce(ownServicosSearchTerm, 300);
   const [ownServicosCurrentPage, setOwnServicosCurrentPage] = useState(1);
+  const [recebidosSearchTerm, setRecebidosSearchTerm] = useState("");
+  const debouncedRecebidosSearchTerm = useDebounce(recebidosSearchTerm, 300);
+  const [servicosRecebidosSearchTerm, setServicosRecebidosSearchTerm] = useState("");
+  const debouncedServicosRecebidosSearchTerm = useDebounce(servicosRecebidosSearchTerm, 300);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [showOnlyZerados, setShowOnlyZerados] = useState(false);
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
@@ -537,8 +541,19 @@ const DiretoriaAprovacao = () => {
     if (showOnlyComQuantidade) {
       filtered = filtered.filter((i) => i.qtdEstimada > 0);
     }
+    const term = debouncedRecebidosSearchTerm.trim().toLowerCase();
+    if (term) {
+      filtered = filtered.filter((i) => {
+        const matchesDesc = i.descricao ? i.descricao.toLowerCase().includes(term) : false;
+        const matchesCode = i.codigo ? i.codigo.toString().includes(term) : false;
+        const matchesGerencia = i.gerencia ? i.gerencia.toLowerCase().includes(term) : false;
+        const matchesCategoria = i.categoria ? i.categoria.toLowerCase().includes(term) : false;
+        const matchesObs = i.observacao ? i.observacao.toLowerCase().includes(term) : false;
+        return matchesDesc || matchesCode || matchesGerencia || matchesCategoria || matchesObs;
+      });
+    }
     return filtered;
-  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados]);
+  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados, debouncedRecebidosSearchTerm]);
 
   const recebidosTabCounts = useMemo(() => {
     const base = filteredItems;
@@ -571,7 +586,7 @@ const DiretoriaAprovacao = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedGerencia, selectedCategoria, showOnlyComQuantidade]);
+  }, [selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados, debouncedRecebidosSearchTerm]);
 
   const categoriasItensProprios = useMemo(() => {
     const unique = Array.from(new Set(catalogItems.map((item) => item.categoria))).filter(Boolean);
@@ -895,18 +910,35 @@ const DiretoriaAprovacao = () => {
   }, [servicosData, servicosCatalogoData, gerenciaMap]);
 
   const filteredServicos = useMemo(() => {
-    const list = selectedGerencia === "todas"
+    let list = selectedGerencia === "todas"
       ? servicosRecebidosBase
       : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
-      return list.filter(s => !servicosCatalogoSet.has(s.item));
+      list = list.filter(s => !servicosCatalogoSet.has(s.item));
+    } else if (selectedOption === "servicos_existentes") {
+      list = list.filter(s => servicosCatalogoSet.has(s.item));
     }
-    if (selectedOption === "servicos_existentes") {
-      return list.filter(s => servicosCatalogoSet.has(s.item));
+
+    const term = debouncedServicosRecebidosSearchTerm.trim().toLowerCase();
+    if (term) {
+      list = list.filter((s: ServicoItem) => {
+        const itemMatch = String(s.item).toLowerCase().includes(term);
+        const objMatch = s.objeto ? s.objeto.toLowerCase().includes(term) : false;
+        const justMatch = s.justificativa ? s.justificativa.toLowerCase().includes(term) : false;
+        const contratoMatch = s.contrato ? s.contrato.toLowerCase().includes(term) : false;
+        const contratadaMatch = s.contratada ? s.contratada.toLowerCase().includes(term) : false;
+        const gerenciaMatch = s.gerencia ? s.gerencia.toLowerCase().includes(term) : false;
+        return itemMatch || objMatch || justMatch || contratoMatch || contratadaMatch || gerenciaMatch;
+      });
     }
+
     return list;
-  }, [servicosRecebidosBase, selectedGerencia, selectedOption]);
+  }, [servicosRecebidosBase, selectedGerencia, selectedOption, servicosCatalogoSet, debouncedServicosRecebidosSearchTerm]);
+
+  useEffect(() => {
+    setServicosCurrentPage(1);
+  }, [selectedGerencia, debouncedServicosRecebidosSearchTerm]);
 
 
 
@@ -3121,19 +3153,40 @@ const DiretoriaAprovacao = () => {
             {/* Filtros para Recebidos */}
             <div className="px-6 py-4">
               <div className="flex flex-wrap items-center gap-4">
+                <div className="relative flex-1 min-w-[240px] max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Pesquisar por item, objeto, justificativa ou gerência..."
+                    value={servicosRecebidosSearchTerm}
+                    onChange={(e) => setServicosRecebidosSearchTerm(e.target.value)}
+                    className="pl-9 pr-8 bg-card text-sm"
+                  />
+                  {servicosRecebidosSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setServicosRecebidosSearchTerm("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-full"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Gerência:</span>
                   <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
-                    <SelectTrigger className="w-[200px] bg-card">
-                      <SelectValue placeholder="Todas as gerências" />
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="todas">Todas as gerências</SelectItem>
-                      {gerenciasData.map((g: any) => (
-                        <SelectItem key={g.id} value={g.sigla}>
-                          {g.sigla}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="todas">Todas ({filteredServicos.length})</SelectItem>
+                      {gerenciasData.map((g: any) => {
+                        const count = filteredServicos.filter((s: ServicoItem) => s.gerencia === g.sigla).length;
+                        return (
+                          <SelectItem key={g.id} value={g.sigla}>
+                            {g.sigla} ({count})
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
@@ -3183,7 +3236,7 @@ const DiretoriaAprovacao = () => {
               </Tabs>
               <p className="mt-2 text-xs text-muted-foreground">
                 {servicosStatusTab === "pendentes" &&
-                  "Serviços com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar."}
+                  "Serviços com status Enviado ou Em análise: use os checkboxes ou Aprovar todos / Rejeitar. Itens já rejeitados ou em compras aparecem nas outras abas."}
                 {servicosStatusTab === "aprovados" &&
                   "Serviços aprovados: selecione para enviar ao setor de Compras quando estiver pronto."}
                 {servicosStatusTab === "rejeitados" &&
@@ -3200,7 +3253,7 @@ const DiretoriaAprovacao = () => {
             ) : (
               <>
                 {/* Botões de Ação de Serviços Recebidos */}
-                <div className="px-6 py-4 border-b bg-white mx-6 rounded-t-lg border-t border-l border-r mt-4">
+                <div className="px-6 py-4 border-b">
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="flex items-center gap-2">
                       <Checkbox 
@@ -3270,7 +3323,7 @@ const DiretoriaAprovacao = () => {
                         Rejeitar ({selectedServicos.size})
                       </Button>
 
-                      {(servicosStatusTab === "pendentes" || servicosStatusTab === "rejeitados") && (
+                      {(servicosStatusTab === "pendentes" || servicosStatusTab === "rejeitados" || servicosStatusTab === "aprovados") && (
                         <>
                           <Button 
                             size="sm" 
@@ -3280,7 +3333,7 @@ const DiretoriaAprovacao = () => {
                             disabled={selectedServicos.size === 0 || isEditarServicosBlocked || isPeriodExpired}
                           >
                             <Pencil className="h-4 w-4" />
-                            Editar Selecionados
+                            Editar Selecionados ({selectedServicos.size})
                           </Button>
                           <Button 
                             size="sm" 
@@ -3935,6 +3988,24 @@ const DiretoriaAprovacao = () => {
       {/* Filtros */}
       <div className="px-6 py-4">
         <div className="flex flex-wrap items-center gap-4">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar por código, descrição ou gerência..."
+              value={recebidosSearchTerm}
+              onChange={(e) => setRecebidosSearchTerm(e.target.value)}
+              className="pl-9 pr-8 bg-card text-sm"
+            />
+            {recebidosSearchTerm && (
+              <button
+                type="button"
+                onClick={() => setRecebidosSearchTerm("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-full"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Gerência:</span>
             <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
