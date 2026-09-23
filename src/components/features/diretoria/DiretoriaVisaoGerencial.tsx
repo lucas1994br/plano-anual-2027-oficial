@@ -157,7 +157,14 @@ export function DiretoriaVisaoGerencial({
       });
     }
 
-    const allAquisicao = [...solicitacoes, ...itensProprios];
+    const uniqueAquisicaoMap = new Map<string, any>();
+    [...solicitacoes, ...itensProprios].forEach((item: any) => {
+      const key = item.id ? String(item.id) : `cod-${item.codigo}-${item.gerencia_id || item.gerencia}`;
+      if (!uniqueAquisicaoMap.has(key)) {
+        uniqueAquisicaoMap.set(key, item);
+      }
+    });
+    const allAquisicao = Array.from(uniqueAquisicaoMap.values());
 
     return listGerencias.map((g) => {
       const gId = g.id;
@@ -209,7 +216,7 @@ export function DiretoriaVisaoGerencial({
         0
       );
 
-      // Desdobramento por Status e Modalidade
+      // Desdobramento por Status e Modalidade (Aprovadas, Rejeitadas, e Pendentes como complemento)
       let aprovadasAquisicaoCount = 0;
       let aprovadasAquisicaoValor = 0;
       let pendentesAquisicaoCount = 0;
@@ -223,12 +230,12 @@ export function DiretoriaVisaoGerencial({
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasAquisicaoCount++;
           aprovadasAquisicaoValor += val;
-        } else if (st === "enviado" || st === "em_analise") {
-          pendentesAquisicaoCount++;
-          pendentesAquisicaoValor += val;
         } else if (st === "rejeitado") {
           rejeitadasAquisicaoCount++;
           rejeitadasAquisicaoValor += val;
+        } else {
+          pendentesAquisicaoCount++;
+          pendentesAquisicaoValor += val;
         }
       });
 
@@ -245,12 +252,12 @@ export function DiretoriaVisaoGerencial({
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasExistentesCount++;
           aprovadasExistentesValor += val;
-        } else if (st === "enviado" || st === "em_analise") {
-          pendentesExistentesCount++;
-          pendentesExistentesValor += val;
         } else if (st === "rejeitado") {
           rejeitadasExistentesCount++;
           rejeitadasExistentesValor += val;
+        } else {
+          pendentesExistentesCount++;
+          pendentesExistentesValor += val;
         }
       });
 
@@ -267,12 +274,12 @@ export function DiretoriaVisaoGerencial({
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasNovosCount++;
           aprovadasNovosValor += val;
-        } else if (st === "enviado" || st === "em_analise") {
-          pendentesNovosCount++;
-          pendentesNovosValor += val;
         } else if (st === "rejeitado") {
           rejeitadasNovosCount++;
           rejeitadasNovosValor += val;
+        } else {
+          pendentesNovosCount++;
+          pendentesNovosValor += val;
         }
       });
 
