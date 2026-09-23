@@ -19,6 +19,7 @@ import { PlanFilters } from "@/components/forms/PlanFilters";
 import { PlanTable } from "@/components/tables/PlanTable";
 import { ServicosTable } from "@/components/tables/ServicosTable";
 import { BudgetConsumptionCard } from "@/components/features/orcamento/BudgetConsumptionCard";
+import { DiretoriaVisaoGerencial } from "@/components/features/diretoria/DiretoriaVisaoGerencial";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -65,7 +66,7 @@ const DiretoriaAprovacao = () => {
   const { toast } = useToast();
 
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | null>(null);
+  const [selectedOption, setSelectedOption] = useState<"aquisicao" | "servicos" | "servicos_existentes" | "servicos_novos" | "visao_gerencial" | null>(null);
   const [approvalTab, setApprovalTab] = useState<"aquisicao" | "servicos" | null>(null);
   const [ownSearchTerm, setOwnSearchTerm] = useState("");
   const debouncedOwnSearchTerm = useDebounce(ownSearchTerm, 300);
@@ -333,7 +334,7 @@ const DiretoriaAprovacao = () => {
   const { data: servicosData = [], isLoading: isServicosLoading } = useQuery({
     queryKey: servicosQueryKey,
     queryFn: () => (diretoria && periodAtivo) ? getServicosByDiretoria(diretoria.id, periodAtivo.id) : [],
-    enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos") && !!diretoria && !!periodAtivo,
+    enabled: !!diretoria && !!periodAtivo,
     staleTime: 0,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
@@ -344,19 +345,19 @@ const DiretoriaAprovacao = () => {
   const { data: catalogoData = [] } = useQuery({
     queryKey: ["itens-catalogo"],
     queryFn: getItensCatalogo,
-    enabled: authenticated && selectedOption === "aquisicao",
+    enabled: !!authenticated,
     staleTime: 10 * 60 * 1000,
   });
 
   const { data: servicosCatalogoData = [] } = useQuery({
     queryKey: ["servicos-catalogo"],
     queryFn: getServicosCatalogo,
-    enabled: authenticated && (selectedOption === "servicos" || selectedOption === "servicos_existentes" || selectedOption === "servicos_novos"),
+    enabled: !!authenticated,
     staleTime: 10 * 60 * 1000,
   });
 
   const servicosCatalogoSet = useMemo(() => {
-    return new Set((servicosCatalogoData as any[]).map(c => c.item));
+    return new Set((servicosCatalogoData as any[]).map(c => String(c.item || "").trim()));
   }, [servicosCatalogoData]);
 
   const orcamentoConfig = useMemo(() => {
@@ -693,14 +694,55 @@ const DiretoriaAprovacao = () => {
 
   const totalPages = Math.ceil(recebidosTableItems.length / ITEMS_PER_PAGE);
 
-  const summary = useMemo(() => ({
-    totalItens:
-      recebidosTableItems.filter((item) => item.qtdEstimada > 0).length +
-      filteredOwnItems.filter((item) => item.qtdEstimada > 0).length,
-    valorTotal:
-      recebidosTableItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0) +
-      filteredOwnItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
-  }), [recebidosTableItems, filteredOwnItems]);
+  const summary = useMemo(() => {
+    if (selectedOwnItems.size > 0 || selectedItems.size > 0) {
+      let count = 0;
+      let totalVal = 0;
+      if (selectedOwnItems.size > 0) {
+        filteredOwnItems.forEach((item) => {
+          const matchId = item.id && selectedOwnItems.has(item.id);
+          const matchCodigo = selectedOwnItems.has(item.codigo as any) || selectedOwnItems.has(String(item.codigo) as any);
+          if ((matchId || matchCodigo) && item.qtdEstimada > 0) {
+            count++;
+            totalVal += item.qtdEstimada * item.valorUnitario;
+          }
+        });
+      }
+      if (selectedItems.size > 0) {
+        items.forEach((item) => {
+          if (item.id && selectedItems.has(item.id) && item.qtdEstimada > 0) {
+            count++;
+            totalVal += item.qtdEstimada * item.valorUnitario;
+          }
+        });
+      }
+      return { totalItens: count, valorTotal: totalVal };
+    }
+
+    if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
+      let count = 0;
+      let totalVal = 0;
+      servicosData.forEach((s: ServicoItem) => {
+        const itemKey = String(s.item || "").trim();
+        const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
+        const matchId = s.id && selectedServicos.has(s.id as any);
+        if (matchItem || matchId) {
+          count++;
+          totalVal += (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0);
+        }
+      });
+      return { totalItens: count, valorTotal: totalVal };
+    }
+
+    return {
+      totalItens:
+        recebidosTableItems.filter((item) => item.qtdEstimada > 0).length +
+        filteredOwnItems.filter((item) => item.qtdEstimada > 0).length,
+      valorTotal:
+        recebidosTableItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0) +
+        filteredOwnItems.reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0),
+    };
+  }, [recebidosTableItems, filteredOwnItems, selectedOwnItems, selectedItems, selectedServicos, items, servicosData, selectedOption]);
 
   const orcamentoDiretoriaAquisicao = diretoria?.id
     ? getDiretoriaBudget(orcamentoConfig as any, diretoria.id, "aquisicao")
@@ -727,7 +769,7 @@ const DiretoriaAprovacao = () => {
     status === "aprovado" || status === "em_compra" || status === "concluido";
 
   const gastoAquisicaoDiretoria = useMemo(() => {
-    if (selectedOwnItems.size > 0 || selectedItems.size > 0) {
+    if ((selectedOwnItems.size > 0 || selectedItems.size > 0) && selectedOption === "aquisicao") {
       let totalSelected = 0;
       if (selectedOwnItems.size > 0) {
         filteredOwnItems.forEach((item) => {
@@ -750,37 +792,39 @@ const DiretoriaAprovacao = () => {
     return [...items, ...itensProprios]
       .filter((item) => isEnviadoOuAprovado(item.status) && item.qtdEstimada > 0)
       .reduce((acc, item) => acc + item.qtdEstimada * item.valorUnitario, 0);
-  }, [items, itensProprios, filteredOwnItems, selectedOwnItems, selectedItems]);
+  }, [items, itensProprios, filteredOwnItems, selectedOwnItems, selectedItems, selectedOption]);
 
   const gastoServicosExistentesDiretoria = useMemo(() => {
-    if (selectedServicos.size > 0) {
+    if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
       return servicosData
         .filter((s: ServicoItem) => {
-          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(String(s.item));
+          const itemKey = String(s.item || "").trim();
+          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
+          return servicosCatalogoSet.has(itemKey) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && servicosCatalogoSet.has(s.item as any))
+      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && servicosCatalogoSet.has(String(s.item || "").trim()))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
-  }, [servicosData, servicosCatalogoSet, selectedServicos]);
+  }, [servicosData, servicosCatalogoSet, selectedServicos, selectedOption]);
 
   const gastoServicosNovosDiretoria = useMemo(() => {
-    if (selectedServicos.size > 0) {
+    if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
       return servicosData
         .filter((s: ServicoItem) => {
-          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(String(s.item));
+          const itemKey = String(s.item || "").trim();
+          const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return !servicosCatalogoSet.has(s.item as any) && (matchItem || matchId);
+          return !servicosCatalogoSet.has(itemKey) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && !servicosCatalogoSet.has(s.item as any))
+      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && !servicosCatalogoSet.has(String(s.item || "").trim()))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
-  }, [servicosData, servicosCatalogoSet, selectedServicos]);
+  }, [servicosData, servicosCatalogoSet, selectedServicos, selectedOption]);
 
   const gastoServicosDiretoria = useMemo(() => {
     return selectedOption === "servicos_existentes"
@@ -838,7 +882,7 @@ const DiretoriaAprovacao = () => {
         } as unknown as ServicoItem;
       });
     } else if (selectedOption === "servicos_novos") {
-      return servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(s.item));
+      return servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()));
     }
     return [];
   }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet, gerenciaMap]);
@@ -915,9 +959,9 @@ const DiretoriaAprovacao = () => {
       : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
 
     if (selectedOption === "servicos_novos") {
-      list = list.filter(s => !servicosCatalogoSet.has(s.item));
+      list = list.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()));
     } else if (selectedOption === "servicos_existentes") {
-      list = list.filter(s => servicosCatalogoSet.has(s.item));
+      list = list.filter(s => servicosCatalogoSet.has(String(s.item || "").trim()));
     }
 
     const term = debouncedServicosRecebidosSearchTerm.trim().toLowerCase();
@@ -2514,7 +2558,7 @@ const DiretoriaAprovacao = () => {
           <div className="px-6 py-12">
             <div className="max-w-6xl mx-auto">
               <h2 className="text-lg font-semibold text-foreground mb-4">Selecione o painel para gestão da diretoria</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Cartão Aquisição */}
                 <button
                   onClick={() => {
@@ -2552,11 +2596,45 @@ const DiretoriaAprovacao = () => {
                     Gerencie serviços da diretoria e das gerências com priorização no mesmo painel
                   </p>
                 </button>
+
+                {/* Cartão Visão Gerencial */}
+                <button
+                  onClick={() => {
+                    setSelectedOption("visao_gerencial");
+                  }}
+                  className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center"
+                >
+                  <div className="mb-4 flex justify-center">
+                    <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center group-hover:bg-purple-200 transition-colors">
+                      <span className="text-4xl">📊</span>
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Visão Gerencial</h2>
+                  <p className="text-muted-foreground">
+                    Visão geral estratégica com gráficos e matriz de solicitações de aquisição e serviços por gerência
+                  </p>
+                </button>
               </div>
             </div>
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Tela de Visão Gerencial da Diretoria
+  if (selectedOption === "visao_gerencial" && diretoria) {
+    return (
+      <DiretoriaVisaoGerencial
+        diretoria={diretoria}
+        gerenciasData={gerenciasData}
+        solicitacoes={solicitacoes}
+        itensProprios={itensProprios}
+        servicosData={servicosData}
+        servicosCatalogoSet={servicosCatalogoSet}
+        orcamentoConfig={orcamentoConfig}
+        onBack={() => setSelectedOption(null)}
+      />
     );
   }
 
@@ -2923,11 +3001,42 @@ const DiretoriaAprovacao = () => {
               { label: selectedOption === "servicos_novos" ? "Novos Serviços" : "Serviços Existentes", isActive: true },
             ]}
             rightContent={
-              (isAnyServicosActionBlocked || isPeriodExpired) ? (
-                <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-xs gap-1 py-1 px-3">
-                  <Lock className="h-3 w-3" /> Somente leitura
-                </Badge>
-              ) : undefined
+              <div className="flex items-center gap-2">
+                {(isAnyServicosActionBlocked || isPeriodExpired) && (
+                  <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-xs gap-1 py-1 px-3">
+                    <Lock className="h-3 w-3" /> Somente leitura
+                  </Badge>
+                )}
+                <Button
+                  variant={approvalTab === "aquisicao" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSelectedOption("aquisicao");
+                    setApprovalTab("aquisicao");
+                  }}
+                >
+                  Aquisição
+                </Button>
+                <Button
+                  variant={approvalTab === "servicos" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSelectedOption("servicos");
+                    setApprovalTab("servicos");
+                  }}
+                >
+                  Serviços
+                </Button>
+                <Button
+                  variant={(selectedOption as string) === "visao_gerencial" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSelectedOption("visao_gerencial");
+                  }}
+                >
+                  Visão Gerencial
+                </Button>
+              </div>
             }
           />
 
@@ -2970,6 +3079,10 @@ const DiretoriaAprovacao = () => {
               orcamento={selectedOption === "servicos_existentes" ? orcamentoDiretoriaServicosExistentes : orcamentoDiretoriaServicosNovos}
               gasto={gastoServicosDiretoria}
               orcamentoGeral={orcamentoGeralDiretoria}
+              isDiretoria={true}
+              gastoAquisicao={gastoAquisicaoDiretoria}
+              gastoServicosExistentes={gastoServicosExistentesDiretoria}
+              gastoServicosNovos={gastoServicosNovosDiretoria}
             />
 
             {/* Seus Serviços - adicionados diretamente pela diretoria */}
@@ -3711,6 +3824,15 @@ const DiretoriaAprovacao = () => {
             >
               Serviços
             </Button>
+            <Button
+              variant={(selectedOption as string) === "visao_gerencial" ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setSelectedOption("visao_gerencial");
+              }}
+            >
+              Visão Gerencial
+            </Button>
           </div>
         }
       />
@@ -3756,6 +3878,10 @@ const DiretoriaAprovacao = () => {
         orcamento={orcamentoDiretoriaAquisicao}
         gasto={gastoAquisicaoDiretoria}
         orcamentoGeral={orcamentoGeralDiretoria}
+        isDiretoria={true}
+        gastoAquisicao={gastoAquisicaoDiretoria}
+        gastoServicosExistentes={gastoServicosExistentesDiretoria}
+        gastoServicosNovos={gastoServicosNovosDiretoria}
       />
 
       {/* Seus Itens - adicionados diretamente pela diretoria */}
