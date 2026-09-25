@@ -146,6 +146,16 @@ export function DiretoriaVisaoGerencial({
 
   const siglaUpper = (diretoria?.sigla || "").toUpperCase();
 
+  // Statuses válidos para contabilização de solicitações submetidas / processadas no painel
+  const VALID_STATUSES = useMemo(() => new Set(["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"]), []);
+
+  // Helper para converter valores numéricos com segurança
+  const parseNum = (val: any): number => {
+    if (val === undefined || val === null || val === "") return 0;
+    const num = typeof val === "number" ? val : Number(val);
+    return isNaN(num) ? 0 : num;
+  };
+
   // Consolidação por Gerência
   const gerenciaMatrix = useMemo(() => {
     const listGerencias = [...gerenciasData];
@@ -157,66 +167,109 @@ export function DiretoriaVisaoGerencial({
       });
     }
 
+    // Deduplica e padroniza os itens de aquisição válidos (status no fluxo de aprovação e quantidade > 0)
     const uniqueAquisicaoMap = new Map<string, any>();
-    [...solicitacoes, ...itensProprios].forEach((item: any) => {
-      const key = item.id ? String(item.id) : `cod-${item.codigo}-${item.gerencia_id || item.gerencia}`;
+    [...solicitacoes, ...itensProprios].forEach((rawItem: any) => {
+      const st = rawItem.status || "rascunho";
+      if (!VALID_STATUSES.has(st)) return;
+
+      const qtd = parseNum(rawItem.qtdEstimada !== undefined ? rawItem.qtdEstimada : rawItem.qtd_estimada);
+      if (qtd <= 0) return;
+
+      const valUnit = parseNum(
+        rawItem.valorUnitario !== undefined
+          ? rawItem.valorUnitario
+          : (rawItem.valor_unitario || rawItem.item?.valor_unitario)
+      );
+      const codigo = Number(rawItem.codigo ?? rawItem.item?.codigo) || 0;
+      const gerenciaId = rawItem.gerencia_id || rawItem.gerenciaId;
+      const gerenciaSigla = rawItem.gerencia || rawItem.gerenciaSigla;
+
+      const normalized = {
+        ...rawItem,
+        id: rawItem.id,
+        codigo,
+        qtdEstimada: qtd,
+        valorUnitario: valUnit,
+        status: st as SolicitacaoStatus,
+        gerencia_id: gerenciaId,
+        gerencia: gerenciaSigla,
+      };
+
+      const key = rawItem.id ? String(rawItem.id) : `cod-${codigo}-${gerenciaId || gerenciaSigla}`;
       if (!uniqueAquisicaoMap.has(key)) {
-        uniqueAquisicaoMap.set(key, item);
+        uniqueAquisicaoMap.set(key, normalized);
       }
     });
+
     const allAquisicao = Array.from(uniqueAquisicaoMap.values());
+
+    // Deduplica e padroniza serviços válidos (status no fluxo de aprovação)
+    const uniqueServicosMap = new Map<string, any>();
+    servicosData.forEach((rawServico: any) => {
+      const st = rawServico.status || "rascunho";
+      if (!VALID_STATUSES.has(st)) return;
+
+      const val = parseNum(
+        rawServico.dotacaoOrcamentaria ||
+        rawServico.estimativaValor ||
+        rawServico.estimativa_valor ||
+        rawServico.valor_total ||
+        rawServico.valorTotal
+      );
+      const itemKey = String(rawServico.item || "").trim();
+      const gerenciaId = rawServico.gerencia_id || rawServico.gerenciaId;
+      const gerenciaSigla = rawServico.gerencia || rawServico.unidadeDemandante;
+
+      const normalized = {
+        ...rawServico,
+        itemKey,
+        valor: val,
+        status: st as SolicitacaoStatus,
+        gerencia_id: gerenciaId,
+        gerencia: gerenciaSigla,
+      };
+
+      const key = rawServico.id ? String(rawServico.id) : `serv-${itemKey}-${gerenciaId || gerenciaSigla}`;
+      if (!uniqueServicosMap.has(key)) {
+        uniqueServicosMap.set(key, normalized);
+      }
+    });
+
+    const allServicos = Array.from(uniqueServicosMap.values());
 
     return listGerencias.map((g) => {
       const gId = g.id;
       const gSigla = g.sigla;
 
       const isMatchGerencia = (itemGerenciaId?: string, itemGerenciaSigla?: string) => {
-        if (gId === "diretoria") {
-          return itemGerenciaId === diretoria.id || itemGerenciaSigla === siglaUpper || itemGerenciaId === "diretoria";
+        const itemGId = itemGerenciaId ? String(itemGerenciaId) : "";
+        const itemGSiglaUpper = itemGerenciaSigla ? String(itemGerenciaSigla).toUpperCase() : "";
+
+        if (gId === "diretoria" || gSigla?.toUpperCase().includes("DIRETORIA")) {
+          return (
+            itemGId === diretoria.id ||
+            itemGId === "diretoria" ||
+            itemGSiglaUpper === siglaUpper ||
+            itemGSiglaUpper === `DIRETORIA (${siglaUpper})` ||
+            itemGSiglaUpper === `DIRETORIA ${siglaUpper}` ||
+            itemGSiglaUpper === `DC - DIRETORIA` ||
+            itemGSiglaUpper.includes("DIRETORIA")
+          );
         }
-        return itemGerenciaId === gId || itemGerenciaSigla === gSigla;
+
+        return (
+          itemGId === gId ||
+          itemGSiglaUpper === String(gSigla).toUpperCase() ||
+          (g.nome && itemGSiglaUpper === g.nome.toUpperCase())
+        );
       };
 
       // Aquisição da gerência
-      const aquisicaoItems = allAquisicao.filter((i: any) =>
+      const aquisicaoItems = allAquisicao.filter((i) =>
         isMatchGerencia(i.gerencia_id, i.gerencia)
       );
 
-      const aquisicaoComQtd = aquisicaoItems.filter((i) => (i.qtdEstimada || 0) > 0);
-      const qtdAquisicao = aquisicaoComQtd.length;
-      const valorAquisicao = aquisicaoComQtd.reduce(
-        (acc, item) => acc + (item.qtdEstimada || 0) * (item.valorUnitario || 0),
-        0
-      );
-
-      // Serviços da gerência
-      const servicosItems = servicosData.filter((s: any) =>
-        isMatchGerencia(s.gerencia_id || s.gerencia, s.gerencia || s.unidadeDemandante)
-      );
-
-      const servicosExistentes = servicosItems.filter((s) =>
-        servicosCatalogoSet.has(String(s.item || "").trim())
-      );
-      const qtdServicosExistentes = servicosExistentes.length;
-      const valorServicosExistentes = servicosExistentes.reduce(
-        (acc, s) =>
-          acc +
-          (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0),
-        0
-      );
-
-      const servicosNovos = servicosItems.filter(
-        (s) => !servicosCatalogoSet.has(String(s.item || "").trim())
-      );
-      const qtdServicosNovos = servicosNovos.length;
-      const valorServicosNovos = servicosNovos.reduce(
-        (acc, s) =>
-          acc +
-          (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0),
-        0
-      );
-
-      // Desdobramento por Status e Modalidade (Aprovadas, Rejeitadas, e Pendentes como complemento)
       let aprovadasAquisicaoCount = 0;
       let aprovadasAquisicaoValor = 0;
       let pendentesAquisicaoCount = 0;
@@ -224,20 +277,32 @@ export function DiretoriaVisaoGerencial({
       let rejeitadasAquisicaoCount = 0;
       let rejeitadasAquisicaoValor = 0;
 
-      aquisicaoComQtd.forEach((i) => {
-        const val = (i.qtdEstimada || 0) * (i.valorUnitario || 0);
-        const st = i.status || "rascunho";
+      aquisicaoItems.forEach((i) => {
+        const val = i.qtdEstimada * i.valorUnitario;
+        const st = i.status;
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasAquisicaoCount++;
           aprovadasAquisicaoValor += val;
         } else if (st === "rejeitado") {
           rejeitadasAquisicaoCount++;
           rejeitadasAquisicaoValor += val;
-        } else {
+        } else if (st === "enviado" || st === "em_analise") {
           pendentesAquisicaoCount++;
           pendentesAquisicaoValor += val;
         }
       });
+
+      const qtdAquisicao = aprovadasAquisicaoCount + pendentesAquisicaoCount + rejeitadasAquisicaoCount;
+      const valorAquisicao = aprovadasAquisicaoValor + pendentesAquisicaoValor + rejeitadasAquisicaoValor;
+
+      // Serviços da gerência
+      const servicosItems = allServicos.filter((s) =>
+        isMatchGerencia(s.gerencia_id || s.gerencia, s.gerencia || s.unidadeDemandante)
+      );
+
+      const servicosExistentes = servicosItems.filter((s) =>
+        servicosCatalogoSet.has(s.itemKey)
+      );
 
       let aprovadasExistentesCount = 0;
       let aprovadasExistentesValor = 0;
@@ -247,19 +312,26 @@ export function DiretoriaVisaoGerencial({
       let rejeitadasExistentesValor = 0;
 
       servicosExistentes.forEach((s) => {
-        const val = s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0;
-        const st = s.status || "rascunho";
+        const val = s.valor;
+        const st = s.status;
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasExistentesCount++;
           aprovadasExistentesValor += val;
         } else if (st === "rejeitado") {
           rejeitadasExistentesCount++;
           rejeitadasExistentesValor += val;
-        } else {
+        } else if (st === "enviado" || st === "em_analise") {
           pendentesExistentesCount++;
           pendentesExistentesValor += val;
         }
       });
+
+      const qtdServicosExistentes = aprovadasExistentesCount + pendentesExistentesCount + rejeitadasExistentesCount;
+      const valorServicosExistentes = aprovadasExistentesValor + pendentesExistentesValor + rejeitadasExistentesValor;
+
+      const servicosNovos = servicosItems.filter((s) =>
+        !servicosCatalogoSet.has(s.itemKey)
+      );
 
       let aprovadasNovosCount = 0;
       let aprovadasNovosValor = 0;
@@ -269,19 +341,22 @@ export function DiretoriaVisaoGerencial({
       let rejeitadasNovosValor = 0;
 
       servicosNovos.forEach((s) => {
-        const val = s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || 0;
-        const st = s.status || "rascunho";
+        const val = s.valor;
+        const st = s.status;
         if (st === "aprovado" || st === "em_compra" || st === "concluido") {
           aprovadasNovosCount++;
           aprovadasNovosValor += val;
         } else if (st === "rejeitado") {
           rejeitadasNovosCount++;
           rejeitadasNovosValor += val;
-        } else {
+        } else if (st === "enviado" || st === "em_analise") {
           pendentesNovosCount++;
           pendentesNovosValor += val;
         }
       });
+
+      const qtdServicosNovos = aprovadasNovosCount + pendentesNovosCount + rejeitadasNovosCount;
+      const valorServicosNovos = aprovadasNovosValor + pendentesNovosValor + rejeitadasNovosValor;
 
       const aprovadasCount = aprovadasAquisicaoCount + aprovadasExistentesCount + aprovadasNovosCount;
       const aprovadasValor = aprovadasAquisicaoValor + aprovadasExistentesValor + aprovadasNovosValor;
@@ -341,7 +416,7 @@ export function DiretoriaVisaoGerencial({
         saldoGeralGerencia,
       };
     });
-  }, [gerenciasData, solicitacoes, itensProprios, servicosData, servicosCatalogoSet, diretoria, siglaUpper, orcamentoConfig]);
+  }, [gerenciasData, solicitacoes, itensProprios, servicosData, servicosCatalogoSet, diretoria, siglaUpper, orcamentoConfig, VALID_STATUSES]);
 
   // Totais Gerais da Diretoria
   const totals = useMemo(() => {
