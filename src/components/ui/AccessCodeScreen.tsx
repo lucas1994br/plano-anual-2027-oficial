@@ -42,17 +42,11 @@ export function AccessCodeScreen({
 
     try {
       const normalizedCode = code.trim().toLowerCase();
-      const isDeveloper = normalizedCode.endsWith("76643");
 
-      // Se for desenvolvedor, permite acesso direto sem validar na planilha
-      if (isDeveloper) {
-        sessionStorage.setItem(`access-code:${scope}`, code.trim());
-        onAccessGranted({ scope });
-        return;
-      }
-
-      // Validação do código de acesso na tabela/guia codigos_acesso (coluna codigo_hash)
-      const result = await validateAccessCode(code, scope, targetDiretoriaId, targetGerenciaId);
+      // Validação estrita do código de acesso na tabela/guia codigos_acesso (coluna codigo_hash) no Google Planilhas
+      const effectiveDiretoriaId = targetDiretoriaId || (scope === "diretoria" ? targetSigla : undefined);
+      const effectiveGerenciaId = targetGerenciaId || (scope === "gerencia" ? targetSigla : undefined);
+      const result = await validateAccessCode(code, scope, effectiveDiretoriaId, effectiveGerenciaId);
 
       if (!result || result.scope !== scope) {
         setError("Código de acesso inválido para este painel.");
@@ -60,22 +54,42 @@ export function AccessCodeScreen({
       }
 
       // Se o código for de diretoria, valida se pertence à diretoria acessada
-      if (scope === "diretoria" && targetDiretoriaId && result.diretoria_id) {
-        const rowDir = String(result.diretoria_id).toLowerCase().trim();
-        const tgtDir = String(targetDiretoriaId).toLowerCase().trim();
+      if (scope === "diretoria") {
+        const rowDir = String(result.diretoria_id || "").toLowerCase().trim();
+        const rowSig = String((result as any).diretoria_sigla || "").toLowerCase().trim();
+        const tgtDir = targetDiretoriaId ? String(targetDiretoriaId).toLowerCase().trim() : "";
         const tgtSig = targetSigla ? String(targetSigla).toLowerCase().trim() : "";
-        if (rowDir !== tgtDir && rowDir !== tgtSig) {
+        
+        const matchesDiretoria =
+          (!tgtDir && !tgtSig) ||
+          (tgtDir && rowDir === tgtDir) ||
+          (tgtSig && rowDir === tgtSig) ||
+          (tgtDir && rowSig === tgtDir) ||
+          (tgtSig && rowSig === tgtSig) ||
+          (tgtSig && normalizedCode.startsWith(tgtSig));
+
+        if (!matchesDiretoria) {
           setError("Código de acesso não pertence a esta diretoria.");
           return;
         }
       }
 
       // Se o código for de gerência, valida se pertence à gerência acessada
-      if (scope === "gerencia" && targetGerenciaId && result.gerencia_id) {
-        const rowGer = String(result.gerencia_id).toLowerCase().trim();
-        const tgtGer = String(targetGerenciaId).toLowerCase().trim();
+      if (scope === "gerencia") {
+        const rowGer = String(result.gerencia_id || "").toLowerCase().trim();
+        const rowSig = String((result as any).gerencia_sigla || "").toLowerCase().trim();
+        const tgtGer = targetGerenciaId ? String(targetGerenciaId).toLowerCase().trim() : "";
         const tgtSig = targetSigla ? String(targetSigla).toLowerCase().trim() : "";
-        if (rowGer !== tgtGer && rowGer !== tgtSig) {
+
+        const matchesGerencia =
+          (!tgtGer && !tgtSig) ||
+          (tgtGer && rowGer === tgtGer) ||
+          (tgtSig && rowGer === tgtSig) ||
+          (tgtGer && rowSig === tgtGer) ||
+          (tgtSig && rowSig === tgtSig) ||
+          (tgtSig && normalizedCode.startsWith(tgtSig));
+
+        if (!matchesGerencia) {
           setError("Código de acesso não pertence a esta gerência.");
           return;
         }
@@ -135,7 +149,7 @@ export function AccessCodeScreen({
                 setError("");
               }}
               className="text-center text-lg tracking-widest"
-              maxLength={20}
+              maxLength={64}
               required
             />
             {error && (

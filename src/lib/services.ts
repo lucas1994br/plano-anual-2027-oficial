@@ -1558,6 +1558,9 @@ interface AccessCodeResponse {
   diretoria_id?: string;
   gerencia_id?: string;
   expired_at?: string;
+  diretoria_sigla?: string;
+  gerencia_sigla?: string;
+  codigo_hash?: string;
 }
 
 export async function validateAccessCode(
@@ -1611,6 +1614,7 @@ export async function validateAccessCode(
         scope: match.scope,
         diretoria_id: match.diretoria_id,
         gerencia_id: match.gerencia_id,
+        codigo_hash: match.codigo_hash,
         expired_at: match.expira_em,
       };
     }

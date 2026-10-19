@@ -1,9 +1,43 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { ArrowLeft, BarChart3, CheckCircle2, Clock, XCircle, FileSpreadsheet, FileDown, Building2, TrendingUp, Layers, PieChart as PieIcon, Info, Landmark, Wallet } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  ArrowLeft,
+  BarChart3,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  FileSpreadsheet,
+  FileDown,
+  Building2,
+  TrendingUp,
+  Layers,
+  PieChart as PieIcon,
+  Info,
+  Landmark,
+  Wallet,
+  Eye,
+  Search,
+  Sparkles,
+  Filter,
+  X,
+  ShoppingCart,
+  Wrench,
+  ShieldAlert,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   PieChart,
   Pie,
@@ -143,6 +177,9 @@ export function DiretoriaVisaoGerencial({
   onBack,
 }: DiretoriaVisaoGerencialProps) {
   const [selectedGerenciaFilter, setSelectedGerenciaFilter] = useState<string>("todas");
+  const [selectedGerenciaDetail, setSelectedGerenciaDetail] = useState<any | null>(null);
+  const [detailSearchTerm, setDetailSearchTerm] = useState<string>("");
+  const [detailActiveTab, setDetailActiveTab] = useState<string>("aquisicoes");
 
   const siglaUpper = (diretoria?.sigla || "").toUpperCase();
 
@@ -184,13 +221,22 @@ export function DiretoriaVisaoGerencial({
       const codigo = Number(rawItem.codigo ?? rawItem.item?.codigo) || 0;
       const gerenciaId = rawItem.gerencia_id || rawItem.gerenciaId;
       const gerenciaSigla = rawItem.gerencia || rawItem.gerenciaSigla;
+      const descricao = rawItem.descricao || rawItem.item?.descricao || rawItem.especificacao || "Sem descrição";
+      const categoria = rawItem.categoria || rawItem.item?.categoria || "-";
+      const unidade = rawItem.unidade || rawItem.item?.unidade || "UN";
+      const prioridade = rawItem.prioridade || rawItem.grauPrioridade || "Média";
 
       const normalized = {
         ...rawItem,
         id: rawItem.id,
         codigo,
+        descricao,
+        categoria,
+        unidade,
+        prioridade,
         qtdEstimada: qtd,
         valorUnitario: valUnit,
+        valorTotal: qtd * valUnit,
         status: st as SolicitacaoStatus,
         gerencia_id: gerenciaId,
         gerencia: gerenciaSigla,
@@ -220,10 +266,25 @@ export function DiretoriaVisaoGerencial({
       const itemKey = String(rawServico.item || "").trim();
       const gerenciaId = rawServico.gerencia_id || rawServico.gerenciaId;
       const gerenciaSigla = rawServico.gerencia || rawServico.unidadeDemandante;
+      const objeto = rawServico.objeto || rawServico.descricao || "Sem objeto informado";
+      const tipoContratacao = rawServico.tipoContratacao || rawServico.tipo_contratacao || "-";
+      const contrato = rawServico.contrato || "-";
+      const contratada = rawServico.contratada || "-";
+      const previsaoInicio = rawServico.previsaoInicio || rawServico.previsao_inicio || "-";
+      const justificativa = rawServico.justificativa || "-";
+      const grauPrioridade = rawServico.grauPrioridade || rawServico.grau_prioridade || "Médio";
 
       const normalized = {
         ...rawServico,
         itemKey,
+        item: rawServico.item || rawServico.item_id || itemKey,
+        objeto,
+        tipoContratacao,
+        contrato,
+        contratada,
+        previsaoInicio,
+        justificativa,
+        grauPrioridade,
         valor: val,
         status: st as SolicitacaoStatus,
         gerencia_id: gerenciaId,
@@ -380,6 +441,10 @@ export function DiretoriaVisaoGerencial({
         id: gId,
         sigla: gSigla,
         nome: g.nome || gSigla,
+        aquisicaoItems,
+        servicosExistentes,
+        servicosNovos,
+        servicosItems,
         qtdAquisicao,
         valorAquisicao,
         qtdServicosExistentes,
@@ -508,89 +573,167 @@ export function DiretoriaVisaoGerencial({
     };
   }, [gerenciaMatrix, diretoria, orcamentoConfig]);
 
+  // Objeto consolidado do Total da Diretoria para o modal de detalhamento
+  const totalDiretoriaDetailRow = useMemo(() => {
+    const allAquisicao = gerenciaMatrix.flatMap((g) => g.aquisicaoItems || []);
+    const allExistentes = gerenciaMatrix.flatMap((g) => g.servicosExistentes || []);
+    const allNovos = gerenciaMatrix.flatMap((g) => g.servicosNovos || []);
+    return {
+      id: "total_diretoria",
+      sigla: `TOTAL DIRETORIA ${siglaUpper}`,
+      nome: `Diretoria ${diretoria?.nome || siglaUpper} (Consolidado Geral)`,
+      aquisicaoItems: allAquisicao,
+      servicosExistentes: allExistentes,
+      servicosNovos: allNovos,
+      qtdAquisicao: totals.qtdAquisicao,
+      valorAquisicao: totals.valorAquisicao,
+      qtdServicosExistentes: totals.qtdServicosExistentes,
+      valorServicosExistentes: totals.valorServicosExistentes,
+      qtdServicosNovos: totals.qtdServicosNovos,
+      valorServicosNovos: totals.valorServicosNovos,
+      totalSolicitacoes: totals.totalSolicitacoes,
+      aprovadasCount: totals.aprovadasCount,
+      pendentesCount: totals.pendentesCount,
+      rejeitadasCount: totals.rejeitadasCount,
+      valorTotalGeral: totals.valorTotalGeral,
+      saldoGeralGerencia: totals.saldoGeralDiretoria,
+    };
+  }, [gerenciaMatrix, totals, siglaUpper, diretoria]);
+
+  // Gerência atualmente filtrada
+  const activeGerencia = useMemo(() => {
+    if (!selectedGerenciaFilter || selectedGerenciaFilter === "todas") return null;
+    return (
+      gerenciaMatrix.find(
+        (g) => g.id === selectedGerenciaFilter || g.sigla === selectedGerenciaFilter
+      ) || null
+    );
+  }, [gerenciaMatrix, selectedGerenciaFilter]);
+
+  // Totais exibidos nos KPIs e Gráficos (Filtrados ou Globais)
+  const displayTotals = useMemo(() => {
+    if (!activeGerencia) return totals;
+    return {
+      qtdAquisicao: activeGerencia.qtdAquisicao,
+      valorAquisicao: activeGerencia.valorAquisicao,
+      qtdServicosExistentes: activeGerencia.qtdServicosExistentes,
+      valorServicosExistentes: activeGerencia.valorServicosExistentes,
+      qtdServicosNovos: activeGerencia.qtdServicosNovos,
+      valorServicosNovos: activeGerencia.valorServicosNovos,
+      totalSolicitacoes: activeGerencia.totalSolicitacoes,
+      aprovadasCount: activeGerencia.aprovadasCount,
+      aprovadasValor: activeGerencia.aprovadasValor,
+      aprovadasAquisicaoCount: activeGerencia.aprovadasAquisicaoCount,
+      aprovadasAquisicaoValor: activeGerencia.aprovadasAquisicaoValor,
+      aprovadasExistentesCount: activeGerencia.aprovadasExistentesCount,
+      aprovadasExistentesValor: activeGerencia.aprovadasExistentesValor,
+      aprovadasNovosCount: activeGerencia.aprovadasNovosCount,
+      aprovadasNovosValor: activeGerencia.aprovadasNovosValor,
+      pendentesCount: activeGerencia.pendentesCount,
+      pendentesValor: activeGerencia.pendentesValor,
+      pendentesAquisicaoCount: activeGerencia.pendentesAquisicaoCount,
+      pendentesAquisicaoValor: activeGerencia.pendentesAquisicaoValor,
+      pendentesExistentesCount: activeGerencia.pendentesExistentesCount,
+      pendentesExistentesValor: activeGerencia.pendentesExistentesValor,
+      pendentesNovosCount: activeGerencia.pendentesNovosCount,
+      pendentesNovosValor: activeGerencia.pendentesNovosValor,
+      rejeitadasCount: activeGerencia.rejeitadasCount,
+      rejeitadasValor: activeGerencia.rejeitadasValor,
+      rejeitadasAquisicaoCount: activeGerencia.rejeitadasAquisicaoCount,
+      rejeitadasAquisicaoValor: activeGerencia.rejeitadasAquisicaoValor,
+      rejeitadasExistentesCount: activeGerencia.rejeitadasExistentesCount,
+      rejeitadasExistentesValor: activeGerencia.rejeitadasExistentesValor,
+      rejeitadasNovosCount: activeGerencia.rejeitadasNovosCount,
+      rejeitadasNovosValor: activeGerencia.rejeitadasNovosValor,
+      valorTotalGeral: activeGerencia.valorTotalGeral,
+      orcamentoTotalDiretoria: activeGerencia.orcamentoGerencia,
+      saldoGeralDiretoria: activeGerencia.saldoGeralGerencia,
+    };
+  }, [activeGerencia, totals]);
+
   // 1. Dados para Gráfico de Pizza / Donut (Até 4 Status) com Detalhamento por Modalidade
   const pieData = useMemo(() => {
     return [
       {
         name: "Aprovadas",
-        value: totals.aprovadasCount,
+        value: displayTotals.aprovadasCount,
         color: PIE_COLORS.aprovado,
-        valor: totals.aprovadasValor,
-        aquisicaoCount: totals.aprovadasAquisicaoCount,
-        aquisicaoValor: totals.aprovadasAquisicaoValor,
-        existentesCount: totals.aprovadasExistentesCount,
-        existentesValor: totals.aprovadasExistentesValor,
-        novosCount: totals.aprovadasNovosCount,
-        novosValor: totals.aprovadasNovosValor,
+        valor: displayTotals.aprovadasValor,
+        aquisicaoCount: displayTotals.aprovadasAquisicaoCount,
+        aquisicaoValor: displayTotals.aprovadasAquisicaoValor,
+        existentesCount: displayTotals.aprovadasExistentesCount,
+        existentesValor: displayTotals.aprovadasExistentesValor,
+        novosCount: displayTotals.aprovadasNovosCount,
+        novosValor: displayTotals.aprovadasNovosValor,
       },
       {
         name: "Pendentes de Aprovação",
-        value: totals.pendentesCount,
+        value: displayTotals.pendentesCount,
         color: PIE_COLORS.pendente,
-        valor: totals.pendentesValor,
-        aquisicaoCount: totals.pendentesAquisicaoCount,
-        aquisicaoValor: totals.pendentesAquisicaoValor,
-        existentesCount: totals.pendentesExistentesCount,
-        existentesValor: totals.pendentesExistentesValor,
-        novosCount: totals.pendentesNovosCount,
-        novosValor: totals.pendentesNovosValor,
+        valor: displayTotals.pendentesValor,
+        aquisicaoCount: displayTotals.pendentesAquisicaoCount,
+        aquisicaoValor: displayTotals.pendentesAquisicaoValor,
+        existentesCount: displayTotals.pendentesExistentesCount,
+        existentesValor: displayTotals.pendentesExistentesValor,
+        novosCount: displayTotals.pendentesNovosCount,
+        novosValor: displayTotals.pendentesNovosValor,
       },
       {
         name: "Rejeitadas",
-        value: totals.rejeitadasCount,
+        value: displayTotals.rejeitadasCount,
         color: PIE_COLORS.rejeitado,
-        valor: totals.rejeitadasValor,
-        aquisicaoCount: totals.rejeitadasAquisicaoCount,
-        aquisicaoValor: totals.rejeitadasAquisicaoValor,
-        existentesCount: totals.rejeitadasExistentesCount,
-        existentesValor: totals.rejeitadasExistentesValor,
-        novosCount: totals.rejeitadasNovosCount,
-        novosValor: totals.rejeitadasNovosValor,
+        valor: displayTotals.rejeitadasValor,
+        aquisicaoCount: displayTotals.rejeitadasAquisicaoCount,
+        aquisicaoValor: displayTotals.rejeitadasAquisicaoValor,
+        existentesCount: displayTotals.rejeitadasExistentesCount,
+        existentesValor: displayTotals.rejeitadasExistentesValor,
+        novosCount: displayTotals.rejeitadasNovosCount,
+        novosValor: displayTotals.rejeitadasNovosValor,
       },
-    ].filter((item) => item.value > 0 || totals.totalSolicitacoes === 0);
-  }, [totals]);
+    ].filter((item) => item.value > 0 || displayTotals.totalSolicitacoes === 0);
+  }, [displayTotals]);
 
   // 2. Dados para Gráfico de Colunas Vertical (Valores por Modalidade) com Detalhamento por Status
   const verticalBarData = useMemo(() => {
     return [
       {
         modalidade: "Aquisição",
-        valor: totals.valorAquisicao,
-        qtd: totals.qtdAquisicao,
+        valor: displayTotals.valorAquisicao,
+        qtd: displayTotals.qtdAquisicao,
         fill: "#3b82f6",
-        aprovadasCount: totals.aprovadasAquisicaoCount,
-        aprovadasValor: totals.aprovadasAquisicaoValor,
-        pendentesCount: totals.pendentesAquisicaoCount,
-        pendentesValor: totals.pendentesAquisicaoValor,
-        rejeitadasCount: totals.rejeitadasAquisicaoCount,
-        rejeitadasValor: totals.rejeitadasAquisicaoValor,
+        aprovadasCount: displayTotals.aprovadasAquisicaoCount,
+        aprovadasValor: displayTotals.aprovadasAquisicaoValor,
+        pendentesCount: displayTotals.pendentesAquisicaoCount,
+        pendentesValor: displayTotals.pendentesAquisicaoValor,
+        rejeitadasCount: displayTotals.rejeitadasAquisicaoCount,
+        rejeitadasValor: displayTotals.rejeitadasAquisicaoValor,
       },
       {
         modalidade: "Serviços Existentes",
-        valor: totals.valorServicosExistentes,
-        qtd: totals.qtdServicosExistentes,
+        valor: displayTotals.valorServicosExistentes,
+        qtd: displayTotals.qtdServicosExistentes,
         fill: "#10b981",
-        aprovadasCount: totals.aprovadasExistentesCount,
-        aprovadasValor: totals.aprovadasExistentesValor,
-        pendentesCount: totals.pendentesExistentesCount,
-        pendentesValor: totals.pendentesExistentesValor,
-        rejeitadasCount: totals.rejeitadasExistentesCount,
-        rejeitadasValor: totals.rejeitadasExistentesValor,
+        aprovadasCount: displayTotals.aprovadasExistentesCount,
+        aprovadasValor: displayTotals.aprovadasExistentesValor,
+        pendentesCount: displayTotals.pendentesExistentesCount,
+        pendentesValor: displayTotals.pendentesExistentesValor,
+        rejeitadasCount: displayTotals.rejeitadasExistentesCount,
+        rejeitadasValor: displayTotals.rejeitadasExistentesValor,
       },
       {
         modalidade: "Novos Serviços",
-        valor: totals.valorServicosNovos,
-        qtd: totals.qtdServicosNovos,
+        valor: displayTotals.valorServicosNovos,
+        qtd: displayTotals.qtdServicosNovos,
         fill: "#8b5cf6",
-        aprovadasCount: totals.aprovadasNovosCount,
-        aprovadasValor: totals.aprovadasNovosValor,
-        pendentesCount: totals.pendentesNovosCount,
-        pendentesValor: totals.pendentesNovosValor,
-        rejeitadasCount: totals.rejeitadasNovosCount,
-        rejeitadasValor: totals.rejeitadasNovosValor,
+        aprovadasCount: displayTotals.aprovadasNovosCount,
+        aprovadasValor: displayTotals.aprovadasNovosValor,
+        pendentesCount: displayTotals.pendentesNovosCount,
+        pendentesValor: displayTotals.pendentesNovosValor,
+        rejeitadasCount: displayTotals.rejeitadasNovosCount,
+        rejeitadasValor: displayTotals.rejeitadasNovosValor,
       },
     ];
-  }, [totals]);
+  }, [displayTotals]);
 
   // 3. Dados para Gráfico de Colunas Horizontal (Comparativo por Gerência)
   const horizontalBarData = useMemo(() => {
@@ -613,6 +756,599 @@ export function DiretoriaVisaoGerencial({
     if (selectedGerenciaFilter === "todas") return gerenciaMatrix;
     return gerenciaMatrix.filter((g) => g.id === selectedGerenciaFilter || g.sigla === selectedGerenciaFilter);
   }, [gerenciaMatrix, selectedGerenciaFilter]);
+
+  // Filtros de busca no modal de detalhamento
+  const filteredModalAquisicoes = useMemo(() => {
+    if (!selectedGerenciaDetail?.aquisicaoItems) return [];
+    const term = detailSearchTerm.trim().toLowerCase();
+    if (!term) return selectedGerenciaDetail.aquisicaoItems;
+    return selectedGerenciaDetail.aquisicaoItems.filter((item: any) => {
+      return (
+        String(item.codigo).toLowerCase().includes(term) ||
+        String(item.descricao || "").toLowerCase().includes(term) ||
+        String(item.categoria || "").toLowerCase().includes(term) ||
+        String(item.unidade || "").toLowerCase().includes(term) ||
+        String(item.status || "").toLowerCase().includes(term) ||
+        String(item.prioridade || "").toLowerCase().includes(term) ||
+        String(item.gerencia || "").toLowerCase().includes(term)
+      );
+    });
+  }, [selectedGerenciaDetail, detailSearchTerm]);
+
+  const filteredModalServicosExistentes = useMemo(() => {
+    if (!selectedGerenciaDetail?.servicosExistentes) return [];
+    const term = detailSearchTerm.trim().toLowerCase();
+    if (!term) return selectedGerenciaDetail.servicosExistentes;
+    return selectedGerenciaDetail.servicosExistentes.filter((s: any) => {
+      return (
+        String(s.item).toLowerCase().includes(term) ||
+        String(s.objeto || "").toLowerCase().includes(term) ||
+        String(s.tipoContratacao || "").toLowerCase().includes(term) ||
+        String(s.contrato || "").toLowerCase().includes(term) ||
+        String(s.contratada || "").toLowerCase().includes(term) ||
+        String(s.status || "").toLowerCase().includes(term) ||
+        String(s.grauPrioridade || "").toLowerCase().includes(term) ||
+        String(s.gerencia || "").toLowerCase().includes(term)
+      );
+    });
+  }, [selectedGerenciaDetail, detailSearchTerm]);
+
+  const filteredModalServicosNovos = useMemo(() => {
+    if (!selectedGerenciaDetail?.servicosNovos) return [];
+    const term = detailSearchTerm.trim().toLowerCase();
+    if (!term) return selectedGerenciaDetail.servicosNovos;
+    return selectedGerenciaDetail.servicosNovos.filter((s: any) => {
+      return (
+        String(s.item).toLowerCase().includes(term) ||
+        String(s.objeto || "").toLowerCase().includes(term) ||
+        String(s.justificativa || "").toLowerCase().includes(term) ||
+        String(s.tipoContratacao || "").toLowerCase().includes(term) ||
+        String(s.previsaoInicio || "").toLowerCase().includes(term) ||
+        String(s.status || "").toLowerCase().includes(term) ||
+        String(s.grauPrioridade || "").toLowerCase().includes(term) ||
+        String(s.gerencia || "").toLowerCase().includes(term)
+      );
+    });
+  }, [selectedGerenciaDetail, detailSearchTerm]);
+
+  // Badges visuais para o modal
+  const getStatusBadge = (status?: string) => {
+    switch (status) {
+      case "aprovado":
+      case "em_compra":
+      case "concluido":
+        return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Aprovado</Badge>;
+      case "enviado":
+      case "em_analise":
+        return <Badge className="bg-amber-100 text-amber-800 border-amber-200">Pendente</Badge>;
+      case "rejeitado":
+        return <Badge className="bg-red-100 text-red-800 border-red-200">Rejeitado</Badge>;
+      default:
+        return <Badge variant="outline" className="text-slate-600">{status || "Rascunho"}</Badge>;
+    }
+  };
+
+  const getPriorityBadge = (priority?: string) => {
+    const p = String(priority || "").toLowerCase();
+    if (p.includes("alta") || p.includes("alto")) {
+      return <Badge className="bg-red-50 text-red-700 border-red-200">Alta</Badge>;
+    }
+    if (p.includes("méd") || p.includes("med")) {
+      return <Badge className="bg-amber-50 text-amber-700 border-amber-200">Média</Badge>;
+    }
+    return <Badge className="bg-blue-50 text-blue-700 border-blue-200">Baixa</Badge>;
+  };
+
+  // Exportar Detalhamento da Gerência/Diretoria para Excel
+  const handleExportDetailExcel = async () => {
+    if (!selectedGerenciaDetail) return;
+    try {
+      const XLSXModule = await import("xlsx-js-style");
+      const XLSX = XLSXModule.default;
+      const wb = XLSX.utils.book_new();
+
+      const titleStyle = {
+        font: { bold: true, sz: 13, color: { rgb: "0F172A" } },
+      };
+      const headerStyle = {
+        fill: { fgColor: { rgb: "1E293B" } },
+        font: { color: { rgb: "FFFFFF" }, bold: true, sz: 10 },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const totalRowStyle = {
+        fill: { fgColor: { rgb: "F1F5F9" } },
+        font: { bold: true, sz: 10, color: { rgb: "0F172A" } },
+        alignment: { vertical: "center" },
+      };
+
+      const gSigla = selectedGerenciaDetail.sigla || "";
+      const gNome = selectedGerenciaDetail.nome || "";
+
+      // 1. Aba Aquisições
+      const aquisicoes = selectedGerenciaDetail.aquisicaoItems || [];
+      const aqHeaders = [
+        "Código",
+        "Descrição do Item",
+        "Categoria",
+        "Unidade",
+        "Quantidade",
+        "Valor Unitário (R$)",
+        "Valor Total (R$)",
+        "Prioridade",
+        "Status",
+        "Observação",
+        "Justificativa Rejeição",
+      ];
+      const aqRows = aquisicoes.map((i: any) => [
+        i.codigo,
+        i.descricao,
+        i.categoria,
+        i.unidade,
+        i.qtdEstimada,
+        i.valorUnitario,
+        i.valorTotal || i.qtdEstimada * i.valorUnitario,
+        i.prioridade || "-",
+        i.status || "rascunho",
+        i.observacao || "",
+        i.justificativaRejeicao || "",
+      ]);
+      const totalQtdAq = aquisicoes.reduce((acc: number, cur: any) => acc + (cur.qtdEstimada || 0), 0);
+      const totalValAq = aquisicoes.reduce(
+        (acc: number, cur: any) => acc + (cur.valorTotal || cur.qtdEstimada * cur.valorUnitario || 0),
+        0
+      );
+      const aqTotalRow = [
+        "TOTAL",
+        `${aquisicoes.length} item(ns)`,
+        "",
+        "",
+        totalQtdAq,
+        "",
+        totalValAq,
+        "",
+        "",
+        "",
+        "",
+      ];
+
+      const wsAq = XLSX.utils.aoa_to_sheet([
+        [`Plano Anual 2027 - Aquisições: ${gSigla} (${gNome})`],
+        [`Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+        [],
+        aqHeaders,
+        ...aqRows,
+        aqTotalRow,
+      ]);
+      wsAq["!cols"] = [
+        { wch: 12 },
+        { wch: 45 },
+        { wch: 25 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 14 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 30 },
+      ];
+      if (wsAq["A1"]) wsAq["A1"].s = titleStyle;
+      for (let c = 0; c < aqHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsAq[cellRef]) wsAq[cellRef].s = headerStyle;
+      }
+      const aqTotalIdx = 4 + aqRows.length;
+      for (let c = 0; c < aqHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: aqTotalIdx, c });
+        if (wsAq[cellRef]) wsAq[cellRef].s = totalRowStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsAq, "Aquisições");
+
+      // 2. Aba Serviços Existentes
+      const servExistentes = selectedGerenciaDetail.servicosExistentes || [];
+      const seHeaders = [
+        "Item",
+        "Objeto do Serviço",
+        "Tipo de Contratação",
+        "Contrato",
+        "Contratada",
+        "Valor Estimado / Dotação (R$)",
+        "Grau Prioridade",
+        "Status",
+        "Observação",
+        "Justificativa Rejeição",
+      ];
+      const seRows = servExistentes.map((s: any) => [
+        s.item,
+        s.objeto,
+        s.tipoContratacao,
+        s.contrato || "-",
+        s.contratada || "-",
+        s.valor || 0,
+        s.grauPrioridade || "-",
+        s.status || "rascunho",
+        s.observacao || "",
+        s.justificativaRejeicao || "",
+      ]);
+      const totalValSE = servExistentes.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0);
+      const seTotalRow = [
+        "TOTAL",
+        `${servExistentes.length} serviço(s)`,
+        "",
+        "",
+        "",
+        totalValSE,
+        "",
+        "",
+        "",
+        "",
+      ];
+
+      const wsSE = XLSX.utils.aoa_to_sheet([
+        [`Plano Anual 2027 - Serviços Existentes: ${gSigla} (${gNome})`],
+        [`Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+        [],
+        seHeaders,
+        ...seRows,
+        seTotalRow,
+      ]);
+      wsSE["!cols"] = [
+        { wch: 10 },
+        { wch: 45 },
+        { wch: 22 },
+        { wch: 16 },
+        { wch: 25 },
+        { wch: 22 },
+        { wch: 16 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 30 },
+      ];
+      if (wsSE["A1"]) wsSE["A1"].s = titleStyle;
+      for (let c = 0; c < seHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsSE[cellRef]) wsSE[cellRef].s = headerStyle;
+      }
+      const seTotalIdx = 4 + seRows.length;
+      for (let c = 0; c < seHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: seTotalIdx, c });
+        if (wsSE[cellRef]) wsSE[cellRef].s = totalRowStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsSE, "Serviços Existentes");
+
+      // 3. Aba Novos Serviços
+      const servNovos = selectedGerenciaDetail.servicosNovos || [];
+      const snHeaders = [
+        "Item",
+        "Objeto do Novo Serviço",
+        "Justificativa da Demanda",
+        "Tipo de Contratação",
+        "Previsão Início",
+        "Estimativa de Valor (R$)",
+        "Grau Prioridade",
+        "Status",
+        "Observação",
+        "Justificativa Rejeição",
+      ];
+      const snRows = servNovos.map((s: any) => [
+        s.item,
+        s.objeto,
+        s.justificativa || "-",
+        s.tipoContratacao,
+        s.previsaoInicio || "-",
+        s.valor || 0,
+        s.grauPrioridade || "-",
+        s.status || "rascunho",
+        s.observacao || "",
+        s.justificativaRejeicao || "",
+      ]);
+      const totalValSN = servNovos.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0);
+      const snTotalRow = [
+        "TOTAL",
+        `${servNovos.length} novo(s) serviço(s)`,
+        "",
+        "",
+        "",
+        totalValSN,
+        "",
+        "",
+        "",
+        "",
+      ];
+
+      const wsSN = XLSX.utils.aoa_to_sheet([
+        [`Plano Anual 2027 - Novos Serviços: ${gSigla} (${gNome})`],
+        [`Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+        [],
+        snHeaders,
+        ...snRows,
+        snTotalRow,
+      ]);
+      wsSN["!cols"] = [
+        { wch: 10 },
+        { wch: 45 },
+        { wch: 40 },
+        { wch: 22 },
+        { wch: 16 },
+        { wch: 22 },
+        { wch: 16 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 30 },
+      ];
+      if (wsSN["A1"]) wsSN["A1"].s = titleStyle;
+      for (let c = 0; c < snHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsSN[cellRef]) wsSN[cellRef].s = headerStyle;
+      }
+      const snTotalIdx = 4 + snRows.length;
+      for (let c = 0; c < snHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: snTotalIdx, c });
+        if (wsSN[cellRef]) wsSN[cellRef].s = totalRowStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsSN, "Novos Serviços");
+
+      // 4. Aba Resumo
+      const resumoHeaders = ["Métrica", "Valor"];
+      const resumoRows = [
+        ["Unidade / Gerência", `${gSigla} - ${gNome}`],
+        ["Total de Solicitações", selectedGerenciaDetail.totalSolicitacoes || 0],
+        ["Aquisições (Quantidade)", `${aquisicoes.length} itens`],
+        ["Aquisições (Valor Total R$)", selectedGerenciaDetail.valorAquisicao || 0],
+        ["Serviços Existentes (Quantidade)", `${servExistentes.length} serviços`],
+        ["Serviços Existentes (Valor Total R$)", selectedGerenciaDetail.valorServicosExistentes || 0],
+        ["Novos Serviços (Quantidade)", `${servNovos.length} serviços`],
+        ["Novos Serviços (Valor Total R$)", selectedGerenciaDetail.valorServicosNovos || 0],
+        ["Valor Total Geral (R$)", selectedGerenciaDetail.valorTotalGeral || 0],
+        ["Orçamento Gerência (R$)", selectedGerenciaDetail.orcamentoGerencia || 0],
+        ["Saldo Geral Gerência (R$)", selectedGerenciaDetail.saldoGeralGerencia || 0],
+      ];
+      const wsResumo = XLSX.utils.aoa_to_sheet([
+        [`Resumo Geral - ${gSigla}`],
+        [`Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+        [],
+        resumoHeaders,
+        ...resumoRows,
+      ]);
+      wsResumo["!cols"] = [{ wch: 35 }, { wch: 35 }];
+      if (wsResumo["A1"]) wsResumo["A1"].s = titleStyle;
+      for (let c = 0; c < resumoHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsResumo[cellRef]) wsResumo[cellRef].s = headerStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
+
+      const fileSafeSigla = gSigla.toLowerCase().replace(/[^a-z0-9]/g, "_");
+      XLSX.writeFile(
+        wb,
+        `detalhamento_${fileSafeSigla}_plano_2027_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+    } catch (error) {
+      console.error("Erro ao exportar Excel do detalhamento:", error);
+    }
+  };
+
+  // Exportar Detalhamento da Gerência/Diretoria para PDF
+  const handleExportDetailPDF = async () => {
+    if (!selectedGerenciaDetail) return;
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTableModule = await import("jspdf-autotable");
+      const autoTable = autoTableModule.default;
+
+      const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+      const gSigla = selectedGerenciaDetail.sigla || "";
+      const gNome = selectedGerenciaDetail.nome || "";
+
+      // Cabeçalho Principal
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Detalhamento de Solicitações - ${gSigla} (${gNome})`, 14, 14);
+
+      doc.setFontSize(8.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        `Plano Anual 2027 | Diretoria ${siglaUpper} | Gerado em: ${new Date().toLocaleString("pt-BR")}`,
+        14,
+        20
+      );
+
+      // Linha de Resumo
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      doc.text(
+        `Total de Solicitações: ${selectedGerenciaDetail.totalSolicitacoes || 0}  |  Aquisições: ${selectedGerenciaDetail.aquisicaoItems?.length || 0} itens (${formatCurrency(selectedGerenciaDetail.valorAquisicao || 0)})  |  Serv. Existentes: ${selectedGerenciaDetail.servicosExistentes?.length || 0} serv. (${formatCurrency(selectedGerenciaDetail.valorServicosExistentes || 0)})  |  Novos Serviços: ${selectedGerenciaDetail.servicosNovos?.length || 0} serv. (${formatCurrency(selectedGerenciaDetail.valorServicosNovos || 0)})  |  VALOR TOTAL GERAL: ${formatCurrency(selectedGerenciaDetail.valorTotalGeral || 0)}`,
+        14,
+        26
+      );
+
+      let currentY = 32;
+
+      // 1. Tabela de Aquisições
+      const aquisicoes = selectedGerenciaDetail.aquisicaoItems || [];
+      if (aquisicoes.length > 0) {
+        doc.setFontSize(10);
+        doc.setTextColor(29, 78, 216);
+        doc.text(`1. Aquisições (${aquisicoes.length} itens - Total: ${formatCurrency(selectedGerenciaDetail.valorAquisicao || 0)})`, 14, currentY);
+        currentY += 4;
+
+        const aqHeaders = ["Código", "Descrição do Item", "Categoria", "Unid.", "Qtd", "Valor Unit.", "Valor Total", "Prioridade", "Status"];
+        const aqRows = aquisicoes.map((i: any) => [
+          String(i.codigo),
+          String(i.descricao || ""),
+          String(i.categoria || "-"),
+          String(i.unidade || "UN"),
+          String(i.qtdEstimada || 0),
+          formatCurrency(i.valorUnitario || 0),
+          formatCurrency(i.valorTotal || i.qtdEstimada * i.valorUnitario || 0),
+          String(i.prioridade || "-"),
+          String(i.status || "rascunho"),
+        ]);
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [aqHeaders],
+          body: aqRows,
+          theme: "grid",
+          headStyles: {
+            fillColor: [30, 58, 138],
+            textColor: 255,
+            fontStyle: "bold",
+            fontSize: 7.5,
+            halign: "center",
+          },
+          styles: {
+            fontSize: 7,
+            cellPadding: 2,
+            valign: "middle",
+          },
+          columnStyles: {
+            0: { halign: "center", cellWidth: 16 },
+            1: { halign: "left" },
+            2: { halign: "left", cellWidth: 40 },
+            3: { halign: "center", cellWidth: 12 },
+            4: { halign: "center", cellWidth: 14, fontStyle: "bold" },
+            5: { halign: "right", cellWidth: 24 },
+            6: { halign: "right", cellWidth: 26, fontStyle: "bold" },
+            7: { halign: "center", cellWidth: 20 },
+            8: { halign: "center", cellWidth: 22 },
+          },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // 2. Tabela de Serviços Existentes
+      const servExistentes = selectedGerenciaDetail.servicosExistentes || [];
+      if (servExistentes.length > 0) {
+        if (currentY > 165) {
+          doc.addPage();
+          currentY = 16;
+        }
+
+        doc.setFontSize(10);
+        doc.setTextColor(4, 120, 87);
+        doc.text(`2. Serviços Existentes (${servExistentes.length} serviços - Total: ${formatCurrency(selectedGerenciaDetail.valorServicosExistentes || 0)})`, 14, currentY);
+        currentY += 4;
+
+        const seHeaders = ["Item", "Objeto do Serviço", "Tipo Contratação", "Contrato / Contratada", "Valor Estimado / Dotação", "Prioridade", "Status"];
+        const seRows = servExistentes.map((s: any) => [
+          String(s.item || "-"),
+          String(s.objeto || ""),
+          String(s.tipoContratacao || "-"),
+          `${s.contrato || "-"}\n${s.contratada || "-"}`,
+          formatCurrency(s.valor || 0),
+          String(s.grauPrioridade || "-"),
+          String(s.status || "rascunho"),
+        ]);
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [seHeaders],
+          body: seRows,
+          theme: "grid",
+          headStyles: {
+            fillColor: [6, 95, 70],
+            textColor: 255,
+            fontStyle: "bold",
+            fontSize: 7.5,
+            halign: "center",
+          },
+          styles: {
+            fontSize: 7,
+            cellPadding: 2,
+            valign: "middle",
+          },
+          columnStyles: {
+            0: { halign: "center", cellWidth: 16 },
+            1: { halign: "left" },
+            2: { halign: "left", cellWidth: 42 },
+            3: { halign: "left", cellWidth: 45 },
+            4: { halign: "right", cellWidth: 32, fontStyle: "bold" },
+            5: { halign: "center", cellWidth: 22 },
+            6: { halign: "center", cellWidth: 24 },
+          },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // 3. Tabela de Novos Serviços
+      const servNovos = selectedGerenciaDetail.servicosNovos || [];
+      if (servNovos.length > 0) {
+        if (currentY > 165) {
+          doc.addPage();
+          currentY = 16;
+        }
+
+        doc.setFontSize(10);
+        doc.setTextColor(109, 40, 217);
+        doc.text(`3. Novos Serviços (${servNovos.length} novos serviços - Total: ${formatCurrency(selectedGerenciaDetail.valorServicosNovos || 0)})`, 14, currentY);
+        currentY += 4;
+
+        const snHeaders = ["Item", "Objeto do Novo Serviço", "Justificativa da Demanda", "Tipo Contratação", "Previsão Início", "Estimativa de Valor", "Prioridade", "Status"];
+        const snRows = servNovos.map((s: any) => [
+          String(s.item || "-"),
+          String(s.objeto || ""),
+          String(s.justificativa || "-"),
+          String(s.tipoContratacao || "-"),
+          String(s.previsaoInicio || "-"),
+          formatCurrency(s.valor || 0),
+          String(s.grauPrioridade || "-"),
+          String(s.status || "rascunho"),
+        ]);
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [snHeaders],
+          body: snRows,
+          theme: "grid",
+          headStyles: {
+            fillColor: [91, 33, 182],
+            textColor: 255,
+            fontStyle: "bold",
+            fontSize: 7.5,
+            halign: "center",
+          },
+          styles: {
+            fontSize: 7,
+            cellPadding: 2,
+            valign: "middle",
+          },
+          columnStyles: {
+            0: { halign: "center", cellWidth: 16 },
+            1: { halign: "left" },
+            2: { halign: "left", cellWidth: 45 },
+            3: { halign: "left", cellWidth: 35 },
+            4: { halign: "center", cellWidth: 24 },
+            5: { halign: "right", cellWidth: 32, fontStyle: "bold" },
+            6: { halign: "center", cellWidth: 20 },
+            7: { halign: "center", cellWidth: 22 },
+          },
+        });
+      }
+
+      // Rodapé de páginas
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Página ${i} de ${pageCount} | Plano Anual 2027 - ${gSigla}`,
+          doc.internal.pageSize.getWidth() - 65,
+          doc.internal.pageSize.getHeight() - 8
+        );
+      }
+
+      const fileSafeSigla = gSigla.toLowerCase().replace(/[^a-z0-9]/g, "_");
+      doc.save(
+        `detalhamento_${fileSafeSigla}_plano_2027_${new Date().toISOString().split("T")[0]}.pdf`
+      );
+    } catch (error) {
+      console.error("Erro ao exportar PDF do detalhamento:", error);
+    }
+  };
 
   // Exportar Excel
   const handleExportExcel = async () => {
@@ -926,6 +1662,445 @@ export function DiretoriaVisaoGerencial({
     }
   };
 
+  // Renderizador do Detalhamento Inline (exibido diretamente na tabela da Matriz Gerencial)
+  const renderDetailContainer = () => {
+    if (!selectedGerenciaDetail) return null;
+    return (
+      <div className="rounded-2xl border border-slate-300 shadow-xl overflow-hidden bg-white my-2 animate-in fade-in slide-in-from-top-2 duration-200">
+        {/* Header do Detalhamento Inline */}
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-900 text-white p-5 sm:p-6 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-blue-500/30 text-blue-200 border-blue-400/30 text-xs">
+                  Detalhamento de Solicitações
+                </Badge>
+                <span className="text-white/60 text-xs font-medium">Plano Anual 2027</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-white mt-1">
+                {selectedGerenciaDetail?.sigla}
+              </h2>
+              <p className="text-xs text-white/70 mt-0.5 font-normal">
+                {selectedGerenciaDetail?.nome}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+              {/* Mini cards de resumo no topo do detalhamento */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 sm:flex-initial">
+                <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/15 text-center">
+                  <p className="text-[10px] text-white/70 uppercase font-semibold">Total Geral</p>
+                  <p className="text-xs font-bold text-amber-300">
+                    {formatCurrency(selectedGerenciaDetail?.valorTotalGeral || 0)}
+                  </p>
+                  <p className="text-[10px] text-white/60">
+                    {selectedGerenciaDetail?.totalSolicitacoes || 0} solicitações
+                  </p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/15 text-center">
+                  <p className="text-[10px] text-white/70 uppercase font-semibold">Aquisição</p>
+                  <p className="text-xs font-bold text-blue-300">
+                    {formatCurrency(selectedGerenciaDetail?.valorAquisicao || 0)}
+                  </p>
+                  <p className="text-[10px] text-white/60">
+                    {selectedGerenciaDetail?.aquisicaoItems?.length || 0} itens
+                  </p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/15 text-center">
+                  <p className="text-[10px] text-white/70 uppercase font-semibold">Serv. Existentes</p>
+                  <p className="text-xs font-bold text-emerald-300">
+                    {formatCurrency(selectedGerenciaDetail?.valorServicosExistentes || 0)}
+                  </p>
+                  <p className="text-[10px] text-white/60">
+                    {selectedGerenciaDetail?.servicosExistentes?.length || 0} serv.
+                  </p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/15 text-center">
+                  <p className="text-[10px] text-white/70 uppercase font-semibold">Novos Serviços</p>
+                  <p className="text-xs font-bold text-purple-300">
+                    {formatCurrency(selectedGerenciaDetail?.valorServicosNovos || 0)}
+                  </p>
+                  <p className="text-[10px] text-white/60">
+                    {selectedGerenciaDetail?.servicosNovos?.length || 0} serv.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botão fechar/recolher */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedGerenciaDetail(null);
+                }}
+                className="bg-white/10 hover:bg-white/20 text-white rounded-lg p-2 text-xs transition-colors shrink-0"
+                title="Recolher detalhamento"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Abas e Barra de Pesquisa */}
+        <Tabs
+          value={detailActiveTab}
+          onValueChange={setDetailActiveTab}
+          className="flex flex-col"
+        >
+          <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <TabsList className="bg-slate-200/80 p-1 rounded-xl h-auto flex flex-wrap">
+              <TabsTrigger
+                value="aquisicoes"
+                className="rounded-lg text-xs font-semibold py-2 px-3 data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-xs flex items-center gap-1.5"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" />
+                <span>Aquisições</span>
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4.5 px-1.5 bg-blue-100 text-blue-800">
+                  {selectedGerenciaDetail?.aquisicaoItems?.length || 0}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
+                value="existentes"
+                className="rounded-lg text-xs font-semibold py-2 px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-xs flex items-center gap-1.5"
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                <span>Serviços Existentes</span>
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4.5 px-1.5 bg-emerald-100 text-emerald-800">
+                  {selectedGerenciaDetail?.servicosExistentes?.length || 0}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
+                value="novos"
+                className="rounded-lg text-xs font-semibold py-2 px-3 data-[state=active]:bg-white data-[state=active]:text-purple-700 data-[state=active]:shadow-xs flex items-center gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Novos Serviços</span>
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4.5 px-1.5 bg-purple-100 text-purple-800">
+                  {selectedGerenciaDetail?.servicosNovos?.length || 0}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Botões Exportar Excel e PDF do Detalhamento */}
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportDetailExcel}
+                  className="bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 text-slate-700 border-slate-300 shadow-2xs gap-1.5 rounded-lg font-medium px-3 h-9 text-xs transition-colors"
+                  title="Exportar todas as listas desta unidade para Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                  <span>Excel</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportDetailPDF}
+                  className="bg-white hover:bg-rose-50 hover:text-rose-800 hover:border-rose-300 text-slate-700 border-slate-300 shadow-2xs gap-1.5 rounded-lg font-medium px-3 h-9 text-xs transition-colors"
+                  title="Exportar relatório completo desta unidade para PDF (.pdf)"
+                >
+                  <FileDown className="h-4 w-4 text-rose-600" />
+                  <span>PDF</span>
+                </Button>
+              </div>
+
+              {/* Campo de Busca Rápida */}
+              <div className="relative w-full sm:w-64">
+                <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Buscar nesta lista..."
+                  value={detailSearchTerm}
+                  onChange={(e) => setDetailSearchTerm(e.target.value)}
+                  className="pl-9 pr-8 h-9 text-xs bg-white border-slate-300 rounded-lg"
+                />
+                {detailSearchTerm && (
+                  <button
+                    onClick={() => setDetailSearchTerm("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Conteúdo Aba 1: Aquisições */}
+          <TabsContent value="aquisicoes" className="m-0 p-4 space-y-4 max-h-[500px] overflow-y-auto">
+            {filteredModalAquisicoes.length === 0 ? (
+              <div className="text-center py-12 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                <ShoppingCart className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-600">Nenhum item de aquisição encontrado</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {detailSearchTerm ? "Tente ajustar o termo de pesquisa." : "Esta unidade não possui itens de aquisição registrados."}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                <table className="w-full text-xs text-left text-slate-700">
+                  <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-16">Código</th>
+                      <th className="px-3.5 py-3 font-bold">Descrição do Item</th>
+                      <th className="px-3.5 py-3 font-bold">Categoria</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-16">Unid.</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-20">Qtd</th>
+                      <th className="px-3.5 py-3 font-bold text-right">Valor Unit. (R$)</th>
+                      <th className="px-3.5 py-3 font-bold text-right">Valor Total (R$)</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Prioridade</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-28">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredModalAquisicoes.map((item: any, idx: number) => (
+                      <tr key={item.id || idx} className="hover:bg-blue-50/40 transition-colors">
+                        <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
+                          {item.codigo}
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <span className="font-semibold text-slate-900 block">{item.descricao}</span>
+                          {item.observacao && (
+                            <span className="text-[10px] text-slate-500 italic block mt-0.5">
+                              Obs: {item.observacao}
+                            </span>
+                          )}
+                          {item.justificativaRejeicao && (
+                            <span className="text-[10px] text-red-600 font-medium block mt-0.5">
+                              Motivo rejeição: {item.justificativaRejeicao}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-slate-600">{item.categoria}</td>
+                        <td className="px-3.5 py-2.5 text-center text-slate-600">{item.unidade}</td>
+                        <td className="px-3.5 py-2.5 text-center font-bold text-slate-900">{item.qtdEstimada}</td>
+                        <td className="px-3.5 py-2.5 text-right font-medium text-slate-700">
+                          {formatCurrency(item.valorUnitario)}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-bold text-blue-700">
+                          {formatCurrency(item.valorTotal || item.qtdEstimada * item.valorUnitario)}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">{getPriorityBadge(item.prioridade)}</td>
+                        <td className="px-3.5 py-2.5 text-center">{getStatusBadge(item.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                    <tr>
+                      <td colSpan={4} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                        Total Aquisições Exibidas ({filteredModalAquisicoes.length} itens)
+                      </td>
+                      <td className="px-3.5 py-2.5 text-center text-xs">
+                        {filteredModalAquisicoes.reduce((acc: number, cur: any) => acc + (cur.qtdEstimada || 0), 0)}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right text-xs">-</td>
+                      <td className="px-3.5 py-2.5 text-right text-xs text-blue-800 font-black">
+                        {formatCurrency(
+                          filteredModalAquisicoes.reduce(
+                            (acc: number, cur: any) => acc + (cur.valorTotal || cur.qtdEstimada * cur.valorUnitario || 0),
+                            0
+                          )
+                        )}
+                      </td>
+                      <td colSpan={2} className="px-3.5 py-2.5"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Conteúdo Aba 2: Serviços Existentes */}
+          <TabsContent value="existentes" className="m-0 p-4 space-y-4 max-h-[500px] overflow-y-auto">
+            {filteredModalServicosExistentes.length === 0 ? (
+              <div className="text-center py-12 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                <Wrench className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-600">Nenhum serviço existente encontrado</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {detailSearchTerm ? "Tente ajustar o termo de pesquisa." : "Esta unidade não possui serviços existentes cadastrados."}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                <table className="w-full text-xs text-left text-slate-700">
+                  <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-16">Item</th>
+                      <th className="px-3.5 py-3 font-bold">Objeto do Serviço</th>
+                      <th className="px-3.5 py-3 font-bold">Tipo Contratação</th>
+                      <th className="px-3.5 py-3 font-bold">Contrato / Contratada</th>
+                      <th className="px-3.5 py-3 font-bold text-right">Valor Estimado / Dotação (R$)</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Prioridade</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-28">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredModalServicosExistentes.map((servico: any, idx: number) => (
+                      <tr key={servico.id || idx} className="hover:bg-emerald-50/40 transition-colors">
+                        <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
+                          {servico.item}
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <span className="font-semibold text-slate-900 block">{servico.objeto}</span>
+                          {servico.observacao && (
+                            <span className="text-[10px] text-slate-500 italic block mt-0.5">
+                              Obs: {servico.observacao}
+                            </span>
+                          )}
+                          {servico.justificativaRejeicao && (
+                            <span className="text-[10px] text-red-600 font-medium block mt-0.5">
+                              Motivo rejeição: {servico.justificativaRejeicao}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-slate-600">{servico.tipoContratacao}</td>
+                        <td className="px-3.5 py-2.5">
+                          <span className="font-medium text-slate-800 block">{servico.contrato || "-"}</span>
+                          <span className="text-[10px] text-muted-foreground block">{servico.contratada || "-"}</span>
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-bold text-emerald-700">
+                          {formatCurrency(servico.valor)}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">{getPriorityBadge(servico.grauPrioridade)}</td>
+                        <td className="px-3.5 py-2.5 text-center">{getStatusBadge(servico.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                    <tr>
+                      <td colSpan={4} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                        Total Serviços Existentes ({filteredModalServicosExistentes.length} serviços)
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right text-xs text-emerald-800 font-black">
+                        {formatCurrency(
+                          filteredModalServicosExistentes.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0)
+                        )}
+                      </td>
+                      <td colSpan={2} className="px-3.5 py-2.5"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Conteúdo Aba 3: Novos Serviços */}
+          <TabsContent value="novos" className="m-0 p-4 space-y-4 max-h-[500px] overflow-y-auto">
+            {filteredModalServicosNovos.length === 0 ? (
+              <div className="text-center py-12 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                <Sparkles className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-600">Nenhum novo serviço encontrado</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {detailSearchTerm ? "Tente ajustar o termo de pesquisa." : "Esta unidade não possui novos serviços solicitados."}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                <table className="w-full text-xs text-left text-slate-700">
+                  <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-16">Item</th>
+                      <th className="px-3.5 py-3 font-bold">Objeto do Novo Serviço</th>
+                      <th className="px-3.5 py-3 font-bold">Justificativa da Demanda</th>
+                      <th className="px-3.5 py-3 font-bold">Tipo Contratação</th>
+                      <th className="px-3.5 py-3 font-bold text-center">Previsão Início</th>
+                      <th className="px-3.5 py-3 font-bold text-right">Estimativa Valor (R$)</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Prioridade</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-28">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredModalServicosNovos.map((servico: any, idx: number) => (
+                      <tr key={servico.id || idx} className="hover:bg-purple-50/40 transition-colors">
+                        <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
+                          {servico.item}
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <span className="font-semibold text-slate-900 block">{servico.objeto}</span>
+                          {servico.observacao && (
+                            <span className="text-[10px] text-slate-500 italic block mt-0.5">
+                              Obs: {servico.observacao}
+                            </span>
+                          )}
+                          {servico.justificativaRejeicao && (
+                            <span className="text-[10px] text-red-600 font-medium block mt-0.5">
+                              Motivo rejeição: {servico.justificativaRejeicao}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-slate-600">{servico.justificativa}</td>
+                        <td className="px-3.5 py-2.5 text-slate-600">{servico.tipoContratacao}</td>
+                        <td className="px-3.5 py-2.5 text-center text-slate-600">{servico.previsaoInicio || "-"}</td>
+                        <td className="px-3.5 py-2.5 text-right font-bold text-purple-700">
+                          {formatCurrency(servico.valor)}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">{getPriorityBadge(servico.grauPrioridade)}</td>
+                        <td className="px-3.5 py-2.5 text-center">{getStatusBadge(servico.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                    <tr>
+                      <td colSpan={5} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                        Total Novos Serviços ({filteredModalServicosNovos.length} serviços)
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right text-xs text-purple-800 font-black">
+                        {formatCurrency(
+                          filteredModalServicosNovos.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0)
+                        )}
+                      </td>
+                      <td colSpan={2} className="px-3.5 py-2.5"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* Footer do Detalhamento */}
+        <div className="p-3.5 bg-slate-100 border-t border-slate-200 flex flex-wrap gap-2 justify-between items-center text-xs">
+          <span className="text-muted-foreground">
+            Total consolidado de solicitações: <strong>{selectedGerenciaDetail?.totalSolicitacoes || 0}</strong>
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportDetailExcel}
+              className="bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 text-slate-700 border-slate-300 h-8 px-3 rounded-lg text-xs font-medium gap-1.5"
+              title="Exportar detalhamento desta unidade para Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Exportar Excel</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportDetailPDF}
+              className="bg-white hover:bg-rose-50 hover:text-rose-800 hover:border-rose-300 text-slate-700 border-slate-300 h-8 px-3 rounded-lg text-xs font-medium gap-1.5"
+              title="Exportar detalhamento desta unidade para PDF (.pdf)"
+            >
+              <FileDown className="h-3.5 w-3.5 text-rose-600" />
+              <span>Exportar PDF</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedGerenciaDetail(null)}
+              className="bg-white text-slate-700 border-slate-300 hover:bg-slate-50 h-8 px-4 rounded-lg text-xs font-medium"
+            >
+              Recolher Detalhamento
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <TooltipProvider delayDuration={150}>
       <div className="min-h-screen bg-slate-50/60 pb-16">
@@ -954,6 +2129,26 @@ export function DiretoriaVisaoGerencial({
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
+              {/* Filtro Gerência no Topo (Visão Gerencial - Conforme Imagem 1) */}
+              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/15">
+                <span className="text-xs text-white/80 font-medium whitespace-nowrap flex items-center gap-1.5">
+                  <Filter className="h-3.5 w-3.5 text-blue-300" />
+                  Filtrar Gerência:
+                </span>
+                <select
+                  value={selectedGerenciaFilter}
+                  onChange={(e) => setSelectedGerenciaFilter(e.target.value)}
+                  className="h-8 rounded-lg border border-white/20 bg-slate-800 text-white text-xs px-2.5 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer font-medium"
+                >
+                  <option value="todas" className="bg-slate-900 text-white">Todas as Gerências</option>
+                  {gerenciaMatrix.map((g) => (
+                    <option key={g.id} value={g.id} className="bg-slate-900 text-white">
+                      {g.sigla}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Botões Exportar Excel e PDF (Imagem 2) */}
               <div className="flex items-center gap-2">
                 <Button
@@ -982,17 +2177,17 @@ export function DiretoriaVisaoGerencial({
                 <TrendingUp className="h-5 w-5 text-emerald-400" />
                 <div>
                   <p className="text-[11px] text-white/70 uppercase tracking-wider font-semibold">Valor Total Geral</p>
-                  <p className="text-lg font-bold text-amber-300">{formatCurrency(totals.valorTotalGeral)}</p>
+                  <p className="text-lg font-bold text-amber-300">{formatCurrency(displayTotals.valorTotalGeral)}</p>
                 </div>
               </div>
 
-              {totals.orcamentoTotalDiretoria > 0 && (
+              {displayTotals.orcamentoTotalDiretoria > 0 && (
                 <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/15">
                   <Wallet className="h-5 w-5 text-amber-300" />
                   <div>
                     <p className="text-[11px] text-white/70 uppercase tracking-wider font-semibold">Saldo Geral</p>
-                    <p className={`text-lg font-bold ${totals.saldoGeralDiretoria < 0 ? "text-red-300" : "text-emerald-300"}`}>
-                      {formatCurrency(totals.saldoGeralDiretoria)}
+                    <p className={`text-lg font-bold ${displayTotals.saldoGeralDiretoria < 0 ? "text-red-300" : "text-emerald-300"}`}>
+                      {formatCurrency(displayTotals.saldoGeralDiretoria)}
                     </p>
                   </div>
                 </div>
@@ -1002,6 +2197,32 @@ export function DiretoriaVisaoGerencial({
         </div>
 
         <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+          {/* Banner de Filtro Ativo */}
+          {activeGerencia && (
+            <div className="bg-blue-50 border border-blue-200 text-blue-950 px-4 py-3 rounded-xl flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-blue-100 rounded-lg text-blue-700">
+                  <Filter className="h-4 w-4" />
+                </div>
+                <div>
+                  <span className="text-xs text-blue-700 font-medium block">Filtro de Gerência Ativo</span>
+                  <p className="text-sm font-bold text-blue-900">
+                    Exibindo dados de: {activeGerencia.sigla} - {activeGerencia.nome}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedGerenciaFilter("todas")}
+                className="bg-white hover:bg-blue-100/60 text-blue-800 border-blue-200 text-xs h-8 gap-1.5 rounded-lg"
+              >
+                <X className="h-3.5 w-3.5" />
+                Ver todas as gerências
+              </Button>
+            </div>
+          )}
+
           {/* Cartões KPI no Topo com Tooltips Detalhadas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             
@@ -1015,7 +2236,7 @@ export function DiretoriaVisaoGerencial({
                         Total Solicitações
                         <Info className="h-3 w-3 text-slate-400 group-hover:text-blue-500 transition-colors" />
                       </p>
-                      <p className="text-2xl font-bold text-slate-800 mt-1">{totals.totalSolicitacoes}</p>
+                      <p className="text-2xl font-bold text-slate-800 mt-1">{displayTotals.totalSolicitacoes}</p>
                     </div>
                     <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
                       <Layers className="h-5 w-5" />
@@ -1031,15 +2252,15 @@ export function DiretoriaVisaoGerencial({
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">📦 Aquisição:</span>
-                    <span className="font-semibold text-blue-400">{totals.qtdAquisicao} itens ({formatCurrency(totals.valorAquisicao)})</span>
+                    <span className="font-semibold text-blue-400">{displayTotals.qtdAquisicao} itens ({formatCurrency(displayTotals.valorAquisicao)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🛠️ Serv. Existentes:</span>
-                    <span className="font-semibold text-emerald-400">{totals.qtdServicosExistentes} serv. ({formatCurrency(totals.valorServicosExistentes)})</span>
+                    <span className="font-semibold text-emerald-400">{displayTotals.qtdServicosExistentes} serv. ({formatCurrency(displayTotals.valorServicosExistentes)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🚀 Novos Serviços:</span>
-                    <span className="font-semibold text-purple-400">{totals.qtdServicosNovos} serv. ({formatCurrency(totals.valorServicosNovos)})</span>
+                    <span className="font-semibold text-purple-400">{displayTotals.qtdServicosNovos} serv. ({formatCurrency(displayTotals.valorServicosNovos)})</span>
                   </div>
                 </div>
               </TooltipContent>
@@ -1055,14 +2276,14 @@ export function DiretoriaVisaoGerencial({
                         Aprovadas
                         <Info className="h-3 w-3 text-slate-400 group-hover:text-emerald-500 transition-colors" />
                       </p>
-                      <p className="text-2xl font-bold text-emerald-700 mt-1">{totals.aprovadasCount}</p>
+                      <p className="text-2xl font-bold text-emerald-700 mt-1">{displayTotals.aprovadasCount}</p>
                     </div>
                     <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
                       <CheckCircle2 className="h-5 w-5" />
                     </div>
                   </div>
                   <p className="text-[11px] font-semibold text-emerald-700 mt-2">
-                    {formatCurrency(totals.aprovadasValor)}
+                    {formatCurrency(displayTotals.aprovadasValor)}
                   </p>
                 </Card>
               </TooltipTrigger>
@@ -1073,15 +2294,15 @@ export function DiretoriaVisaoGerencial({
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">📦 Aquisição:</span>
-                    <span className="font-semibold text-blue-400">{totals.aprovadasAquisicaoCount} itens ({formatCurrency(totals.aprovadasAquisicaoValor)})</span>
+                    <span className="font-semibold text-blue-400">{displayTotals.aprovadasAquisicaoCount} itens ({formatCurrency(displayTotals.aprovadasAquisicaoValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🛠️ Serv. Existentes:</span>
-                    <span className="font-semibold text-emerald-400">{totals.aprovadasExistentesCount} serv. ({formatCurrency(totals.aprovadasExistentesValor)})</span>
+                    <span className="font-semibold text-emerald-400">{displayTotals.aprovadasExistentesCount} serv. ({formatCurrency(displayTotals.aprovadasExistentesValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🚀 Novos Serviços:</span>
-                    <span className="font-semibold text-purple-400">{totals.aprovadasNovosCount} serv. ({formatCurrency(totals.aprovadasNovosValor)})</span>
+                    <span className="font-semibold text-purple-400">{displayTotals.aprovadasNovosCount} serv. ({formatCurrency(displayTotals.aprovadasNovosValor)})</span>
                   </div>
                 </div>
               </TooltipContent>
@@ -1097,14 +2318,14 @@ export function DiretoriaVisaoGerencial({
                         Pendentes
                         <Info className="h-3 w-3 text-slate-400 group-hover:text-amber-500 transition-colors" />
                       </p>
-                      <p className="text-2xl font-bold text-amber-700 mt-1">{totals.pendentesCount}</p>
+                      <p className="text-2xl font-bold text-amber-700 mt-1">{displayTotals.pendentesCount}</p>
                     </div>
                     <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
                       <Clock className="h-5 w-5" />
                     </div>
                   </div>
                   <p className="text-[11px] font-semibold text-amber-700 mt-2">
-                    {formatCurrency(totals.pendentesValor)}
+                    {formatCurrency(displayTotals.pendentesValor)}
                   </p>
                 </Card>
               </TooltipTrigger>
@@ -1115,15 +2336,15 @@ export function DiretoriaVisaoGerencial({
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">📦 Aquisição:</span>
-                    <span className="font-semibold text-blue-400">{totals.pendentesAquisicaoCount} itens ({formatCurrency(totals.pendentesAquisicaoValor)})</span>
+                    <span className="font-semibold text-blue-400">{displayTotals.pendentesAquisicaoCount} itens ({formatCurrency(displayTotals.pendentesAquisicaoValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🛠️ Serv. Existentes:</span>
-                    <span className="font-semibold text-emerald-400">{totals.pendentesExistentesCount} serv. ({formatCurrency(totals.pendentesExistentesValor)})</span>
+                    <span className="font-semibold text-emerald-400">{displayTotals.pendentesExistentesCount} serv. ({formatCurrency(displayTotals.pendentesExistentesValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🚀 Novos Serviços:</span>
-                    <span className="font-semibold text-purple-400">{totals.pendentesNovosCount} serv. ({formatCurrency(totals.pendentesNovosValor)})</span>
+                    <span className="font-semibold text-purple-400">{displayTotals.pendentesNovosCount} serv. ({formatCurrency(displayTotals.pendentesNovosValor)})</span>
                   </div>
                 </div>
               </TooltipContent>
@@ -1139,14 +2360,14 @@ export function DiretoriaVisaoGerencial({
                         Rejeitadas
                         <Info className="h-3 w-3 text-slate-400 group-hover:text-red-500 transition-colors" />
                       </p>
-                      <p className="text-2xl font-bold text-red-700 mt-1">{totals.rejeitadasCount}</p>
+                      <p className="text-2xl font-bold text-red-700 mt-1">{displayTotals.rejeitadasCount}</p>
                     </div>
                     <div className="p-2 bg-red-50 rounded-lg text-red-600">
                       <XCircle className="h-5 w-5" />
                     </div>
                   </div>
                   <p className="text-[11px] font-semibold text-red-700 mt-2">
-                    {formatCurrency(totals.rejeitadasValor)}
+                    {formatCurrency(displayTotals.rejeitadasValor)}
                   </p>
                 </Card>
               </TooltipTrigger>
@@ -1157,15 +2378,15 @@ export function DiretoriaVisaoGerencial({
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">📦 Aquisição:</span>
-                    <span className="font-semibold text-blue-400">{totals.rejeitadasAquisicaoCount} itens ({formatCurrency(totals.rejeitadasAquisicaoValor)})</span>
+                    <span className="font-semibold text-blue-400">{displayTotals.rejeitadasAquisicaoCount} itens ({formatCurrency(displayTotals.rejeitadasAquisicaoValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🛠️ Serv. Existentes:</span>
-                    <span className="font-semibold text-emerald-400">{totals.rejeitadasExistentesCount} serv. ({formatCurrency(totals.rejeitadasExistentesValor)})</span>
+                    <span className="font-semibold text-emerald-400">{displayTotals.rejeitadasExistentesCount} serv. ({formatCurrency(displayTotals.rejeitadasExistentesValor)})</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🚀 Novos Serviços:</span>
-                    <span className="font-semibold text-purple-400">{totals.rejeitadasNovosCount} serv. ({formatCurrency(totals.rejeitadasNovosValor)})</span>
+                    <span className="font-semibold text-purple-400">{displayTotals.rejeitadasNovosCount} serv. ({formatCurrency(displayTotals.rejeitadasNovosValor)})</span>
                   </div>
                 </div>
               </TooltipContent>
@@ -1181,14 +2402,14 @@ export function DiretoriaVisaoGerencial({
                         Total em R$
                         <Info className="h-3 w-3 text-slate-400 group-hover:text-indigo-500 transition-colors" />
                       </p>
-                      <p className="text-xl font-bold text-indigo-900 mt-1">{formatCurrency(totals.valorTotalGeral)}</p>
+                      <p className="text-xl font-bold text-indigo-900 mt-1">{formatCurrency(displayTotals.valorTotalGeral)}</p>
                     </div>
                     <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
                       <BarChart3 className="h-5 w-5" />
                     </div>
                   </div>
-                  <p className={`text-[11px] font-bold mt-2 ${totals.saldoGeralDiretoria < 0 ? "text-red-600" : "text-emerald-700"}`}>
-                    Saldo Geral: {formatCurrency(totals.saldoGeralDiretoria)}
+                  <p className={`text-[11px] font-bold mt-2 ${displayTotals.saldoGeralDiretoria < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                    Saldo Geral: {formatCurrency(displayTotals.saldoGeralDiretoria)}
                   </p>
                 </Card>
               </TooltipTrigger>
@@ -1197,28 +2418,28 @@ export function DiretoriaVisaoGerencial({
                   <Landmark className="h-3.5 w-3.5" /> Balanço Financeiro & Saldo Geral
                 </p>
                 <div className="space-y-1.5 text-xs">
-                  {totals.orcamentoTotalDiretoria > 0 && (
+                  {displayTotals.orcamentoTotalDiretoria > 0 && (
                     <div className="flex justify-between gap-4 border-b border-slate-800 pb-1">
                       <span className="text-slate-300 font-medium">🏛️ Orçamento Definido:</span>
-                      <span className="font-bold text-blue-300">{formatCurrency(totals.orcamentoTotalDiretoria)}</span>
+                      <span className="font-bold text-blue-300">{formatCurrency(displayTotals.orcamentoTotalDiretoria)}</span>
                     </div>
                   )}
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">📦 Gasto Aquisição:</span>
-                    <span className="font-semibold text-blue-400">{formatCurrency(totals.valorAquisicao)}</span>
+                    <span className="font-semibold text-blue-400">{formatCurrency(displayTotals.valorAquisicao)}</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🛠️ Serv. Existentes:</span>
-                    <span className="font-semibold text-emerald-400">{formatCurrency(totals.valorServicosExistentes)}</span>
+                    <span className="font-semibold text-emerald-400">{formatCurrency(displayTotals.valorServicosExistentes)}</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-300">🚀 Novos Serviços:</span>
-                    <span className="font-semibold text-purple-400">{formatCurrency(totals.valorServicosNovos)}</span>
+                    <span className="font-semibold text-purple-400">{formatCurrency(displayTotals.valorServicosNovos)}</span>
                   </div>
                   <div className="flex justify-between gap-4 pt-1.5 border-t border-slate-700">
                     <span className="text-slate-200 font-bold">💳 Saldo Geral:</span>
-                    <span className={`font-extrabold ${totals.saldoGeralDiretoria < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                      {formatCurrency(totals.saldoGeralDiretoria)}
+                    <span className={`font-extrabold ${displayTotals.saldoGeralDiretoria < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {formatCurrency(displayTotals.saldoGeralDiretoria)}
                     </span>
                   </div>
                 </div>
@@ -1393,58 +2614,183 @@ export function DiretoriaVisaoGerencial({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredMatrix.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-slate-900 flex flex-col">
-                        <span>{row.sigla}</span>
-                        <span className="text-[10px] text-muted-foreground font-normal">{row.nome}</span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-bold text-slate-800">{row.qtdAquisicao}</span>
-                        <span className="block text-[11px] text-blue-600/90 font-medium">
-                          {formatCurrency(row.valorAquisicao)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-bold text-slate-800">{row.qtdServicosExistentes}</span>
-                        <span className="block text-[11px] text-emerald-600/90 font-medium">
-                          {formatCurrency(row.valorServicosExistentes)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-bold text-slate-800">{row.qtdServicosNovos}</span>
-                        <span className="block text-[11px] text-purple-600/90 font-medium">
-                          {formatCurrency(row.valorServicosNovos)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-slate-800 text-sm">
-                        {row.totalSolicitacoes}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px] px-1.5 py-0.5">
-                            ✓ {row.aprovadasCount}
-                          </Badge>
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100 text-[10px] px-1.5 py-0.5">
-                            ⏳ {row.pendentesCount}
-                          </Badge>
-                          <Badge className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100 text-[10px] px-1.5 py-0.5">
-                            ✕ {row.rejeitadasCount}
-                          </Badge>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right font-extrabold text-slate-900 text-sm">
-                        {formatCurrency(row.valorTotalGeral)}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-bold text-sm bg-slate-50/50 ${row.saldoGeralGerencia < 0 ? "text-red-700" : "text-emerald-700"}`}>
-                        {formatCurrency(row.saldoGeralGerencia)}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredMatrix.map((row) => {
+                    const isExpanded = selectedGerenciaDetail?.id === row.id;
+                    return (
+                      <Fragment key={row.id}>
+                        <tr
+                          onClick={() => {
+                            if (isExpanded) {
+                              setSelectedGerenciaDetail(null);
+                            } else {
+                              setSelectedGerenciaDetail(row);
+                              setDetailActiveTab("aquisicoes");
+                              setDetailSearchTerm("");
+                            }
+                          }}
+                          className={cn(
+                            "hover:bg-blue-50/70 transition-colors cursor-pointer group",
+                            isExpanded && "bg-blue-50/80 border-l-4 border-l-blue-600"
+                          )}
+                          title={
+                            isExpanded
+                              ? "Clique para recolher o detalhamento"
+                              : "Clique para ver todas as aquisições e serviços detalhados"
+                          }
+                        >
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <span className="font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                                  {row.sigla}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-normal block">
+                                  {row.nome}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isExpanded) {
+                                    setSelectedGerenciaDetail(null);
+                                  } else {
+                                    setSelectedGerenciaDetail(row);
+                                    setDetailActiveTab("aquisicoes");
+                                    setDetailSearchTerm("");
+                                  }
+                                }}
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] rounded px-2 py-1 font-semibold transition-all shadow-2xs",
+                                  isExpanded
+                                    ? "text-white bg-blue-600 hover:bg-blue-700"
+                                    : "text-blue-700 bg-blue-50 border border-blue-200/80 hover:bg-blue-100"
+                                )}
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronUp className="h-3 w-3" />
+                                    Recolher
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="h-3 w-3" />
+                                    Ver itens
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="font-bold text-slate-800">{row.qtdAquisicao}</span>
+                            <span className="block text-[11px] text-blue-600/90 font-medium">
+                              {formatCurrency(row.valorAquisicao)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="font-bold text-slate-800">{row.qtdServicosExistentes}</span>
+                            <span className="block text-[11px] text-emerald-600/90 font-medium">
+                              {formatCurrency(row.valorServicosExistentes)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="font-bold text-slate-800">{row.qtdServicosNovos}</span>
+                            <span className="block text-[11px] text-purple-600/90 font-medium">
+                              {formatCurrency(row.valorServicosNovos)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center font-bold text-slate-800 text-sm">
+                            {row.totalSolicitacoes}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px] px-1.5 py-0.5">
+                                ✓ {row.aprovadasCount}
+                              </Badge>
+                              <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100 text-[10px] px-1.5 py-0.5">
+                                ⏳ {row.pendentesCount}
+                              </Badge>
+                              <Badge className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100 text-[10px] px-1.5 py-0.5">
+                                ✕ {row.rejeitadasCount}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right font-extrabold text-slate-900 text-sm">
+                            {formatCurrency(row.valorTotalGeral)}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-bold text-sm bg-slate-50/50 ${row.saldoGeralGerencia < 0 ? "text-red-700" : "text-emerald-700"}`}>
+                            {formatCurrency(row.saldoGeralGerencia)}
+                          </td>
+                        </tr>
+
+                        {isExpanded && (
+                          <tr className="bg-slate-50/90 border-b-2 border-indigo-200">
+                            <td colSpan={8} className="p-3 sm:p-4 bg-slate-100/60">
+                              {renderDetailContainer()}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
                 <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-900">
-                  <tr>
-                    <td className="px-4 py-3.5 text-sm uppercase">Total Diretoria {siglaUpper}</td>
+                  <tr
+                    onClick={() => {
+                      if (selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id) {
+                        setSelectedGerenciaDetail(null);
+                      } else {
+                        setSelectedGerenciaDetail(totalDiretoriaDetailRow);
+                        setDetailActiveTab("aquisicoes");
+                        setDetailSearchTerm("");
+                      }
+                    }}
+                    className={cn(
+                      "hover:bg-slate-200/90 transition-colors cursor-pointer group",
+                      selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id && "bg-slate-200 border-l-4 border-l-indigo-600"
+                    )}
+                    title={
+                      selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id
+                        ? "Clique para recolher o detalhamento consolidado"
+                        : "Clique para ver o detalhamento consolidado de toda a diretoria"
+                    }
+                  >
+                    <td className="px-4 py-3.5 text-sm uppercase">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>Total Diretoria {siglaUpper}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id) {
+                              setSelectedGerenciaDetail(null);
+                            } else {
+                              setSelectedGerenciaDetail(totalDiretoriaDetailRow);
+                              setDetailActiveTab("aquisicoes");
+                              setDetailSearchTerm("");
+                            }
+                          }}
+                          className={cn(
+                            "inline-flex items-center gap-1 text-[10px] rounded px-2 py-1 font-semibold transition-all normal-case shadow-2xs",
+                            selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id
+                              ? "text-white bg-indigo-600 hover:bg-indigo-700"
+                              : "text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100"
+                          )}
+                        >
+                          {selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id ? (
+                            <>
+                              <ChevronUp className="h-3 w-3" />
+                              Recolher
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-3 w-3" />
+                              Ver Consolidado
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3.5 text-center text-blue-700">
                       <div>{totals.qtdAquisicao} itens</div>
                       <div className="text-[11px]">{formatCurrency(totals.valorAquisicao)}</div>
@@ -1472,11 +2818,21 @@ export function DiretoriaVisaoGerencial({
                       {formatCurrency(totals.saldoGeralDiretoria)}
                     </td>
                   </tr>
+
+                  {selectedGerenciaDetail?.id === totalDiretoriaDetailRow.id && (
+                    <tr className="bg-slate-50/90 border-t-2 border-indigo-200">
+                      <td colSpan={8} className="p-3 sm:p-4 bg-slate-100/60">
+                        {renderDetailContainer()}
+                      </td>
+                    </tr>
+                  )}
                 </tfoot>
               </table>
             </div>
           </Card>
         </div>
+
+        
       </div>
     </TooltipProvider>
   );

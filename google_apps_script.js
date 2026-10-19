@@ -2095,6 +2095,38 @@ function handleValidateAccessCode(code, scope, diretoria_id, gerencia_id) {
     return { success: false, error: "Tabela de códigos de acesso vazia ou não encontrada na planilha" };
   }
 
+  // Mapas auxiliares para resolução flexível (UUID <-> Sigla)
+  const diretoriasData = getSheetData(SHEETS.DIRETORIAS);
+  const gerenciasData = getSheetData(SHEETS.GERENCIAS);
+
+  const dirIdBySigla = {};
+  const dirSiglaById = {};
+  diretoriasData.forEach(d => {
+    const dId = String(d.id || "").trim().toLowerCase();
+    const dSigla = String(d.sigla || "").trim().toLowerCase();
+    if (dId && dSigla) {
+      dirIdBySigla[dSigla] = dId;
+      dirSiglaById[dId] = String(d.sigla).trim().toUpperCase();
+    }
+  });
+
+  const gerIdBySigla = {};
+  const gerSiglaById = {};
+  gerenciasData.forEach(g => {
+    const gId = String(g.id || "").trim().toLowerCase();
+    const gSigla = String(g.sigla || "").trim().toLowerCase();
+    if (gId && gSigla) {
+      gerIdBySigla[gSigla] = gId;
+      gerSiglaById[gId] = String(g.sigla).trim().toUpperCase();
+    }
+  });
+
+  const targetDirId = diretoria_id ? (dirIdBySigla[String(diretoria_id).trim().toLowerCase()] || String(diretoria_id).trim().toLowerCase()) : null;
+  const targetDirSigla = diretoria_id ? (dirSiglaById[String(diretoria_id).trim().toLowerCase()] ? dirSiglaById[String(diretoria_id).trim().toLowerCase()].toLowerCase() : String(diretoria_id).trim().toLowerCase()) : null;
+
+  const targetGerId = gerencia_id ? (gerIdBySigla[String(gerencia_id).trim().toLowerCase()] || String(gerencia_id).trim().toLowerCase()) : null;
+  const targetGerSigla = gerencia_id ? (gerSiglaById[String(gerencia_id).trim().toLowerCase()] ? gerSiglaById[String(gerencia_id).trim().toLowerCase()].toLowerCase() : String(gerencia_id).trim().toLowerCase()) : null;
+
   const match = codes.find(c => {
     // Aceitar ativo flexível: true, "true", "TRUE", "VERDADEIRO", 1, "t", "sim", "s" ou vazio/indefinido
     const isAtivo = c.ativo === true || 
@@ -2125,20 +2157,22 @@ function handleValidateAccessCode(code, scope, diretoria_id, gerencia_id) {
     );
     if (!isCodeMatch) return false;
 
-    // Se especificada a diretoria_id, valida correspondência
-    if (diretoria_id && c.diretoria_id) {
+    // Se especificada a diretoria_id, valida correspondência (suporta UUID ou Sigla)
+    if (targetDirId && c.diretoria_id) {
       const rowDir = String(c.diretoria_id).trim().toLowerCase();
-      const targetDir = String(diretoria_id).trim().toLowerCase();
-      if (rowDir && rowDir !== targetDir) {
+      const rowDirSigla = dirSiglaById[rowDir] ? dirSiglaById[rowDir].toLowerCase() : rowDir;
+      const isDirMatch = (rowDir === targetDirId || rowDirSigla === targetDirSigla || rowDir === targetDirSigla || rowDirSigla === targetDirId);
+      if (!isDirMatch) {
         return false;
       }
     }
 
-    // Se especificada a gerencia_id, valida correspondência
-    if (gerencia_id && c.gerencia_id) {
+    // Se especificada a gerencia_id, valida correspondência (suporta UUID ou Sigla)
+    if (targetGerId && c.gerencia_id) {
       const rowGer = String(c.gerencia_id).trim().toLowerCase();
-      const targetGer = String(gerencia_id).trim().toLowerCase();
-      if (rowGer && rowGer !== targetGer) {
+      const rowGerSigla = gerSiglaById[rowGer] ? gerSiglaById[rowGer].toLowerCase() : rowGer;
+      const isGerMatch = (rowGer === targetGerId || rowGerSigla === targetGerSigla || rowGer === targetGerSigla || rowGerSigla === targetGerId);
+      if (!isGerMatch) {
         return false;
       }
     }
@@ -2154,13 +2188,19 @@ function handleValidateAccessCode(code, scope, diretoria_id, gerencia_id) {
     return { success: false, error: "Código de acesso expirado" };
   }
 
+  const matchDirId = match.diretoria_id ? String(match.diretoria_id).trim().toLowerCase() : null;
+  const matchGerId = match.gerencia_id ? String(match.gerencia_id).trim().toLowerCase() : null;
+
   return {
     success: true,
     data: {
       id: match.id || null,
       scope: match.scope,
       diretoria_id: match.diretoria_id || null,
+      diretoria_sigla: (matchDirId && dirSiglaById[matchDirId]) ? dirSiglaById[matchDirId] : null,
       gerencia_id: match.gerencia_id || null,
+      gerencia_sigla: (matchGerId && gerSiglaById[matchGerId]) ? gerSiglaById[matchGerId] : null,
+      codigo_hash: match.codigo_hash || null,
       expired_at: match.expira_em || null
     }
   };
