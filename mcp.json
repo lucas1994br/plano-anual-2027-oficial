@@ -1,5 +1,11 @@
 {
-  "mcpServers": {
+  "Servers": {
+    "google-developer-knowledge": {
+      "url": "https://developerknowledge.googleapis.com/",
+      "headers": {
+        "X-Goog-Api-Key": "AIzaSyCTN7uybdBzonpJDsyPDZ96zfNsoUWS2Fc"
+      }
+    },
     "supabase": {
       "command": "npx",
       "args": [

@@ -194,6 +194,7 @@ export function AdminCatalogItemControl() {
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast.success("Item criado e distribuído com sucesso.");
     } catch (error: unknown) {
       const rawMessage = error instanceof Error ? error.message : String(error || "");
@@ -244,6 +245,7 @@ export function AdminCatalogItemControl() {
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast.success("Item atualizado com sucesso.");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Não foi possível atualizar o item.";
@@ -263,6 +265,7 @@ export function AdminCatalogItemControl() {
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast.success("Item removido com sucesso.");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Não foi possível remover o item.";
@@ -286,6 +289,7 @@ export function AdminCatalogItemControl() {
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast.success(`${selectedIds.length} itens removidos com sucesso.`);
     } catch (_error: unknown) {
       toast.error("Ocorreu um erro ao excluir um ou mais itens.");
@@ -312,6 +316,7 @@ export function AdminCatalogItemControl() {
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
       toast.success(`${selectedIds.length} itens atualizados com sucesso.`);
     } catch (_error: unknown) {
       toast.error("Ocorreu um erro ao atualizar um ou mais itens.");

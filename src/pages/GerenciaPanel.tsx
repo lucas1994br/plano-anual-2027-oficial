@@ -238,13 +238,13 @@ import {
         id: existente ? s.id : undefined,
         item_id: c.id,
         codigo: c.codigo,
-        descricao: (existente && s.descricao) ? s.descricao : c.descricao,
+        descricao: (c.descricao && String(c.descricao).trim().length > 0) ? c.descricao : (s.descricao || ""),
         categoria: categoriaItem,
         gerencia: gerenciaUpper,
         prioridade: s.prioridade || "Baixa",
         qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
-        unidade: s.unidade || c.unidade || "un",
-        valorUnitario: parseSafeNumber(s.valor_unitario !== undefined ? s.valor_unitario : (c.valor_unitario || 0), 0),
+        unidade: c.unidade || s.unidade || "un",
+        valorUnitario: parseSafeNumber(c.valor_unitario !== undefined && c.valor_unitario !== null && Number(c.valor_unitario) > 0 ? c.valor_unitario : (s.valor_unitario || 0), 0),
         observacao: s.observacao || "",
         status: (s.status as SolicitacaoStatus) || "rascunho",
         justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
@@ -418,37 +418,51 @@ import {
       return Array.from(grupos.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
     }, [items, diretoria?.sigla, selectedAquisicaoIds]);
 
+  const servicosCatalogoExistentesSet = useMemo(() => {
+    return new Set(
+      (servicosCatalogoData as any[])
+        .filter((c: any) => String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() !== "novo")
+        .map((c: any) => String(c.item))
+    );
+  }, [servicosCatalogoData]);
+
+  const servicosCatalogoNovosSet = useMemo(() => {
+    return new Set(
+      (servicosCatalogoData as any[])
+        .filter((c: any) => String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() === "novo")
+        .map((c: any) => String(c.item))
+    );
+  }, [servicosCatalogoData]);
+
   const gastoServicosExistentes = useMemo(() => {
-    const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
     if (selectedServicos.size > 0) {
       return servicosData
         .filter((s: ServicoItem) => {
           const matchItem = selectedServicos.has(s.item) || selectedServicos.has(String(s.item) as any) || selectedServicos.has(Number(s.item) as any);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return catalogoSet.has(String(s.item)) && (matchItem || matchId);
+          return servicosCatalogoExistentesSet.has(String(s.item)) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => catalogoSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
+      .filter((s: ServicoItem) => servicosCatalogoExistentesSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
-  }, [servicosData, servicosCatalogoData, selectedServicos]);
+  }, [servicosData, servicosCatalogoExistentesSet, selectedServicos]);
 
   const gastoServicosNovos = useMemo(() => {
-    const catalogoSet = new Set(servicosCatalogoData.map((c: any) => String(c.item)));
     if (selectedServicos.size > 0) {
       return servicosData
         .filter((s: ServicoItem) => {
           const matchItem = selectedServicos.has(s.item) || selectedServicos.has(String(s.item) as any) || selectedServicos.has(Number(s.item) as any);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return !catalogoSet.has(String(s.item)) && (matchItem || matchId);
+          return !servicosCatalogoExistentesSet.has(String(s.item)) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => !catalogoSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
+      .filter((s: ServicoItem) => !servicosCatalogoExistentesSet.has(String(s.item)) && isEnviadoOuAprovado(s.status))
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || 0), 0);
-  }, [servicosData, servicosCatalogoData, selectedServicos]);
+  }, [servicosData, servicosCatalogoExistentesSet, selectedServicos]);
 
   const canSend = items.some((item) => item.qtdEstimada > 0 && (item.status === "rascunho" || item.status === "rejeitado")); // Permite enviar se tiver pelo menos 1 item elegivel com quantidade
   const isReadOnly = items.filter((item) => item.qtdEstimada > 0).length > 0 && items.filter((item) => item.qtdEstimada > 0).every((item) => item.status === "enviado" || item.status === "em_analise" || item.status === "aprovado");
@@ -1441,7 +1455,7 @@ import {
 
   if (!diretoria) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-foreground mb-4">Diretoria não encontrada</h1>
           <Button onClick={() => navigate("/")}>Voltar ao início</Button>
@@ -1470,7 +1484,7 @@ import {
   // Tela de seleção: Aquisição ou Serviços
   if (!selectedOption) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -1492,7 +1506,7 @@ import {
           />
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
+          <div className="bg-linear-to-r from-blue-600 to-blue-800 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(siglaUpper) && (
@@ -1559,7 +1573,7 @@ import {
   // Tela de seleção secundária: Serviços Existentes ou Novos Serviços
   if (selectedOption === "servicos") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -1582,7 +1596,7 @@ import {
           />
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
+          <div className="bg-linear-to-r from-blue-600 to-blue-800 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(siglaUpper) && (
@@ -1602,7 +1616,7 @@ import {
                 {/* Cartão Serviços Existentes */}
                 <button
                   onClick={() => setSelectedOption("servicos_existentes")}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-80"
                 >
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
@@ -1624,7 +1638,7 @@ import {
                 {/* Cartão Novos Serviços */}
                 <button
                   onClick={() => setSelectedOption("servicos_novos")}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-purple-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-80"
                 >
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
@@ -1701,21 +1715,40 @@ import {
         contratada: s.contratada || (contratoKey ? contratadaMap.get(contratoKey) : null),
       };
       if (itemKey !== undefined) {
-        servicosByItem.set(itemKey, sItem);
+        servicosByItem.set(String(itemKey).trim(), sItem);
+        const parsed = parseInt(itemKey, 10);
+        if (!isNaN(parsed)) servicosByItem.set(parsed, sItem);
       }
       return sItem;
     });
 
     const isServicoReadOnly = (s: ServicoItem) => s.status !== "rascunho" && s.status !== "rejeitado";
-    const catalogoItemsSet = new Set((servicosCatalogoData as any[]).map(c => c.item));
     
-    // Serviços Existentes vêm do catálogo (Painel Administrativo)
-    const servicosExistentes: ServicoItem[] = (servicosCatalogoData as any[]).map((catalogoItem) => {
-      const servicoDb = servicosByItem.get(catalogoItem.item);
+    // Split catalog items into Existentes and Novos
+    const catalogoExistentes = (servicosCatalogoData as any[]).filter(
+      (c) => String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() !== "novo"
+    );
+    const catalogoNovos = (servicosCatalogoData as any[]).filter(
+      (c) => String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() === "novo"
+    );
+
+    const mapCatalogoToServico = (catalogoItem: any): ServicoItem => {
+      const itemKey = catalogoItem.item !== undefined && catalogoItem.item !== null ? String(catalogoItem.item).trim() : "";
+      const servicoDb = servicosByItem.get(itemKey) || servicosByItem.get(catalogoItem.item);
       if (servicoDb) {
-        return servicoDb;
+        return {
+          ...servicoDb,
+          objeto: (catalogoItem.objeto && catalogoItem.objeto.trim().length > 0) ? catalogoItem.objeto : servicoDb.objeto,
+          tipoContratacao: catalogoItem.tipo_contratacao || servicoDb.tipoContratacao || "Serviço",
+          estimativaValor: (catalogoItem.estimativa_valor !== undefined && catalogoItem.estimativa_valor !== null && Number(catalogoItem.estimativa_valor) > 0) ? Number(catalogoItem.estimativa_valor) : (servicoDb.estimativaValor || 0),
+          dotacaoOrcamentaria: (catalogoItem.dotacao_orcamentaria !== undefined && catalogoItem.dotacao_orcamentaria !== null && Number(catalogoItem.dotacao_orcamentaria) > 0) ? Number(catalogoItem.dotacao_orcamentaria) : (servicoDb.dotacaoOrcamentaria || servicoDb.estimativaValor || 0),
+          grauPrioridade: catalogoItem.grau_prioridade || servicoDb.grauPrioridade || "Baixo",
+          vinculacao: catalogoItem.vinculacao || servicoDb.vinculacao || "Não",
+          dependenciaDescricao: catalogoItem.dependencia_descricao !== undefined ? catalogoItem.dependencia_descricao : servicoDb.dependenciaDescricao,
+          contrato: catalogoItem.contrato !== undefined ? catalogoItem.contrato : servicoDb.contrato,
+          contratada: catalogoItem.contratada || servicoDb.contratada,
+        };
       }
-      // Virtual item if it doesn't exist in the database yet
       return {
         id: undefined, // undefined indicates it needs to be created
         item: catalogoItem.item,
@@ -1736,10 +1769,17 @@ import {
         contrato: catalogoItem.contrato,
         contratada: catalogoItem.contratada,
       } as unknown as ServicoItem;
-    });
+    };
+
+    // Serviços Existentes vêm do catálogo (Painel Administrativo) onde tipo !== 'Novo'
+    const servicosExistentes: ServicoItem[] = catalogoExistentes.map(mapCatalogoToServico);
     
-    // Novos Serviços são aqueles criados diretamente pela Gerência (não estão no catálogo)
-    const servicosNovos = servicos.filter((s) => !catalogoItemsSet.has(s.item));
+    // Novos Serviços vêm do catálogo (com tipo === 'Novo') + aqueles criados diretamente pela Gerência
+    const servicosNovosCatalogo = catalogoNovos.map(mapCatalogoToServico);
+    const servicosNovosCustom = servicos.filter(
+      (s) => !servicosCatalogoExistentesSet.has(String(s.item)) && !servicosCatalogoNovosSet.has(String(s.item))
+    );
+    const servicosNovos: ServicoItem[] = [...servicosNovosCatalogo, ...servicosNovosCustom];
     const displayedServicos = selectedOption === "servicos_existentes" ? servicosExistentes : servicosNovos;
     
     const trimmedServicoSearch = searchTerm.trim().toLowerCase();
@@ -2119,7 +2159,7 @@ import {
   };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-0" style={{ top: "200px" }}>
           <img src="/assets/images/caema-logo.png" alt="CAEMA" className="w-full max-w-3xl opacity-[0.08]" />
         </div>
@@ -2632,7 +2672,7 @@ import {
   }
   if (isPeriodExpired) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
         <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
           <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
             <Lock className="h-10 w-10 text-destructive" />
@@ -2647,7 +2687,7 @@ import {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
       <div
         className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
         style={{ top: "200px" }}
@@ -3035,7 +3075,7 @@ import {
                             <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any}>{item.prioridade}</Badge>
                           ) : (
                             <Select value={item.prioridade} onValueChange={(v) => handleUpdatePrioridade(item.codigo, v as PlanItem["prioridade"])}>
-                              <SelectTrigger className="h-8 w-[90px] mx-auto border-none bg-transparent p-0 justify-center">
+                              <SelectTrigger className="h-8 w-22.5 mx-auto border-none bg-transparent p-0 justify-center">
                                 <Badge variant={getPrioridadeBadgeVariant(item.prioridade) as any} className="cursor-pointer">{item.prioridade}</Badge>
                               </SelectTrigger>
                               <SelectContent>

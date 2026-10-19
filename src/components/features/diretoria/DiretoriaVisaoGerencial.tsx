@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { ArrowLeft, BarChart3, CheckCircle2, Clock, XCircle, FileSpreadsheet, Building2, TrendingUp, Layers, PieChart as PieIcon, Info, Landmark, Wallet } from "lucide-react";
+import { ArrowLeft, BarChart3, CheckCircle2, Clock, XCircle, FileSpreadsheet, FileDown, Building2, TrendingUp, Layers, PieChart as PieIcon, Info, Landmark, Wallet } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -614,6 +614,318 @@ export function DiretoriaVisaoGerencial({
     return gerenciaMatrix.filter((g) => g.id === selectedGerenciaFilter || g.sigla === selectedGerenciaFilter);
   }, [gerenciaMatrix, selectedGerenciaFilter]);
 
+  // Exportar Excel
+  const handleExportExcel = async () => {
+    try {
+      const XLSXModule = await import("xlsx-js-style");
+      const XLSX = XLSXModule.default;
+
+      const wb = XLSX.utils.book_new();
+
+      const headerStyle = {
+        fill: { fgColor: { rgb: "1E293B" } },
+        font: { color: { rgb: "FFFFFF" }, bold: true, sz: 10 },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+
+      const titleStyle = {
+        font: { bold: true, sz: 13, color: { rgb: "0F172A" } },
+      };
+
+      const totalRowStyle = {
+        fill: { fgColor: { rgb: "F1F5F9" } },
+        font: { bold: true, sz: 10, color: { rgb: "0F172A" } },
+        alignment: { vertical: "center" },
+      };
+
+      // 1. Aba Matriz Gerencial
+      const matrizHeaders = [
+        "Gerência / Unidade",
+        "Nome da Gerência",
+        "Aquisição (Qtd)",
+        "Aquisição (Valor R$)",
+        "Serv. Existentes (Qtd)",
+        "Serv. Existentes (Valor R$)",
+        "Serv. Novos (Qtd)",
+        "Serv. Novos (Valor R$)",
+        "Total Solicitações",
+        "Aprovadas (Qtd)",
+        "Pendentes (Qtd)",
+        "Rejeitadas (Qtd)",
+        "Valor Total Geral (R$)",
+        "Orçamento Gerência (R$)",
+        "Saldo Geral Gerência (R$)",
+      ];
+
+      const matrizRows = filteredMatrix.map((g) => [
+        g.sigla,
+        g.nome,
+        g.qtdAquisicao,
+        g.valorAquisicao,
+        g.qtdServicosExistentes,
+        g.valorServicosExistentes,
+        g.qtdServicosNovos,
+        g.valorServicosNovos,
+        g.totalSolicitacoes,
+        g.aprovadasCount,
+        g.pendentesCount,
+        g.rejeitadasCount,
+        g.valorTotalGeral,
+        g.orcamentoGerencia,
+        g.saldoGeralGerencia,
+      ]);
+
+      const matrizTotalRow = [
+        `TOTAL DIRETORIA ${siglaUpper}`,
+        `Diretoria ${diretoria?.nome || siglaUpper}`,
+        totals.qtdAquisicao,
+        totals.valorAquisicao,
+        totals.qtdServicosExistentes,
+        totals.valorServicosExistentes,
+        totals.qtdServicosNovos,
+        totals.valorServicosNovos,
+        totals.totalSolicitacoes,
+        totals.aprovadasCount,
+        totals.pendentesCount,
+        totals.rejeitadasCount,
+        totals.valorTotalGeral,
+        totals.orcamentoTotalDiretoria,
+        totals.saldoGeralDiretoria,
+      ];
+
+      const wsMatriz = XLSX.utils.aoa_to_sheet([
+        [`Painel Estratégico da Diretoria ${siglaUpper} - Visão Gerencial`],
+        [`Plano Anual 2027 | Gerado em: ${new Date().toLocaleString("pt-BR")}`],
+        [],
+        matrizHeaders,
+        ...matrizRows,
+        matrizTotalRow,
+      ]);
+
+      wsMatriz["!cols"] = [
+        { wch: 20 },
+        { wch: 32 },
+        { wch: 16 },
+        { wch: 22 },
+        { wch: 20 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 24 },
+      ];
+
+      if (wsMatriz["A1"]) wsMatriz["A1"].s = titleStyle;
+
+      for (let c = 0; c < matrizHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsMatriz[cellRef]) wsMatriz[cellRef].s = headerStyle;
+      }
+
+      const totalRowIndex = 4 + matrizRows.length;
+      for (let c = 0; c < matrizHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: totalRowIndex, c });
+        if (wsMatriz[cellRef]) wsMatriz[cellRef].s = totalRowStyle;
+      }
+
+      XLSX.utils.book_append_sheet(wb, wsMatriz, "Matriz Gerencial");
+
+      // 2. Aba Distribuição de Status
+      const statusHeaders = [
+        "Status",
+        "Qtd Solicitações",
+        "Valor Total (R$)",
+        "Aquisição (Qtd)",
+        "Aquisição (R$)",
+        "Serv. Existentes (Qtd)",
+        "Serv. Existentes (R$)",
+        "Serv. Novos (Qtd)",
+        "Serv. Novos (R$)",
+      ];
+      const statusRows = pieData.map((p) => [
+        p.name,
+        p.value,
+        p.valor,
+        p.aquisicaoCount,
+        p.aquisicaoValor,
+        p.existentesCount,
+        p.existentesValor,
+        p.novosCount,
+        p.novosValor,
+      ]);
+
+      const wsStatus = XLSX.utils.aoa_to_sheet([
+        [`Distribuição de Status - Diretoria ${siglaUpper}`],
+        [],
+        statusHeaders,
+        ...statusRows,
+      ]);
+      wsStatus["!cols"] = statusHeaders.map((h) => ({ wch: Math.max(h.length + 4, 18) }));
+      if (wsStatus["A1"]) wsStatus["A1"].s = titleStyle;
+      for (let c = 0; c < statusHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 2, c });
+        if (wsStatus[cellRef]) wsStatus[cellRef].s = headerStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsStatus, "Status Solicitações");
+
+      // 3. Aba Modalidades de Gasto
+      const modalidadeHeaders = [
+        "Modalidade",
+        "Qtd Total",
+        "Valor Total (R$)",
+        "Aprovadas (Qtd)",
+        "Aprovadas (R$)",
+        "Pendentes (Qtd)",
+        "Pendentes (R$)",
+        "Rejeitadas (Qtd)",
+        "Rejeitadas (R$)",
+      ];
+      const modalidadeRows = verticalBarData.map((m) => [
+        m.modalidade,
+        m.qtd,
+        m.valor,
+        m.aprovadasCount,
+        m.aprovadasValor,
+        m.pendentesCount,
+        m.pendentesValor,
+        m.rejeitadasCount,
+        m.rejeitadasValor,
+      ]);
+
+      const wsModalidades = XLSX.utils.aoa_to_sheet([
+        [`Gasto Total por Modalidade - Diretoria ${siglaUpper}`],
+        [],
+        modalidadeHeaders,
+        ...modalidadeRows,
+      ]);
+      wsModalidades["!cols"] = modalidadeHeaders.map((h) => ({ wch: Math.max(h.length + 4, 18) }));
+      if (wsModalidades["A1"]) wsModalidades["A1"].s = titleStyle;
+      for (let c = 0; c < modalidadeHeaders.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 2, c });
+        if (wsModalidades[cellRef]) wsModalidades[cellRef].s = headerStyle;
+      }
+      XLSX.utils.book_append_sheet(wb, wsModalidades, "Gastos por Modalidade");
+
+      XLSX.writeFile(
+        wb,
+        `visao_gerencial_${siglaUpper.toLowerCase()}_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+    } catch (error) {
+      console.error("Erro ao exportar Excel:", error);
+    }
+  };
+
+  // Exportar PDF
+  const handleExportPDF = async () => {
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTableModule = await import("jspdf-autotable");
+      const autoTable = autoTableModule.default;
+
+      const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+
+      doc.setFontSize(15);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Painel Estratégico da Diretoria ${siglaUpper} - Visão Gerencial`, 14, 15);
+
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Plano Anual 2027 | Gerado em: ${new Date().toLocaleString("pt-BR")}`, 14, 21);
+
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(
+        `Solicitações Totais: ${totals.totalSolicitacoes}  |  Aprovadas: ${totals.aprovadasCount} (${formatCurrency(totals.aprovadasValor)})  |  Pendentes: ${totals.pendentesCount} (${formatCurrency(totals.pendentesValor)})  |  Rejeitadas: ${totals.rejeitadasCount} (${formatCurrency(totals.rejeitadasValor)})`,
+        14,
+        27
+      );
+      doc.text(
+        `Valor Total Geral: ${formatCurrency(totals.valorTotalGeral)}  |  Saldo Geral Diretoria: ${formatCurrency(totals.saldoGeralDiretoria)}`,
+        14,
+        32
+      );
+
+      const headers = [
+        "Gerência / Unidade",
+        "Aquisição (Qtd / R$)",
+        "Serv. Existentes (Qtd / R$)",
+        "Serv. Novos (Qtd / R$)",
+        "Total Solic.",
+        "Status (A / P / R)",
+        "Valor Total (R$)",
+        "Saldo Geral (R$)",
+      ];
+
+      const rows = filteredMatrix.map((row) => [
+        `${row.sigla}\n${row.nome}`,
+        `${row.qtdAquisicao} item(ns)\n${formatCurrency(row.valorAquisicao)}`,
+        `${row.qtdServicosExistentes} serv.\n${formatCurrency(row.valorServicosExistentes)}`,
+        `${row.qtdServicosNovos} serv.\n${formatCurrency(row.valorServicosNovos)}`,
+        `${row.totalSolicitacoes}`,
+        `✓ ${row.aprovadasCount} | ⏳ ${row.pendentesCount} | ✕ ${row.rejeitadasCount}`,
+        formatCurrency(row.valorTotalGeral),
+        formatCurrency(row.saldoGeralGerencia),
+      ]);
+
+      const totalRow = [
+        `TOTAL DIRETORIA ${siglaUpper}`,
+        `${totals.qtdAquisicao} item(ns)\n${formatCurrency(totals.valorAquisicao)}`,
+        `${totals.qtdServicosExistentes} serv.\n${formatCurrency(totals.valorServicosExistentes)}`,
+        `${totals.qtdServicosNovos} serv.\n${formatCurrency(totals.valorServicosNovos)}`,
+        `${totals.totalSolicitacoes}`,
+        `✓ ${totals.aprovadasCount} | ⏳ ${totals.pendentesCount} | ✕ ${totals.rejeitadasCount}`,
+        formatCurrency(totals.valorTotalGeral),
+        formatCurrency(totals.saldoGeralDiretoria),
+      ];
+
+      autoTable(doc, {
+        startY: 37,
+        head: [headers],
+        body: [...rows, totalRow],
+        theme: "grid",
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: 255,
+          fontStyle: "bold",
+          fontSize: 8,
+          halign: "center",
+        },
+        styles: {
+          fontSize: 7.5,
+          cellPadding: 2.5,
+          valign: "middle",
+        },
+        columnStyles: {
+          0: { halign: "left", cellWidth: 42 },
+          1: { halign: "center" },
+          2: { halign: "center" },
+          3: { halign: "center" },
+          4: { halign: "center", fontStyle: "bold" },
+          5: { halign: "center" },
+          6: { halign: "right", fontStyle: "bold" },
+          7: { halign: "right", fontStyle: "bold" },
+        },
+        didParseCell: function (data) {
+          if (data.row.index === rows.length) {
+            data.cell.styles.fillColor = [241, 245, 249];
+            data.cell.styles.fontStyle = "bold";
+          }
+        },
+      });
+
+      doc.save(
+        `visao_gerencial_${siglaUpper.toLowerCase()}_${new Date().toISOString().split("T")[0]}.pdf`
+      );
+    } catch (error) {
+      console.error("Erro ao exportar PDF:", error);
+    }
+  };
+
   return (
     <TooltipProvider delayDuration={150}>
       <div className="min-h-screen bg-slate-50/60 pb-16">
@@ -641,7 +953,31 @@ export function DiretoriaVisaoGerencial({
               </div>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Botões Exportar Excel e PDF (Imagem 2) */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportExcel}
+                  className="bg-white hover:bg-slate-100 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                  title="Exportar Visão Gerencial para Excel"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-slate-700" />
+                  <span>Excel</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportPDF}
+                  className="bg-white hover:bg-slate-100 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                  title="Exportar Visão Gerencial para PDF"
+                >
+                  <FileDown className="h-4 w-4 text-slate-700" />
+                  <span>PDF</span>
+                </Button>
+              </div>
+
               <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/15">
                 <TrendingUp className="h-5 w-5 text-emerald-400" />
                 <div>
@@ -1001,20 +1337,44 @@ export function DiretoriaVisaoGerencial({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground font-medium">Filtrar Gerência:</span>
-                <select
-                  value={selectedGerenciaFilter}
-                  onChange={(e) => setSelectedGerenciaFilter(e.target.value)}
-                  className="h-9 rounded-lg border border-slate-300 bg-white text-xs px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="todas">Todas as Gerências</option>
-                  {gerenciaMatrix.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.sigla}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Botões Exportar Excel e PDF */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportExcel}
+                    className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3 py-1.5 h-9 transition-colors"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-slate-700" />
+                    <span>Excel</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportPDF}
+                    className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3 py-1.5 h-9 transition-colors"
+                  >
+                    <FileDown className="h-4 w-4 text-slate-700" />
+                    <span>PDF</span>
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground font-medium">Filtrar Gerência:</span>
+                  <select
+                    value={selectedGerenciaFilter}
+                    onChange={(e) => setSelectedGerenciaFilter(e.target.value)}
+                    className="h-9 rounded-lg border border-slate-300 bg-white text-xs px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="todas">Todas as Gerências</option>
+                    {gerenciaMatrix.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.sigla}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 

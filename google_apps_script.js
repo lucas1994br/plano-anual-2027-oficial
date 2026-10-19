@@ -196,6 +196,19 @@ function doGet(e) {
       // Hidrata a sigla da gerência e da diretoria
       const gerenciasData = getSheetData(SHEETS.GERENCIAS);
       const diretoriasData = getSheetData(SHEETS.DIRETORIAS);
+      const servicosCatalogoRaw = getSheetData(SHEETS.SERVICOS_CATALOGO);
+
+      const servCatMap = new Map();
+      servicosCatalogoRaw.forEach(c => {
+        if (c.id) servCatMap.set(String(c.id).toLowerCase(), c);
+        if (c.item !== undefined && c.item !== null && c.item !== "") {
+          const itemTrimmed = String(c.item).trim();
+          servCatMap.set(itemTrimmed, c);
+          const parsed = parseInt(c.item, 10);
+          if (!isNaN(parsed)) servCatMap.set(String(parsed), c);
+        }
+      });
+
       const gerMap = {};
       gerenciasData.forEach(g => {
         if (g.id && g.sigla) gerMap[String(g.id).toLowerCase()] = String(g.sigla);
@@ -206,6 +219,21 @@ function doGet(e) {
         if (d.sigla) dirMap[String(d.sigla).toLowerCase()] = String(d.sigla);
       });
       data.forEach(s => {
+        const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
+        const parsedItemKey = parseInt(s.item, 10);
+        const cat = (s.servico_catalogo_id && servCatMap.get(String(s.servico_catalogo_id).toLowerCase()))
+          || (itemKey ? servCatMap.get(itemKey) : null)
+          || (!isNaN(parsedItemKey) ? servCatMap.get(String(parsedItemKey)) : null);
+        if (cat) {
+          if (cat.objeto) s.objeto = cat.objeto;
+          if (cat.tipo_contratacao) s.tipo_contratacao = cat.tipo_contratacao;
+          if (cat.estimativa_valor !== undefined && Number(cat.estimativa_valor) > 0) s.estimativa_valor = parseSafeNumberGAS(cat.estimativa_valor);
+          if (cat.contrato !== undefined) s.contrato = cat.contrato;
+          if (cat.contratada !== undefined) s.contratada = cat.contratada;
+          if (cat.grau_prioridade) s.grau_prioridade = cat.grau_prioridade;
+          if (cat.vinculacao) s.vinculacao = cat.vinculacao;
+          if (cat.dependencia_descricao !== undefined) s.dependencia_descricao = cat.dependencia_descricao;
+        }
         if (s.gerencia_id && gerMap[String(s.gerencia_id).toLowerCase()]) {
           s.gerencia = gerMap[String(s.gerencia_id).toLowerCase()];
         }
@@ -571,6 +599,7 @@ function doPost(e) {
       if (!item.id) item.id = item.codigo ? ("item-" + item.codigo) : generateCanonicalUuid();
       if (!item.created_at) item.created_at = new Date().toISOString();
       const saved = appendRow(SHEETS.ITENS_CATALOGO, item);
+      distributeNewCatalogItemToSolicitacoes(saved || item);
       return jsonResponse({ success: true, data: saved });
     }
 
@@ -580,23 +609,29 @@ function doPost(e) {
       if (updates.valor_unitario !== undefined) updates.valor_unitario = parseSafeNumberGAS(updates.valor_unitario, 0);
       if (updates.valorUnitario !== undefined) updates.valor_unitario = parseSafeNumberGAS(updates.valorUnitario, 0);
       const updated = updateRow(SHEETS.ITENS_CATALOGO, body.id, updates);
+      propagateItemCatalogoToSolicitacoes(body.id, updates, updates.codigo);
       return jsonResponse({ success: true, data: updated });
     }
 
     if (action === "deleteItemCatalogo") {
       const success = deleteRow(SHEETS.ITENS_CATALOGO, body.id);
+      deleteItemFromSolicitacoes(body.id, body.codigo);
       return jsonResponse({ success });
     }
 
     if (action === "deleteItensCatalogoBulk") {
       const ids = body.ids || [];
       const count = deleteRowsBulk(SHEETS.ITENS_CATALOGO, ids);
+      ids.forEach(id => deleteItemFromSolicitacoes(id));
       return jsonResponse({ success: true, deletedCount: count });
     }
 
     if (action === "updateItensCatalogoBulk") {
       const updates = body.items || [];
       const count = updateRowsBulk(SHEETS.ITENS_CATALOGO, updates);
+      updates.forEach(u => {
+        if (u && u.id) propagateItemCatalogoToSolicitacoes(u.id, u, u.codigo);
+      });
       return jsonResponse({ success: true, updatedCount: count });
     }
 
@@ -620,23 +655,30 @@ function doPost(e) {
       if (updates.item !== undefined) updates.item = parseInt(updates.item, 10) || 1;
       if (updates.estimativa_valor !== undefined) updates.estimativa_valor = parseSafeNumberGAS(updates.estimativa_valor, 0);
       const updated = updateRow(SHEETS.SERVICOS_CATALOGO, body.id, updates);
+      const finalItem = updates.item || (updated && updated.item) || body.item;
+      propagateServicoCatalogoToServicos(body.id, updates, finalItem);
       return jsonResponse({ success: true, data: updated });
     }
 
     if (action === "deleteServicoCatalogo") {
       const success = deleteRow(SHEETS.SERVICOS_CATALOGO, body.id);
+      deleteServicoFromServicos(body.id, body.item);
       return jsonResponse({ success });
     }
 
     if (action === "deleteServicosCatalogoBulk") {
       const ids = body.ids || [];
       const count = deleteRowsBulk(SHEETS.SERVICOS_CATALOGO, ids);
+      ids.forEach(id => deleteServicoFromServicos(id));
       return jsonResponse({ success: true, deletedCount: count });
     }
 
     if (action === "updateServicosCatalogoBulk") {
       const updates = body.items || [];
       const count = updateRowsBulk(SHEETS.SERVICOS_CATALOGO, updates);
+      updates.forEach(u => {
+        if (u && u.id) propagateServicoCatalogoToServicos(u.id, u, u.item);
+      });
       return jsonResponse({ success: true, updatedCount: count });
     }
 
@@ -1336,12 +1378,12 @@ function hydrateSolicitacoesWithCatalog(solicitacoes) {
     }
 
     const finalCode = (cat && cat.codigo > 0) ? cat.codigo : rawCode;
-    const finalDesc = (isDescDefault && cat && cat.descricao) ? cat.descricao : (rawDesc || (cat ? cat.descricao : "Material não especificado"));
-    const finalCat = (s.categoria && s.categoria !== "diversos") ? s.categoria : (cat ? cat.categoria : "MATERIAIS DE CUSTEIO");
-    const finalUn = s.unidade || (cat ? cat.unidade : "UND");
-    const finalVal = (s.valor_unitario !== undefined && s.valor_unitario !== "" && Number(s.valor_unitario) > 0)
-      ? parseSafeNumberGAS(s.valor_unitario)
-      : (cat ? cat.valor_unitario : 0);
+    const finalDesc = (cat && cat.descricao && cat.descricao.trim().length > 0) ? cat.descricao : (rawDesc || "Material não especificado");
+    const finalCat = (cat && cat.categoria && cat.categoria !== "diversos") ? cat.categoria : ((s.categoria && s.categoria !== "diversos") ? s.categoria : "MATERIAIS DE CUSTEIO");
+    const finalUn = (cat && cat.unidade) ? cat.unidade : (s.unidade || "UND");
+    const finalVal = (cat && cat.valor_unitario !== undefined && Number(cat.valor_unitario) > 0)
+      ? parseSafeNumberGAS(cat.valor_unitario)
+      : (s.valor_unitario !== undefined && s.valor_unitario !== "" && Number(s.valor_unitario) > 0 ? parseSafeNumberGAS(s.valor_unitario) : 0);
     const finalGerencia = (s.gerencia_id && gerMap.get(String(s.gerencia_id).trim().toLowerCase())) || s.gerencia || "";
     const finalDirSigla = (s.diretoria_id && dirMap.get(String(s.diretoria_id).trim().toLowerCase())) || s.diretoria_sigla || "";
 
@@ -1499,10 +1541,16 @@ function updateRow(sheetName, id, updates) {
       altColIdx = itemColIdx;
       altTarget = targetId;
     }
-    if (altColIdx !== -1 && altTarget) {
+    const updateItemTarget = updates && updates.item !== undefined && updates.item !== null ? String(updates.item).trim() : null;
+    const updateCodTarget = updates && updates.codigo !== undefined && updates.codigo !== null ? String(updates.codigo).trim() : null;
+
+    if (altColIdx !== -1 && (altTarget || updateItemTarget || updateCodTarget)) {
       const altValues = sheet.getRange(2, altColIdx + 1, lastRow - 1, 1).getValues();
       for (let i = 0; i < altValues.length; i++) {
-        if (String(altValues[i][0] || "").trim().toLowerCase() === altTarget) {
+        const valStr = String(altValues[i][0] || "").trim().toLowerCase();
+        if ((altTarget && valStr === altTarget) ||
+            (altColIdx === itemColIdx && updateItemTarget && (valStr === updateItemTarget.toLowerCase() || parseInt(valStr, 10) === parseInt(updateItemTarget, 10))) ||
+            (altColIdx === codColIdx && updateCodTarget && (valStr === updateCodTarget.toLowerCase() || parseInt(valStr, 10) === parseInt(updateCodTarget, 10)))) {
           matchedRowNum = i + 2;
           break;
         }
@@ -1693,6 +1741,331 @@ function deleteRowsBulk(sheetName, ids) {
   }
 
   return rowsToDelete.length;
+}
+
+// ================= PROPAGAÇÃO CATÁLOGO -> SOLICITAÇÕES E SERVIÇOS =================
+
+function distributeNewCatalogItemToSolicitacoes(catalogItem) {
+  try {
+    const gerencias = getSheetData(SHEETS.GERENCIAS);
+    const periodos = getSheetData(SHEETS.PERIODOS);
+    const ativoPeriod = periodos.find(p => p.status === "ativo" || p.status === "aberto" || p.is_active || p.ativo) || periodos[0];
+    if (!ativoPeriod || !gerencias || gerencias.length === 0) return;
+
+    const solicitacoes = [];
+    gerencias.forEach(g => {
+      solicitacoes.push({
+        id: generateCanonicalUuid(),
+        item_id: catalogItem.id,
+        codigo: catalogItem.codigo || 0,
+        descricao: catalogItem.descricao || "",
+        categoria: catalogItem.categoria || "MATERIAIS DE CUSTEIO",
+        unidade: catalogItem.unidade || "UND",
+        valor_unitario: parseSafeNumberGAS(catalogItem.valor_unitario, 0),
+        qtd_estimada: 0,
+        prioridade: "Baixa",
+        status: "rascunho",
+        gerencia_id: g.id,
+        diretoria_id: g.diretoria_id || "",
+        periodo_id: ativoPeriod.id,
+        created_at: new Date().toISOString()
+      });
+    });
+    if (solicitacoes.length > 0) {
+      appendRowsBulk(SHEETS.SOLICITACOES, solicitacoes);
+    }
+  } catch (err) {
+    Logger.log("Erro ao distribuir novo item para solicitacoes: " + err);
+  }
+}
+
+function propagateItemCatalogoToSolicitacoes(catalogId, updates, catalogCodigo) {
+  try {
+    const sheet = getSs().getSheetByName(SHEETS.SOLICITACOES);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) return;
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+    const itemIdIdx = headers.indexOf("item_id");
+    const codIdx = headers.indexOf("codigo");
+    const descIdx = headers.indexOf("descricao");
+    const catIdx = headers.indexOf("categoria");
+    const unIdx = headers.indexOf("unidade");
+    const valIdx = headers.indexOf("valor_unitario");
+
+    const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
+    const targetCode = catalogCodigo !== undefined && catalogCodigo !== null ? String(catalogCodigo).trim() : "";
+
+    const allValues = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    let hasChanges = false;
+
+    for (let i = 0; i < allValues.length; i++) {
+      const row = allValues[i];
+      const rItemId = itemIdIdx !== -1 ? String(row[itemIdIdx] || "").trim().toLowerCase() : "";
+      const rCode = codIdx !== -1 ? String(row[codIdx] || "").trim() : "";
+
+      const match = (targetId && rItemId === targetId) || (targetCode && rCode === targetCode);
+      if (match) {
+        if (updates.descricao !== undefined && descIdx !== -1) {
+          row[descIdx] = String(updates.descricao).trim();
+          hasChanges = true;
+        }
+        if (updates.categoria !== undefined && catIdx !== -1) {
+          row[catIdx] = String(updates.categoria).trim();
+          hasChanges = true;
+        }
+        if (updates.unidade !== undefined && unIdx !== -1) {
+          row[unIdx] = String(updates.unidade).trim();
+          hasChanges = true;
+        }
+        if (updates.valor_unitario !== undefined && valIdx !== -1) {
+          row[valIdx] = parseSafeNumberGAS(updates.valor_unitario);
+          hasChanges = true;
+        }
+        if (updates.codigo !== undefined && codIdx !== -1) {
+          row[codIdx] = parseInt(updates.codigo, 10) || row[codIdx];
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges) {
+      sheet.getRange(2, 1, lastRow - 1, lastCol).setValues(allValues);
+    }
+  } catch (err) {
+    Logger.log("Erro ao propagar atualizacao para solicitacoes: " + err);
+  }
+}
+
+function deleteItemFromSolicitacoes(catalogId, catalogCodigo) {
+  try {
+    const sheet = getSs().getSheetByName(SHEETS.SOLICITACOES);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) return;
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+    const itemIdIdx = headers.indexOf("item_id");
+    const codIdx = headers.indexOf("codigo");
+    const statusIdx = headers.indexOf("status");
+
+    const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
+    const targetCode = catalogCodigo !== undefined && catalogCodigo !== null ? String(catalogCodigo).trim() : "";
+
+    const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const rowsToDelete = [];
+
+    for (let i = 0; i < dataRange.length; i++) {
+      const row = dataRange[i];
+      const rItemId = itemIdIdx !== -1 ? String(row[itemIdIdx] || "").trim().toLowerCase() : "";
+      const rCode = codIdx !== -1 ? String(row[codIdx] || "").trim() : "";
+      const rStatus = statusIdx !== -1 ? String(row[statusIdx] || "").trim().toLowerCase() : "rascunho";
+
+      const match = (targetId && rItemId === targetId) || (targetCode && rCode === targetCode);
+      if (match && (rStatus === "rascunho" || rStatus === "")) {
+        rowsToDelete.push(i + 2);
+      }
+    }
+
+    for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+      sheet.deleteRow(rowsToDelete[k]);
+    }
+  } catch (err) {
+    Logger.log("Erro ao remover solicitacoes de item excluido: " + err);
+  }
+}
+
+function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
+  try {
+    let resolvedItemNumber = itemNumber;
+
+    // Se itemNumber não foi passado diretamente, tenta recuperar da linha do catálogo
+    if ((resolvedItemNumber === undefined || resolvedItemNumber === null || resolvedItemNumber === "") && catalogId) {
+      const catSheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
+      if (catSheet) {
+        const catLastRow = catSheet.getLastRow();
+        const catLastCol = catSheet.getLastColumn();
+        if (catLastRow > 1) {
+          const catHeaders = catSheet.getRange(1, 1, 1, catLastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+          const catIdCol = catHeaders.indexOf("id");
+          const catItemCol = catHeaders.indexOf("item");
+          if (catItemCol !== -1) {
+            const catVals = catSheet.getRange(2, 1, catLastRow - 1, catLastCol).getValues();
+            for (let i = 0; i < catVals.length; i++) {
+              const rId = catIdCol !== -1 ? String(catVals[i][catIdCol] || "").trim().toLowerCase() : "";
+              const rItem = String(catVals[i][catItemCol] || "").trim();
+              if ((catalogId && rId === String(catalogId).trim().toLowerCase()) || rItem === String(catalogId).trim()) {
+                resolvedItemNumber = catVals[i][catItemCol];
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const sheet = getSs().getSheetByName(SHEETS.SERVICOS);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) return;
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+    const catIdIdx = headers.indexOf("servico_catalogo_id");
+    const itemIdx = headers.indexOf("item");
+    const objIdx = headers.indexOf("objeto");
+    const tipoIdx = headers.indexOf("tipo_contratacao");
+    const valIdx = headers.indexOf("estimativa_valor");
+    const dotIdx = headers.indexOf("dotacao_orcamentaria");
+    const prioIdx = headers.indexOf("grau_prioridade");
+    const vincIdx = headers.indexOf("vinculacao");
+    const depIdx = headers.indexOf("dependencia_descricao");
+    const contIdx = headers.indexOf("contrato");
+    const ctdIdx = headers.indexOf("contratada");
+    const gerColIdx = headers.indexOf("gerencia_id");
+    const dirColIdx = headers.indexOf("diretoria_id");
+    const updIdx = headers.indexOf("updated_at");
+
+    const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
+    const targetItem = resolvedItemNumber !== undefined && resolvedItemNumber !== null ? String(resolvedItemNumber).trim() : "";
+
+    const allValues = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    let hasChanges = false;
+
+    for (let i = 0; i < allValues.length; i++) {
+      const row = allValues[i];
+      const rCatId = catIdIdx !== -1 ? String(row[catIdIdx] || "").trim().toLowerCase() : "";
+      const rItem = itemIdx !== -1 ? String(row[itemIdx] || "").trim() : "";
+
+      const match = (targetId && rCatId === targetId) || 
+                    (targetItem && rItem === targetItem) ||
+                    (targetItem && parseInt(rItem, 10) === parseInt(targetItem, 10));
+      if (match) {
+        if (updates.objeto !== undefined && objIdx !== -1) {
+          row[objIdx] = String(updates.objeto).trim();
+          hasChanges = true;
+        }
+        if (updates.tipo_contratacao !== undefined && tipoIdx !== -1) {
+          row[tipoIdx] = String(updates.tipo_contratacao).trim();
+          hasChanges = true;
+        }
+        if (updates.estimativa_valor !== undefined && valIdx !== -1) {
+          row[valIdx] = parseSafeNumberGAS(updates.estimativa_valor);
+          hasChanges = true;
+        }
+        if (updates.dotacao_orcamentaria !== undefined && dotIdx !== -1) {
+          row[dotIdx] = parseSafeNumberGAS(updates.dotacao_orcamentaria);
+          hasChanges = true;
+        }
+        if (updates.grau_prioridade !== undefined && prioIdx !== -1) {
+          row[prioIdx] = String(updates.grau_prioridade).trim();
+          hasChanges = true;
+        }
+        if (updates.vinculacao !== undefined && vincIdx !== -1) {
+          row[vincIdx] = String(updates.vinculacao).trim();
+          hasChanges = true;
+        }
+        if (updates.dependencia_descricao !== undefined && depIdx !== -1) {
+          row[depIdx] = updates.dependencia_descricao ? String(updates.dependencia_descricao).trim() : "";
+          hasChanges = true;
+        }
+        if (updates.contrato !== undefined && contIdx !== -1) {
+          row[contIdx] = updates.contrato ? String(updates.contrato).trim() : "";
+          hasChanges = true;
+        }
+        if (updates.contratada !== undefined && ctdIdx !== -1) {
+          row[ctdIdx] = updates.contratada ? String(updates.contratada).trim() : "";
+          hasChanges = true;
+        }
+        if (updates.gerencia_id !== undefined && gerColIdx !== -1) {
+          row[gerColIdx] = String(updates.gerencia_id).trim();
+          hasChanges = true;
+        }
+        if (updates.diretoria_id !== undefined && dirColIdx !== -1) {
+          row[dirColIdx] = String(updates.diretoria_id).trim();
+          hasChanges = true;
+        }
+        if (updIdx !== -1) {
+          row[updIdx] = new Date().toISOString();
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges) {
+      sheet.getRange(2, 1, lastRow - 1, lastCol).setValues(allValues);
+    }
+  } catch (err) {
+    Logger.log("Erro ao propagar atualizacao para servicos: " + err);
+  }
+}
+
+function deleteServicoFromServicos(catalogId, itemNumber) {
+  try {
+    let resolvedItemNumber = itemNumber;
+    if ((resolvedItemNumber === undefined || resolvedItemNumber === null || resolvedItemNumber === "") && catalogId) {
+      const catSheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
+      if (catSheet) {
+        const catLastRow = catSheet.getLastRow();
+        const catLastCol = catSheet.getLastColumn();
+        if (catLastRow > 1) {
+          const catHeaders = catSheet.getRange(1, 1, 1, catLastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+          const catIdCol = catHeaders.indexOf("id");
+          const catItemCol = catHeaders.indexOf("item");
+          if (catItemCol !== -1) {
+            const catVals = catSheet.getRange(2, 1, catLastRow - 1, catLastCol).getValues();
+            for (let i = 0; i < catVals.length; i++) {
+              const rId = catIdCol !== -1 ? String(catVals[i][catIdCol] || "").trim().toLowerCase() : "";
+              const rItem = String(catVals[i][catItemCol] || "").trim();
+              if ((catalogId && rId === String(catalogId).trim().toLowerCase()) || rItem === String(catalogId).trim()) {
+                resolvedItemNumber = catVals[i][catItemCol];
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    const sheet = getSs().getSheetByName(SHEETS.SERVICOS);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) return;
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
+    const catIdIdx = headers.indexOf("servico_catalogo_id");
+    const itemIdx = headers.indexOf("item");
+    const statusIdx = headers.indexOf("status");
+
+    const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
+    const targetItem = resolvedItemNumber !== undefined && resolvedItemNumber !== null ? String(resolvedItemNumber).trim() : "";
+
+    const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const rowsToDelete = [];
+
+    for (let i = 0; i < dataRange.length; i++) {
+      const row = dataRange[i];
+      const rCatId = catIdIdx !== -1 ? String(row[catIdIdx] || "").trim().toLowerCase() : "";
+      const rItem = itemIdx !== -1 ? String(row[itemIdx] || "").trim() : "";
+      const rStatus = statusIdx !== -1 ? String(row[statusIdx] || "").trim().toLowerCase() : "rascunho";
+
+      const match = (targetId && rCatId === targetId) || 
+                    (targetItem && rItem === targetItem) ||
+                    (targetItem && parseInt(rItem, 10) === parseInt(targetItem, 10));
+      if (match && (rStatus === "rascunho" || rStatus === "")) {
+        rowsToDelete.push(i + 2);
+      }
+    }
+
+    for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+      sheet.deleteRow(rowsToDelete[k]);
+    }
+  } catch (err) {
+    Logger.log("Erro ao remover servicos de catalogo excluido: " + err);
+  }
 }
 
 // ================= VALIDAÇÃO DE CÓDIGO DE ACESSO =================

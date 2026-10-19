@@ -91,19 +91,24 @@ function mapDbToPlanItem(s: any): PlanItem {
   }
 
   const rawDesc = s.descricao || s.item?.descricao || (catItem ? catItem.descricao : "");
-  const isDescDefault = !rawDesc || rawDesc.toLowerCase() === "material não especificado" || rawDesc.toLowerCase() === "diversos";
-  const desc = (!isDescDefault) ? rawDesc : ((catItem && catItem.descricao) ? catItem.descricao : rawDesc);
+  const desc = (catItem && catItem.descricao && catItem.descricao.trim().length > 0)
+    ? catItem.descricao
+    : ((rawDesc && rawDesc.toLowerCase() !== "material não especificado" && rawDesc.toLowerCase() !== "diversos") ? rawDesc : (catItem?.descricao || rawDesc));
 
-  const cat = (s.categoria && s.categoria !== "diversos")
-    ? s.categoria
-    : ((catItem && catItem.categoria) ? catItem.categoria : (s.item?.categoria || "MATERIAIS DE CUSTEIO"));
-  const un = s.unidade || (catItem && catItem.unidade) || s.item?.unidade || "un";
+  const cat = (catItem && catItem.categoria && catItem.categoria !== "diversos")
+    ? catItem.categoria
+    : ((s.categoria && s.categoria !== "diversos") ? s.categoria : (s.item?.categoria || "MATERIAIS DE CUSTEIO"));
+  const un = (catItem && catItem.unidade) || s.unidade || s.item?.unidade || "un";
 
   const resolvedGerencia = s.gerencias?.sigla 
     || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined)
     || memoryGerenciasById.get(String(s.gerencia_id || s.gerencia || "").trim().toLowerCase()) 
     || s.gerencia 
     || "";
+
+  const finalPrice = (catItem && catItem.valor_unitario !== undefined && Number(catItem.valor_unitario) > 0)
+    ? Number(catItem.valor_unitario)
+    : (unitVal > 0 ? unitVal : 0);
 
   return {
     id: s.id,
@@ -112,8 +117,8 @@ function mapDbToPlanItem(s: any): PlanItem {
     descricao: desc,
     categoria: cat,
     unidade: un,
-    valorUnitario: unitVal > 0 ? unitVal : (catItem?.valor_unitario || 0),
-    valor_unitario: unitVal > 0 ? unitVal : (catItem?.valor_unitario || 0),
+    valorUnitario: finalPrice,
+    valor_unitario: finalPrice,
     qtdEstimada: qtdVal,
     qtd_estimada: qtdVal,
     prioridade: s.prioridade || s.grau_prioridade || "Baixa",
@@ -2800,6 +2805,8 @@ export async function updateItemCatalogoAdmin(
 ): Promise<unknown> {
   if (gs.isGoogleSheetsActive()) {
     const updated = await gs.gsUpdateItemCatalogo(itemId, updates);
+    const existing = memoryCatalogById.get(String(itemId).trim().toLowerCase());
+    updateCatalogCache([{ ...(existing || {}), id: itemId, ...updates }]);
     await registrarLogAtividade("EDITAR", "itens_catalogo", itemId, updates);
     return { success: true, data: updated };
   }

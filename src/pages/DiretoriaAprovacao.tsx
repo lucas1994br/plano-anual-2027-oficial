@@ -346,18 +346,36 @@ const DiretoriaAprovacao = () => {
     queryKey: ["itens-catalogo"],
     queryFn: getItensCatalogo,
     enabled: !!authenticated,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 1000,
+    refetchOnMount: true,
   });
 
   const { data: servicosCatalogoData = [] } = useQuery({
     queryKey: ["servicos-catalogo"],
     queryFn: getServicosCatalogo,
     enabled: !!authenticated,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 1000,
+    refetchOnMount: true,
   });
 
   const servicosCatalogoSet = useMemo(() => {
     return new Set((servicosCatalogoData as any[]).map(c => String(c.item || "").trim()));
+  }, [servicosCatalogoData]);
+
+  const servicosCatalogoExistentesSet = useMemo(() => {
+    return new Set(
+      (servicosCatalogoData as any[])
+        .filter(c => String(c.tipo_contratacao || "").trim().toLowerCase() !== "novo")
+        .map(c => String(c.item || "").trim())
+    );
+  }, [servicosCatalogoData]);
+
+  const servicosCatalogoNovosSet = useMemo(() => {
+    return new Set(
+      (servicosCatalogoData as any[])
+        .filter(c => String(c.tipo_contratacao || "").trim().toLowerCase() === "novo")
+        .map(c => String(c.item || "").trim())
+    );
   }, [servicosCatalogoData]);
 
   const orcamentoConfig = useMemo(() => {
@@ -385,6 +403,14 @@ const DiretoriaAprovacao = () => {
   const items: PlanItem[] = useMemo(() => {
     if (!diretoria) return [];
 
+    const catalogoByCodigoMap = new Map<number, any>();
+    const catalogoByIdMap = new Map<string, any>();
+    (catalogoData as any[]).forEach((c) => {
+      if (c.id) catalogoByIdMap.set(String(c.id).toLowerCase(), c);
+      const cCode = Number(c.codigo);
+      if (!isNaN(cCode) && cCode > 0) catalogoByCodigoMap.set(cCode, c);
+    });
+
     return solicitacoes
       .filter((s: any) =>
         s.qtd_estimada >= 0 &&
@@ -393,14 +419,15 @@ const DiretoriaAprovacao = () => {
       .map((s: any) => {
         const rawCode = s.codigo ?? s.item?.codigo ?? 0;
         const codigo = Number(rawCode) || 0;
+        const catItem = (codigo > 0 ? catalogoByCodigoMap.get(codigo) : undefined) || (s.item_id ? catalogoByIdMap.get(String(s.item_id).toLowerCase()) : undefined) || s.item;
         const descFromMap = codigo > 0 ? (materialDescriptions[String(codigo)] || "") : "";
-        const rawDesc = s.descricao || s.item?.descricao || "";
+        const rawDesc = catItem?.descricao || s.descricao || s.item?.descricao || "";
         const descricao = (rawDesc && rawDesc.trim().toLowerCase() !== "diversos")
           ? rawDesc
           : (descFromMap || rawDesc || "Material não especificado");
-        const categoriaItem = (typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos")
+        const categoriaItem = catItem?.categoria || ((typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos")
           ? s.categoria
-          : (s.item?.categoria || "MATERIAIS DE CUSTEIO");
+          : (s.item?.categoria || "MATERIAIS DE CUSTEIO"));
         const trueRequesterDiretoriaId = globalGerenciaMap[s.gerencia_id]?.diretoria_id || s.diretoria_id;
         
         const diretoriaOrcamentariaIdRaw = getBudgetOwnerDiretoriaId(
@@ -415,6 +442,7 @@ const DiretoriaAprovacao = () => {
           : trueRequesterDiretoriaId;
         const diretoriaSolicitante = diretoriaMap[trueRequesterDiretoriaId];
         const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
+        const valUnit = parseSafeNumber(catItem?.valor_unitario !== undefined && Number(catItem?.valor_unitario) > 0 ? catItem.valor_unitario : (s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0)), 0);
 
         return {
           id: s.id,
@@ -424,8 +452,8 @@ const DiretoriaAprovacao = () => {
           gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || gerenciaMap[s.gerencia_id] || gerenciaMap[s.gerencia] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || "N/A",
           prioridade: s.prioridade || "Média",
           qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
-          unidade: s.unidade || s.item?.unidade || "un",
-          valorUnitario: parseSafeNumber(s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0), 0),
+          unidade: catItem?.unidade || s.unidade || s.item?.unidade || "un",
+          valorUnitario: valUnit,
           observacao: s.observacao || "",
           status: s.status as SolicitacaoStatus,
           justificativaRejeicao: s.justificativa_rejeicao || s.justificativaRejeicao || "",
@@ -436,7 +464,7 @@ const DiretoriaAprovacao = () => {
           gerencia_id: s.gerencia_id,
         };
       });
-  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, gerenciaMap]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, gerenciaMap, catalogoData]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {
@@ -801,14 +829,19 @@ const DiretoriaAprovacao = () => {
           const itemKey = String(s.item || "").trim();
           const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return servicosCatalogoSet.has(itemKey) && (matchItem || matchId);
+          const isExistente = servicosCatalogoExistentesSet.has(itemKey) || (!servicosCatalogoNovosSet.has(itemKey) && String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() !== "novo");
+          return isExistente && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && servicosCatalogoSet.has(String(s.item || "").trim()))
+      .filter((s: ServicoItem) => {
+        const itemKey = String(s.item || "").trim();
+        const isExistente = servicosCatalogoExistentesSet.has(itemKey) || (!servicosCatalogoNovosSet.has(itemKey) && String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() !== "novo");
+        return isEnviadoOuAprovado(s.status) && isExistente;
+      })
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
-  }, [servicosData, servicosCatalogoSet, selectedServicos, selectedOption]);
+  }, [servicosData, servicosCatalogoExistentesSet, servicosCatalogoNovosSet, selectedServicos, selectedOption]);
 
   const gastoServicosNovosDiretoria = useMemo(() => {
     if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
@@ -817,14 +850,19 @@ const DiretoriaAprovacao = () => {
           const itemKey = String(s.item || "").trim();
           const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          return !servicosCatalogoSet.has(itemKey) && (matchItem || matchId);
+          const isNovo = servicosCatalogoNovosSet.has(itemKey) || (!servicosCatalogoExistentesSet.has(itemKey) && (String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() === "novo" || !servicosCatalogoSet.has(itemKey)));
+          return isNovo && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
-      .filter((s: ServicoItem) => isEnviadoOuAprovado(s.status) && !servicosCatalogoSet.has(String(s.item || "").trim()))
+      .filter((s: ServicoItem) => {
+        const itemKey = String(s.item || "").trim();
+        const isNovo = servicosCatalogoNovosSet.has(itemKey) || (!servicosCatalogoExistentesSet.has(itemKey) && (String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() === "novo" || !servicosCatalogoSet.has(itemKey)));
+        return isEnviadoOuAprovado(s.status) && isNovo;
+      })
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
-  }, [servicosData, servicosCatalogoSet, selectedServicos, selectedOption]);
+  }, [servicosData, servicosCatalogoExistentesSet, servicosCatalogoNovosSet, servicosCatalogoSet, selectedServicos, selectedOption]);
 
   const gastoServicosDiretoria = useMemo(() => {
     return selectedOption === "servicos_existentes"
@@ -854,35 +892,95 @@ const DiretoriaAprovacao = () => {
         };
       });
     
+    const isNovoTipo = (tipo?: string) => String(tipo || "").trim().toLowerCase() === "novo";
+
     if (selectedOption === "servicos_existentes") {
-      return (servicosCatalogoData as any[]).map((catalogoItem) => {
-        const servicoDb = servicosDaDiretoria.find(s => s.item === catalogoItem.item);
-        if (servicoDb) {
-          return servicoDb;
-        }
-        return {
-          id: undefined,
-          item: catalogoItem.item,
-          tipoContratacao: catalogoItem.tipo_contratacao || "Serviço",
-          unidadeDemandante: siglaUpper,
-          objeto: catalogoItem.objeto || "",
-          justificativa: "",
-          previsaoInicio: catalogoItem.previsao_inicio || undefined,
-          estimativaValor: catalogoItem.estimativa_valor || 0,
-          dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
-          grauPrioridade: catalogoItem.grau_prioridade || "Baixo",
-          vinculacao: catalogoItem.vinculacao || "Não",
-          dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
-          status: catalogoItem.status || "rascunho",
-          contrato: catalogoItem.contrato,
-          contratada: catalogoItem.contratada,
-          observacao: catalogoItem.observacao || "",
-          gerencia: siglaUpper,
-          diretoriaSigla: siglaUpper,
-        } as unknown as ServicoItem;
-      });
+      return (servicosCatalogoData as any[])
+        .filter((catalogoItem) => !isNovoTipo(catalogoItem.tipo_contratacao))
+        .map((catalogoItem) => {
+          const servicoDb = servicosDaDiretoria.find(s => String(s.item).trim() === String(catalogoItem.item).trim() || (Number(s.item) > 0 && Number(s.item) === Number(catalogoItem.item)));
+          if (servicoDb) {
+            return {
+              ...servicoDb,
+              objeto: catalogoItem.objeto || servicoDb.objeto,
+              tipoContratacao: catalogoItem.tipo_contratacao || servicoDb.tipoContratacao,
+              estimativaValor: (catalogoItem.estimativa_valor !== undefined && catalogoItem.estimativa_valor > 0)
+                ? catalogoItem.estimativa_valor
+                : servicoDb.estimativaValor,
+              grauPrioridade: catalogoItem.grau_prioridade || servicoDb.grauPrioridade,
+              vinculacao: catalogoItem.vinculacao || servicoDb.vinculacao,
+              contrato: catalogoItem.contrato !== undefined ? catalogoItem.contrato : servicoDb.contrato,
+              contratada: catalogoItem.contratada || servicoDb.contratada,
+              dependenciaDescricao: catalogoItem.dependencia_descricao !== undefined ? catalogoItem.dependencia_descricao : servicoDb.dependenciaDescricao,
+              justificativa: servicoDb.justificativa || catalogoItem.justificativa || "",
+            };
+          }
+          return {
+            id: undefined,
+            item: catalogoItem.item,
+            tipoContratacao: catalogoItem.tipo_contratacao || "Serviço",
+            unidadeDemandante: siglaUpper,
+            objeto: catalogoItem.objeto || "",
+            justificativa: catalogoItem.justificativa || "",
+            previsaoInicio: catalogoItem.previsao_inicio || undefined,
+            estimativaValor: catalogoItem.estimativa_valor || 0,
+            dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
+            grauPrioridade: catalogoItem.grau_prioridade || "Baixo",
+            vinculacao: catalogoItem.vinculacao || "Não",
+            dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
+            status: catalogoItem.status || "rascunho",
+            contrato: catalogoItem.contrato,
+            contratada: catalogoItem.contratada,
+            observacao: catalogoItem.observacao || "",
+            gerencia: siglaUpper,
+            diretoriaSigla: siglaUpper,
+          } as unknown as ServicoItem;
+        });
     } else if (selectedOption === "servicos_novos") {
-      return servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()));
+      const catalogoNovos = (servicosCatalogoData as any[])
+        .filter((catalogoItem) => isNovoTipo(catalogoItem.tipo_contratacao))
+        .map((catalogoItem) => {
+          const servicoDb = servicosDaDiretoria.find(s => Number(s.item) === Number(catalogoItem.item));
+          if (servicoDb) {
+            return {
+              ...servicoDb,
+              objeto: catalogoItem.objeto || servicoDb.objeto,
+              tipoContratacao: "Novo",
+              estimativaValor: (catalogoItem.estimativa_valor !== undefined && catalogoItem.estimativa_valor > 0)
+                ? catalogoItem.estimativa_valor
+                : servicoDb.estimativaValor,
+              grauPrioridade: catalogoItem.grau_prioridade || servicoDb.grauPrioridade,
+              vinculacao: catalogoItem.vinculacao || servicoDb.vinculacao,
+              contrato: catalogoItem.contrato !== undefined ? catalogoItem.contrato : servicoDb.contrato,
+              contratada: catalogoItem.contratada || servicoDb.contratada,
+              dependenciaDescricao: catalogoItem.dependencia_descricao !== undefined ? catalogoItem.dependencia_descricao : servicoDb.dependenciaDescricao,
+              justificativa: servicoDb.justificativa || catalogoItem.justificativa || "",
+            };
+          }
+          return {
+            id: undefined,
+            item: catalogoItem.item,
+            tipoContratacao: "Novo",
+            unidadeDemandante: siglaUpper,
+            objeto: catalogoItem.objeto || "",
+            justificativa: catalogoItem.justificativa || "",
+            previsaoInicio: catalogoItem.previsao_inicio || undefined,
+            estimativaValor: catalogoItem.estimativa_valor || 0,
+            dotacaoOrcamentaria: catalogoItem.dotacao_orcamentaria || 0,
+            grauPrioridade: catalogoItem.grau_prioridade || "Médio",
+            vinculacao: catalogoItem.vinculacao || "Não",
+            dependenciaDescricao: catalogoItem.dependencia_descricao || undefined,
+            status: catalogoItem.status || "rascunho",
+            observacao: catalogoItem.observacao || "",
+            gerencia: siglaUpper,
+            diretoriaSigla: siglaUpper,
+            contrato: catalogoItem.contrato,
+            contratada: catalogoItem.contratada,
+          } as unknown as ServicoItem;
+        });
+      const catalogoNovosItemsSet = new Set(catalogoNovos.map(s => Number(s.item)));
+      const customNovos = servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()) && !catalogoNovosItemsSet.has(Number(s.item)));
+      return [...catalogoNovos, ...customNovos];
     }
     return [];
   }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet, gerenciaMap]);
@@ -940,11 +1038,46 @@ const DiretoriaAprovacao = () => {
       return found ? found.contratada : null;
     };
 
+    const catalogoMapByItem = new Map<string, any>();
+    const catalogoMapById = new Map<string, any>();
+    (servicosCatalogoData as any[]).forEach((c) => {
+      if (c.id) catalogoMapById.set(String(c.id).toLowerCase(), c);
+      if (c.item !== undefined && c.item !== null && c.item !== "") {
+        catalogoMapByItem.set(String(c.item).trim(), c);
+        const parsed = parseInt(c.item, 10);
+        if (!isNaN(parsed)) catalogoMapByItem.set(String(parsed), c);
+      }
+    });
+
     return servicosData
       .filter((s: ServicoItem) => s.status !== "rascunho")
       .map((s: ServicoItem) => {
         const rawG = s.gerencia || (s as any).gerencia_id;
         const resolvedGer = gerenciaMap[rawG] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) || s.gerencia;
+        
+        const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
+        const catItem = (s.id && catalogoMapById.get(String(s.id).toLowerCase())) || (itemKey ? catalogoMapByItem.get(itemKey) : null);
+
+        if (catItem) {
+          return {
+            ...s,
+            gerencia: resolvedGer,
+            objeto: (catItem.objeto && String(catItem.objeto).trim().length > 0) ? catItem.objeto : s.objeto,
+            tipoContratacao: catItem.tipo_contratacao || catItem.tipoContratacao || s.tipoContratacao || "Serviço",
+            estimativaValor: (catItem.estimativa_valor !== undefined && catItem.estimativa_valor !== null && Number(catItem.estimativa_valor) > 0)
+              ? Number(catItem.estimativa_valor)
+              : s.estimativaValor,
+            dotacaoOrcamentaria: (catItem.dotacao_orcamentaria !== undefined && catItem.dotacao_orcamentaria !== null && Number(catItem.dotacao_orcamentaria) > 0)
+              ? Number(catItem.dotacao_orcamentaria)
+              : (s.dotacaoOrcamentaria || s.estimativaValor || 0),
+            grauPrioridade: catItem.grau_prioridade || catItem.grauPrioridade || s.grauPrioridade || "Baixo",
+            vinculacao: catItem.vinculacao || s.vinculacao || "Não",
+            dependenciaDescricao: catItem.dependencia_descricao !== undefined ? catItem.dependencia_descricao : s.dependenciaDescricao,
+            contrato: catItem.contrato !== undefined ? catItem.contrato : s.contrato,
+            contratada: catItem.contratada || s.contratada || getContratadaFallback(catItem.contrato || s.contrato),
+          };
+        }
+
         return {
           ...s,
           gerencia: resolvedGer,
@@ -2456,7 +2589,7 @@ const DiretoriaAprovacao = () => {
 
   if (isDiretoriasLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-foreground mb-4">Carregando diretoria...</h1>
         </div>
@@ -2466,7 +2599,7 @@ const DiretoriaAprovacao = () => {
 
   if (!diretoria) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-foreground mb-4">
             {isDiretoriasError ? "Erro ao carregar diretorias" : "Diretoria não encontrada"}
@@ -2479,7 +2612,7 @@ const DiretoriaAprovacao = () => {
 
   if (isPeriodExpired) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative flex items-center justify-center p-4 z-50">
         <div className="bg-white p-8 rounded-xl shadow-lg border max-w-lg w-full text-center relative z-10">
           <div className="mx-auto bg-destructive/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
             <Lock className="h-10 w-10 text-destructive" />
@@ -2511,7 +2644,7 @@ const DiretoriaAprovacao = () => {
   // Tela de seleção: Aquisição ou Serviços
   if (!selectedOption) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -2533,7 +2666,7 @@ const DiretoriaAprovacao = () => {
           />
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-8">
+          <div className="bg-linear-to-r from-blue-700 to-blue-900 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(diretoria.sigla) && (
@@ -2641,7 +2774,7 @@ const DiretoriaAprovacao = () => {
   // Tela de seleção: Serviços Existentes ou Novos Serviços (Diretoria)
   if (selectedOption === "servicos") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -2664,7 +2797,7 @@ const DiretoriaAprovacao = () => {
           />
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-8">
+          <div className="bg-linear-to-r from-blue-700 to-blue-900 px-6 py-8">
             <div className="max-w-7xl mx-auto text-center">
               <div className="flex items-center justify-center gap-3 mb-4">
                 {getIconPath(diretoria?.sigla) && (
@@ -2687,7 +2820,7 @@ const DiretoriaAprovacao = () => {
                     setSelectedOption("servicos_existentes");
                     setApprovalTab("servicos");
                   }}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-blue-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-80"
                 >
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
@@ -2713,7 +2846,7 @@ const DiretoriaAprovacao = () => {
                     setSelectedOption("servicos_novos");
                     setApprovalTab("servicos");
                   }}
-                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-[320px]"
+                  className="group bg-card rounded-xl border-2 border-border hover:border-green-500 hover:shadow-xl transition-all duration-200 p-8 text-center flex flex-col items-center justify-between min-h-80"
                 >
                   <div className="mb-4 flex justify-center w-full">
                     <div className="w-48 h-32 rounded-lg overflow-hidden flex items-center justify-center transition-colors">
@@ -2888,7 +3021,7 @@ const DiretoriaAprovacao = () => {
                         value={servico.grauPrioridade}
                         onValueChange={(value) => handleUpdateServicoGrauPrioridade(servico, value as GrauPrioridade)}
                       >
-                        <SelectTrigger className="w-[150px] h-8">
+                        <SelectTrigger className="w-37.5 h-8">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -2979,7 +3112,7 @@ const DiretoriaAprovacao = () => {
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
         <div
           className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
           style={{ top: "200px" }}
@@ -3040,7 +3173,7 @@ const DiretoriaAprovacao = () => {
             }
           />
 
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-6">
+          <div className="bg-linear-to-r from-blue-600 to-blue-800 px-6 py-6">
             <div className="max-w-7xl mx-auto">
               <div className="flex items-center gap-3 mb-2">
                 {getIconPath(siglaUpper) && (
@@ -3111,7 +3244,7 @@ const DiretoriaAprovacao = () => {
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">Gerência responsável:</span>
                     <Select value={ownServicosGerenciaId} onValueChange={(v) => { setOwnServicosGerenciaId(v); setOwnCurrentPage(1); }}>
-                      <SelectTrigger className="w-[240px] bg-card text-sm h-9">
+                      <SelectTrigger className="w-60 bg-card text-sm h-9">
                         <SelectValue placeholder="Selecione a gerência" />
                       </SelectTrigger>
                       <SelectContent>
@@ -3266,7 +3399,7 @@ const DiretoriaAprovacao = () => {
             {/* Filtros para Recebidos */}
             <div className="px-6 py-4">
               <div className="flex flex-wrap items-center gap-4">
-                <div className="relative flex-1 min-w-[240px] max-w-md">
+                <div className="relative flex-1 min-w-60 max-w-md">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Pesquisar por item, objeto, justificativa ou gerência..."
@@ -3287,7 +3420,7 @@ const DiretoriaAprovacao = () => {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Gerência:</span>
                   <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
-                    <SelectTrigger className="w-[200px]">
+                    <SelectTrigger className="w-50">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -3490,22 +3623,22 @@ const DiretoriaAprovacao = () => {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        className="gap-2"
-                        onClick={exportServicosToPDF}
+                        className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                        onClick={exportServicosToExcel}
                         disabled={servicosFiltradasPorStatus.length === 0}
                       >
-                        <FileText className="h-4 w-4" />
-                        Exportar PDF
+                        <FileSpreadsheet className="h-4 w-4 text-slate-700" />
+                        <span>Excel</span>
                       </Button>
                       <Button 
                         size="sm" 
                         variant="outline"
-                        className="gap-2"
-                        onClick={exportServicosToExcel}
+                        className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                        onClick={exportServicosToPDF}
                         disabled={servicosFiltradasPorStatus.length === 0}
                       >
-                        <Download className="h-4 w-4" />
-                        Exportar Excel
+                        <FileDown className="h-4 w-4 text-slate-700" />
+                        <span>PDF</span>
                       </Button>
                     </div>
                   </div>
@@ -3777,7 +3910,7 @@ const DiretoriaAprovacao = () => {
     }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 relative">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 to-blue-100 relative">
       <div
         className="fixed inset-0 flex items-center justify-center pointer-events-none z-0"
         style={{ top: "200px" }}
@@ -3837,7 +3970,7 @@ const DiretoriaAprovacao = () => {
         }
       />
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-900 px-6 py-6">
+      <div className="bg-linear-to-r from-blue-700 to-blue-900 px-6 py-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center gap-3 mb-2">
             {getIconPath(diretoria.sigla) && (
@@ -3896,7 +4029,7 @@ const DiretoriaAprovacao = () => {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Gerência responsável:</span>
               <Select value={ownGerenciaId} onValueChange={(v) => { setOwnGerenciaId(v); setOwnCurrentPage(1); }}>
-                <SelectTrigger className="w-[240px] bg-card">
+                <SelectTrigger className="w-60 bg-card">
                   <SelectValue placeholder="Selecione a gerência" />
                 </SelectTrigger>
                 <SelectContent>
@@ -4114,7 +4247,7 @@ const DiretoriaAprovacao = () => {
       {/* Filtros */}
       <div className="px-6 py-4">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
+          <div className="relative flex-1 min-w-60 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Pesquisar por código, descrição ou gerência..."
@@ -4135,7 +4268,7 @@ const DiretoriaAprovacao = () => {
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Gerência:</span>
             <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="w-50">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -4151,7 +4284,7 @@ const DiretoriaAprovacao = () => {
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Categoria:</span>
             <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="w-50">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -4373,22 +4506,22 @@ const DiretoriaAprovacao = () => {
                 <Button 
                   size="sm" 
                   variant="outline"
-                  className="gap-2"
-                  onClick={exportToPDF}
+                  className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                  onClick={exportToExcel}
                   disabled={recebidosTableItems.length === 0}
                 >
-                  <FileText className="h-4 w-4" />
-                  Exportar PDF
+                  <FileSpreadsheet className="h-4 w-4 text-slate-700" />
+                  <span>Excel</span>
                 </Button>
                 <Button 
                   size="sm" 
                   variant="outline"
-                  className="gap-2"
-                  onClick={exportToExcel}
+                  className="bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-sm gap-2 rounded-lg font-medium px-3.5 py-1.5 h-9 transition-colors"
+                  onClick={exportToPDF}
                   disabled={recebidosTableItems.length === 0}
                 >
-                  <Download className="h-4 w-4" />
-                  Exportar Excel
+                  <FileDown className="h-4 w-4 text-slate-700" />
+                  <span>PDF</span>
                 </Button>
               </div>
             </div>

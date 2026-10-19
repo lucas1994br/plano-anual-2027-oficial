@@ -356,6 +356,7 @@ export function AdminServicosControl() {
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast.success("Serviço criado e distribuído com sucesso.");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Não foi possível criar o serviço.";
@@ -414,6 +415,7 @@ export function AdminServicosControl() {
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast.success("Serviço atualizado com sucesso.");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Não foi possível atualizar o serviço.";
@@ -433,6 +435,7 @@ export function AdminServicosControl() {
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast.success("Serviço removido com sucesso.");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Não foi possível remover o serviço.";
@@ -456,6 +459,7 @@ export function AdminServicosControl() {
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast.success(`${selectedIds.length} serviços removidos com sucesso.`);
     } catch (_error: unknown) {
       toast.error("Ocorreu um erro ao excluir um ou mais serviços.");
@@ -487,6 +491,7 @@ export function AdminServicosControl() {
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
       queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
       toast.success(`${selectedIds.length} serviços atualizados com sucesso.`);
     } catch (_error: unknown) {
       toast.error("Ocorreu um erro ao atualizar um ou mais serviços.");

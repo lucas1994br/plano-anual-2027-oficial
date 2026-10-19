@@ -83,7 +83,8 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
   const { data: servicosCatalogoData = [], isLoading: isLoadingServicosCatalogo } = useQuery<any[]>({
     queryKey: ["servicos-catalogo"],
     queryFn: () => getServicosCatalogo(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
+    refetchOnMount: true,
   });
 
   const orcamentoConfig = useMemo(() => {
@@ -103,7 +104,8 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
   const { data: catalogoData = [], isLoading: isLoadingCatalogo } = useQuery<any[]>({
     queryKey: ["itens-catalogo"],
     queryFn: () => getItensCatalogo(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
+    refetchOnMount: true,
   });
 
   const isAquisicaoLoading = isLoadingDiretorias || isLoadingGerencias || isLoadingPeriodos || isLoadingCatalogo || (!!gerenciaAtual && !!periodAtivo && isLoadingSolicitacoes);
