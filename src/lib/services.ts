@@ -74,6 +74,13 @@ export function updateCatalogCache(items: any[]) {
   });
 }
 
+export function removeFromCatalogCache(id?: string, codigo?: number) {
+  if (id) memoryCatalogById.delete(String(id).trim().toLowerCase());
+  if (codigo !== undefined && codigo !== null && !isNaN(Number(codigo))) {
+    memoryCatalogByCode.delete(Number(codigo));
+  }
+}
+
 function mapDbToPlanItem(s: any): PlanItem {
   if (!s) return s;
   const unitVal = parseSafeNumber(s.valor_unitario ?? s.item?.valor_unitario, 0);
@@ -1628,7 +1635,7 @@ export async function validateAccessCode(
 
 // ============ ITENS CATÁLOGO ============
 
-export default async function getItensCatalogo(): Promise<unknown[]> {
+export async function getItensCatalogo(): Promise<unknown[]> {
   if (gs.isGoogleSheetsActive()) {
     try {
       const items = await gs.gsGetItensCatalogo();
@@ -1703,6 +1710,7 @@ export default async function getItensCatalogo(): Promise<unknown[]> {
     return [];
   }
 }
+export default getItensCatalogo;
 
 export async function getCategoryBudgetOwnerRules(): Promise<
   Record<string, string>
@@ -2079,10 +2087,11 @@ export async function updateServicoCatalogoAdmin(
 }
 
 export async function deleteServicoCatalogoAdmin(
-  servicoId: string
+  servicoId: string,
+  item?: number
 ): Promise<unknown> {
   if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicoCatalogo(servicoId);
+    await gs.gsDeleteServicoCatalogo(servicoId, item);
     await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
     return { success: true };
   }
@@ -2111,16 +2120,49 @@ export async function deleteServicoCatalogoAdmin(
   return data;
 }
 
+export async function updateServicosCatalogoBulkAdmin(
+  items: Array<{
+    id?: string;
+    item: number;
+    tipo_contratacao?: string;
+    objeto?: string;
+    contrato?: string | null;
+    contratada?: string | null;
+    grau_prioridade?: string;
+    vinculacao?: "Sim" | "Não";
+    diretoria_id?: string;
+    gerencia_id?: string | null;
+    estimativa_valor?: number;
+    justificativa?: string | null;
+    dependencia_descricao?: string | null;
+    ativo?: boolean;
+  }>
+): Promise<unknown> {
+  if (!items || items.length === 0) return { success: true };
+  if (gs.isGoogleSheetsActive()) {
+    const res = await gs.gsUpdateServicosCatalogoBulk(items);
+    await registrarLogAtividadeBulk("EDITAR", "servicos_catalogo", items.map(i => i.id || String(i.item)), { acao: "updateServicosCatalogoBulkAdmin", count: items.length });
+    return res;
+  }
+  return Promise.all(items.map(servico => {
+    if (servico.id) {
+      return updateServicoCatalogoAdmin(servico.id, servico as any);
+    }
+    return supabase.from("servicos_catalogo").update(servico).eq("item", servico.item);
+  }));
+}
+
 export async function deleteServicosCatalogoBulkAdmin(
-  servicoIds: string[]
+  servicoIds: string[],
+  items?: number[]
 ): Promise<unknown> {
   if (!servicoIds || servicoIds.length === 0) return { success: true };
   if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteServicosCatalogoBulk(servicoIds);
+    await gs.gsDeleteServicosCatalogoBulk(servicoIds, items);
     await registrarLogAtividadeBulk("EXCLUIR", "servicos_catalogo", servicoIds, { acao: "deleteServicosCatalogoBulkAdmin" });
     return { success: true };
   }
-  return Promise.all(servicoIds.map(id => deleteServicoCatalogoAdmin(id)));
+  return Promise.all(servicoIds.map((id, idx) => deleteServicoCatalogoAdmin(id, items?.[idx])));
 }
 
 export async function deleteServicoCatalogo(
@@ -2842,10 +2884,14 @@ export async function updateItemCatalogoAdmin(
 }
 
 export async function deleteItemCatalogoAdmin(
-  itemId: string
+  itemId: string,
+  codigo?: number
 ): Promise<unknown> {
+  const resolvedCode = codigo ?? memoryCatalogById.get(String(itemId).trim().toLowerCase())?.codigo;
+  removeFromCatalogCache(itemId, resolvedCode);
+
   if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteItemCatalogo(itemId);
+    await gs.gsDeleteItemCatalogo(itemId, resolvedCode);
     await registrarLogAtividade("EXCLUIR", "itens_catalogo", itemId);
     return { success: true };
   }
@@ -2874,16 +2920,44 @@ export async function deleteItemCatalogoAdmin(
   return data;
 }
 
+export async function updateItensCatalogoBulkAdmin(
+  items: Array<{
+    id?: string;
+    codigo: number;
+    descricao?: string;
+    categoria?: string;
+    unidade?: string;
+    valor_unitario?: number;
+  }>
+): Promise<unknown> {
+  if (!items || items.length === 0) return { success: true };
+  if (gs.isGoogleSheetsActive()) {
+    const res = await gs.gsUpdateItensCatalogoBulk(items);
+    await registrarLogAtividadeBulk("EDITAR", "itens_catalogo", items.map(i => i.id || String(i.codigo)), { acao: "updateItensCatalogoBulkAdmin", count: items.length });
+    return res;
+  }
+  return Promise.all(items.map(item => {
+    if (item.id) {
+      return updateItemCatalogoAdmin(item.id, item as any);
+    }
+    return supabase.from("itens_catalogo").update(item).eq("codigo", item.codigo);
+  }));
+}
+
 export async function deleteItensCatalogoBulkAdmin(
-  itemIds: string[]
+  itemIds: string[],
+  codigos?: number[]
 ): Promise<unknown> {
   if (!itemIds || itemIds.length === 0) return { success: true };
+  const resolvedCodigos = codigos ?? itemIds.map(id => memoryCatalogById.get(String(id).trim().toLowerCase())?.codigo).filter(Boolean);
+  itemIds.forEach((id, idx) => removeFromCatalogCache(id, resolvedCodigos?.[idx]));
+
   if (gs.isGoogleSheetsActive()) {
-    await gs.gsDeleteItensCatalogoBulk(itemIds);
+    await gs.gsDeleteItensCatalogoBulk(itemIds, resolvedCodigos);
     await registrarLogAtividadeBulk("EXCLUIR", "itens_catalogo", itemIds, { acao: "deleteItensCatalogoBulkAdmin" });
     return { success: true };
   }
-  return Promise.all(itemIds.map(id => deleteItemCatalogoAdmin(id)));
+  return Promise.all(itemIds.map((id, idx) => deleteItemCatalogoAdmin(id, resolvedCodigos?.[idx])));
 }
 
 export async function criarOrcamento(

@@ -267,25 +267,26 @@ export const gsCreateServicoCatalogo = (servico: any) =>
 export const gsUpdateServicoCatalogo = (id: string, updates: any) =>
   gsPost("updateServicoCatalogo", { id, updates });
 
-export const gsDeleteServicoCatalogo = (id: string) =>
-  gsPost("deleteServicoCatalogo", { id });
+export const gsDeleteServicoCatalogo = (id: string, item?: number) =>
+  gsPost("deleteServicoCatalogo", { id, ...(item !== undefined && item !== null ? { item } : {}) });
 
-export const gsDeleteServicosCatalogoBulk = (ids: string[]) =>
-  gsPost("deleteServicosCatalogoBulk", { ids });
+export const gsDeleteServicosCatalogoBulk = (ids: string[], items?: number[]) =>
+  gsPost("deleteServicosCatalogoBulk", { ids, ...(items && items.length > 0 ? { items } : {}) });
 
 export const gsUpdateServicosCatalogoBulk = (items: any[]) =>
   gsPost("updateServicosCatalogoBulk", { items });
 
 // Itens Catálogo (Materiais)
+
 export const gsGetItensCatalogo = () => gsGet("getItensCatalogo");
 export const gsCreateItemCatalogo = (item: any) =>
   gsPost("createItemCatalogo", { item });
 export const gsUpdateItemCatalogo = (id: string, updates: any) =>
   gsPost("updateItemCatalogo", { id, updates });
-export const gsDeleteItemCatalogo = (id: string) =>
-  gsPost("deleteItemCatalogo", { id });
-export const gsDeleteItensCatalogoBulk = (ids: string[]) =>
-  gsPost("deleteItensCatalogoBulk", { ids });
+export const gsDeleteItemCatalogo = (id: string, codigo?: number) =>
+  gsPost("deleteItemCatalogo", { id, ...(codigo !== undefined && codigo !== null ? { codigo } : {}) });
+export const gsDeleteItensCatalogoBulk = (ids: string[], codigos?: number[]) =>
+  gsPost("deleteItensCatalogoBulk", { ids, ...(codigos && codigos.length > 0 ? { codigos } : {}) });
 export const gsUpdateItensCatalogoBulk = (items: any[]) =>
   gsPost("updateItensCatalogoBulk", { items });
 

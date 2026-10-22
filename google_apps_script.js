@@ -609,20 +609,47 @@ function doPost(e) {
       if (updates.valor_unitario !== undefined) updates.valor_unitario = parseSafeNumberGAS(updates.valor_unitario, 0);
       if (updates.valorUnitario !== undefined) updates.valor_unitario = parseSafeNumberGAS(updates.valorUnitario, 0);
       const updated = updateRow(SHEETS.ITENS_CATALOGO, body.id, updates);
-      propagateItemCatalogoToSolicitacoes(body.id, updates, updates.codigo);
+      const finalCodigo = updates.codigo || (updated && updated.codigo) || body.codigo || lookupCodigoFromCatalog(body.id);
+      propagateItemCatalogoToSolicitacoes(body.id, updates, finalCodigo);
       return jsonResponse({ success: true, data: updated });
     }
 
     if (action === "deleteItemCatalogo") {
+      const resolvedCodigo = body.codigo || lookupCodigoFromCatalog(body.id);
+      deleteItemFromSolicitacoes(body.id, resolvedCodigo);
       const success = deleteRow(SHEETS.ITENS_CATALOGO, body.id);
-      deleteItemFromSolicitacoes(body.id, body.codigo);
       return jsonResponse({ success });
     }
 
     if (action === "deleteItensCatalogoBulk") {
-      const ids = body.ids || [];
+      let ids = body.ids || [];
+      const codigos = body.codigos || [];
+      if (ids.length === 0 && codigos.length > 0) {
+        ids = codigos.map(String);
+      }
+      const codMap = {};
+      const catSheet = getSs().getSheetByName(SHEETS.ITENS_CATALOGO);
+      if (catSheet && catSheet.getLastRow() > 1) {
+        const catVals = catSheet.getDataRange().getValues();
+        const headers = catVals[0].map(h => String(h).trim().toLowerCase());
+        const idIdx = headers.indexOf("id");
+        const codIdx = headers.indexOf("codigo");
+        if (idIdx !== -1 && codIdx !== -1) {
+          for (let i = 1; i < catVals.length; i++) {
+            const rowId = String(catVals[i][idIdx] || "").trim().toLowerCase();
+            const rowCod = catVals[i][codIdx];
+            if (rowId) codMap[rowId] = rowCod;
+            if (rowCod !== undefined && rowCod !== null && rowCod !== "") {
+              codMap[String(rowCod).trim().toLowerCase()] = rowCod;
+            }
+          }
+        }
+      }
+      ids.forEach((id, idx) => {
+        const cod = codigos[idx] !== undefined ? codigos[idx] : codMap[String(id).trim().toLowerCase()];
+        deleteItemFromSolicitacoes(id, cod);
+      });
       const count = deleteRowsBulk(SHEETS.ITENS_CATALOGO, ids);
-      ids.forEach(id => deleteItemFromSolicitacoes(id));
       return jsonResponse({ success: true, deletedCount: count });
     }
 
@@ -630,7 +657,7 @@ function doPost(e) {
       const updates = body.items || [];
       const count = updateRowsBulk(SHEETS.ITENS_CATALOGO, updates);
       updates.forEach(u => {
-        if (u && u.id) propagateItemCatalogoToSolicitacoes(u.id, u, u.codigo);
+        if (u) propagateItemCatalogoToSolicitacoes(u.id, u, u.codigo || (u.id ? lookupCodigoFromCatalog(u.id) : undefined));
       });
       return jsonResponse({ success: true, updatedCount: count });
     }
@@ -647,6 +674,7 @@ function doPost(e) {
       if (item.estimativa_valor !== undefined) item.estimativa_valor = parseSafeNumberGAS(item.estimativa_valor, 0);
       if (!item.created_at) item.created_at = new Date().toISOString();
       const saved = appendRow(SHEETS.SERVICOS_CATALOGO, item);
+      distributeNewCatalogServicoToServicos(saved || item);
       return jsonResponse({ success: true, data: saved });
     }
 
@@ -655,21 +683,47 @@ function doPost(e) {
       if (updates.item !== undefined) updates.item = parseInt(updates.item, 10) || 1;
       if (updates.estimativa_valor !== undefined) updates.estimativa_valor = parseSafeNumberGAS(updates.estimativa_valor, 0);
       const updated = updateRow(SHEETS.SERVICOS_CATALOGO, body.id, updates);
-      const finalItem = updates.item || (updated && updated.item) || body.item;
+      const finalItem = updates.item || (updated && updated.item) || body.item || lookupItemFromServicosCatalog(body.id);
       propagateServicoCatalogoToServicos(body.id, updates, finalItem);
       return jsonResponse({ success: true, data: updated });
     }
 
     if (action === "deleteServicoCatalogo") {
+      const resolvedItem = body.item || lookupItemFromServicosCatalog(body.id);
+      deleteServicoFromServicos(body.id, resolvedItem);
       const success = deleteRow(SHEETS.SERVICOS_CATALOGO, body.id);
-      deleteServicoFromServicos(body.id, body.item);
       return jsonResponse({ success });
     }
 
     if (action === "deleteServicosCatalogoBulk") {
-      const ids = body.ids || [];
+      let ids = body.ids || [];
+      const items = body.items || [];
+      if (ids.length === 0 && items.length > 0) {
+        ids = items.map(String);
+      }
+      const itemMap = {};
+      const catSheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
+      if (catSheet && catSheet.getLastRow() > 1) {
+        const catVals = catSheet.getDataRange().getValues();
+        const headers = catVals[0].map(h => String(h).trim().toLowerCase());
+        const idIdx = headers.indexOf("id");
+        const itemIdx = headers.indexOf("item");
+        if (idIdx !== -1 && itemIdx !== -1) {
+          for (let i = 1; i < catVals.length; i++) {
+            const rowId = String(catVals[i][idIdx] || "").trim().toLowerCase();
+            const rowItem = catVals[i][itemIdx];
+            if (rowId) itemMap[rowId] = rowItem;
+            if (rowItem !== undefined && rowItem !== null && rowItem !== "") {
+              itemMap[String(rowItem).trim().toLowerCase()] = rowItem;
+            }
+          }
+        }
+      }
+      ids.forEach((id, idx) => {
+        const it = items[idx] !== undefined ? items[idx] : itemMap[String(id).trim().toLowerCase()];
+        deleteServicoFromServicos(id, it);
+      });
       const count = deleteRowsBulk(SHEETS.SERVICOS_CATALOGO, ids);
-      ids.forEach(id => deleteServicoFromServicos(id));
       return jsonResponse({ success: true, deletedCount: count });
     }
 
@@ -677,7 +731,7 @@ function doPost(e) {
       const updates = body.items || [];
       const count = updateRowsBulk(SHEETS.SERVICOS_CATALOGO, updates);
       updates.forEach(u => {
-        if (u && u.id) propagateServicoCatalogoToServicos(u.id, u, u.item);
+        if (u) propagateServicoCatalogoToServicos(u.id, u, u.item || (u.id ? lookupItemFromServicosCatalog(u.id) : undefined));
       });
       return jsonResponse({ success: true, updatedCount: count });
     }
@@ -1584,51 +1638,41 @@ function updateRowsBulk(sheetName, updatesArray) {
 
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
   const idColIdx = headers.indexOf("id");
-  if (idColIdx === -1) return 0;
+  const codColIdx = headers.indexOf("codigo");
+  const itemColIdx = headers.indexOf("item");
+  if (idColIdx === -1 && codColIdx === -1 && itemColIdx === -1) return 0;
 
   const updateMap = {};
+  const codUpdateMap = {};
+  const itemUpdateMap = {};
   updatesArray.forEach(u => {
     if (u && u.id) updateMap[String(u.id).trim().toLowerCase()] = u;
+    if (u && u.codigo !== undefined && u.codigo !== null && u.codigo !== "") {
+      codUpdateMap[String(u.codigo).trim().toLowerCase()] = u;
+    }
+    if (u && u.item !== undefined && u.item !== null && u.item !== "") {
+      itemUpdateMap[String(u.item).trim().toLowerCase()] = u;
+    }
   });
 
-  // Lê apenas a coluna de IDs para identificar linhas afetadas
-  const idValues = sheet.getRange(2, idColIdx + 1, lastRow - 1, 1).getValues();
-  const matchedRows = [];
-
-  for (let i = 0; i < idValues.length; i++) {
-    const rowId = String(idValues[i][0] || "").trim().toLowerCase();
-    if (updateMap[rowId]) {
-      matchedRows.push({ rowNum: i + 2, updates: updateMap[rowId] });
-    }
-  }
-
-  if (matchedRows.length === 0) return 0;
-
-  // Se poucas linhas ou planilha grande, atualiza diretamente cada célula sem reescrever a planilha inteira
-  if (matchedRows.length <= 100 || lastRow > 5000) {
-    matchedRows.forEach(item => {
-      Object.keys(item.updates).forEach(key => {
-        if (key.toLowerCase() === "id") return;
-        const colIdx = headers.indexOf(key.toLowerCase());
-        if (colIdx !== -1) {
-          sheet.getRange(item.rowNum, colIdx + 1).setValue(formatCellSafe(key, item.updates[key]));
-        }
-      });
-    });
-    return matchedRows.length;
-  }
-
-  // Para planilhas menores, atualiza em matriz de dados
   const range = sheet.getDataRange();
   const data = range.getValues();
   let count = 0;
+
   for (let i = 1; i < data.length; i++) {
-    const rowId = String(data[i][idColIdx] || "").trim().toLowerCase();
-    if (updateMap[rowId]) {
-      const updates = updateMap[rowId];
+    const rowId = idColIdx !== -1 ? String(data[i][idColIdx] || "").trim().toLowerCase() : "";
+    const rowCod = codColIdx !== -1 ? String(data[i][codColIdx] || "").trim().toLowerCase() : "";
+    const rowItem = itemColIdx !== -1 ? String(data[i][itemColIdx] || "").trim().toLowerCase() : "";
+
+    const updates = (rowId && updateMap[rowId]) ||
+                    (rowCod && codUpdateMap[rowCod]) ||
+                    (rowItem && itemUpdateMap[rowItem]);
+
+    if (updates) {
       Object.keys(updates).forEach(key => {
-        if (key.toLowerCase() === "id") return;
-        const colIdx = headers.indexOf(key.toLowerCase());
+        const lowerKey = key.toLowerCase();
+        if (lowerKey === "id" && idColIdx !== -1 && data[i][idColIdx]) return;
+        const colIdx = headers.indexOf(lowerKey);
         if (colIdx !== -1) {
           data[i][colIdx] = formatCellSafe(key, updates[key]);
         }
@@ -1636,6 +1680,7 @@ function updateRowsBulk(sheetName, updatesArray) {
       count++;
     }
   }
+
   if (count > 0) {
     range.setValues(data);
   }
@@ -1745,6 +1790,42 @@ function deleteRowsBulk(sheetName, ids) {
 
 // ================= PROPAGAÇÃO CATÁLOGO -> SOLICITAÇÕES E SERVIÇOS =================
 
+function lookupCodigoFromCatalog(catalogId) {
+  if (!catalogId) return null;
+  const sheet = getSs().getSheetByName(SHEETS.ITENS_CATALOGO);
+  if (!sheet || sheet.getLastRow() <= 1) return null;
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0].map(h => String(h).trim().toLowerCase());
+  const idIdx = headers.indexOf("id");
+  const codIdx = headers.indexOf("codigo");
+  if (idIdx === -1 || codIdx === -1) return null;
+  const target = String(catalogId).trim().toLowerCase();
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][idIdx] || "").trim().toLowerCase() === target) {
+      return vals[i][codIdx];
+    }
+  }
+  return null;
+}
+
+function lookupItemFromServicosCatalog(catalogId) {
+  if (!catalogId) return null;
+  const sheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
+  if (!sheet || sheet.getLastRow() <= 1) return null;
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0].map(h => String(h).trim().toLowerCase());
+  const idIdx = headers.indexOf("id");
+  const itemIdx = headers.indexOf("item");
+  if (idIdx === -1 || itemIdx === -1) return null;
+  const target = String(catalogId).trim().toLowerCase();
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][idIdx] || "").trim().toLowerCase() === target) {
+      return vals[i][itemIdx];
+    }
+  }
+  return null;
+}
+
 function distributeNewCatalogItemToSolicitacoes(catalogItem) {
   try {
     const gerencias = getSheetData(SHEETS.GERENCIAS);
@@ -1779,6 +1860,52 @@ function distributeNewCatalogItemToSolicitacoes(catalogItem) {
   }
 }
 
+function distributeNewCatalogServicoToServicos(catalogServico) {
+  try {
+    const gerencias = getSheetData(SHEETS.GERENCIAS);
+    const periodos = getSheetData(SHEETS.PERIODOS);
+    const ativoPeriod = periodos.find(p => p.status === "ativo" || p.status === "aberto" || p.is_active || p.ativo) || periodos[0];
+    if (!ativoPeriod || !gerencias || gerencias.length === 0) return;
+
+    const targetGerencias = catalogServico.gerencia_id
+      ? gerencias.filter(g => String(g.id).toLowerCase() === String(catalogServico.gerencia_id).toLowerCase() || String(g.sigla).toLowerCase() === String(catalogServico.gerencia_id).toLowerCase())
+      : gerencias;
+    const listToDistribute = targetGerencias.length > 0 ? targetGerencias : gerencias;
+
+    const servicos = [];
+    listToDistribute.forEach(g => {
+      servicos.push({
+        id: generateCanonicalUuid(),
+        servico_catalogo_id: catalogServico.id,
+        periodo_id: ativoPeriod.id,
+        diretoria_id: catalogServico.diretoria_id || g.diretoria_id || "",
+        gerencia_id: g.id,
+        item: catalogServico.item || 1,
+        tipo_contratacao: catalogServico.tipo_contratacao || "Serviço",
+        unidade_demandante: g.sigla || "",
+        objeto: catalogServico.objeto || "",
+        justificativa: catalogServico.justificativa || "",
+        previsao_inicio: catalogServico.previsao_inicio || "",
+        estimativa_valor: parseSafeNumberGAS(catalogServico.estimativa_valor, 0),
+        dotacao_orcamentaria: parseSafeNumberGAS(catalogServico.dotacao_orcamentaria || catalogServico.estimativa_valor, 0),
+        grau_prioridade: catalogServico.grau_prioridade || "Médio",
+        vinculacao: catalogServico.vinculacao || "Não",
+        dependencia_descricao: catalogServico.dependencia_descricao || "",
+        contrato: catalogServico.contrato || "",
+        contratada: catalogServico.contratada || "",
+        status: "rascunho",
+        observacao: catalogServico.observacao || "",
+        created_at: new Date().toISOString()
+      });
+    });
+    if (servicos.length > 0) {
+      appendRowsBulk(SHEETS.SERVICOS, servicos);
+    }
+  } catch (err) {
+    Logger.log("Erro ao distribuir novo servico para servicos: " + err);
+  }
+}
+
 function propagateItemCatalogoToSolicitacoes(catalogId, updates, catalogCodigo) {
   try {
     const sheet = getSs().getSheetByName(SHEETS.SOLICITACOES);
@@ -1795,8 +1922,13 @@ function propagateItemCatalogoToSolicitacoes(catalogId, updates, catalogCodigo) 
     const unIdx = headers.indexOf("unidade");
     const valIdx = headers.indexOf("valor_unitario");
 
+    let resolvedCode = catalogCodigo;
+    if ((resolvedCode === undefined || resolvedCode === null || resolvedCode === "") && catalogId) {
+      resolvedCode = lookupCodigoFromCatalog(catalogId);
+    }
+
     const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
-    const targetCode = catalogCodigo !== undefined && catalogCodigo !== null ? String(catalogCodigo).trim() : "";
+    const targetCode = resolvedCode !== undefined && resolvedCode !== null ? String(resolvedCode).trim() : "";
 
     const allValues = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     let hasChanges = false;
@@ -1806,7 +1938,9 @@ function propagateItemCatalogoToSolicitacoes(catalogId, updates, catalogCodigo) 
       const rItemId = itemIdIdx !== -1 ? String(row[itemIdIdx] || "").trim().toLowerCase() : "";
       const rCode = codIdx !== -1 ? String(row[codIdx] || "").trim() : "";
 
-      const match = (targetId && rItemId === targetId) || (targetCode && rCode === targetCode);
+      const match = (targetId && rItemId === targetId) || 
+                    (targetCode && rCode === targetCode) ||
+                    (targetCode && parseInt(rCode, 10) === parseInt(targetCode, 10));
       if (match) {
         if (updates.descricao !== undefined && descIdx !== -1) {
           row[descIdx] = String(updates.descricao).trim();
@@ -1850,10 +1984,14 @@ function deleteItemFromSolicitacoes(catalogId, catalogCodigo) {
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
     const itemIdIdx = headers.indexOf("item_id");
     const codIdx = headers.indexOf("codigo");
-    const statusIdx = headers.indexOf("status");
+
+    let resolvedCode = catalogCodigo;
+    if ((resolvedCode === undefined || resolvedCode === null || resolvedCode === "") && catalogId) {
+      resolvedCode = lookupCodigoFromCatalog(catalogId);
+    }
 
     const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
-    const targetCode = catalogCodigo !== undefined && catalogCodigo !== null ? String(catalogCodigo).trim() : "";
+    const targetCode = resolvedCode !== undefined && resolvedCode !== null ? String(resolvedCode).trim() : "";
 
     const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     const rowsToDelete = [];
@@ -1862,10 +2000,11 @@ function deleteItemFromSolicitacoes(catalogId, catalogCodigo) {
       const row = dataRange[i];
       const rItemId = itemIdIdx !== -1 ? String(row[itemIdIdx] || "").trim().toLowerCase() : "";
       const rCode = codIdx !== -1 ? String(row[codIdx] || "").trim() : "";
-      const rStatus = statusIdx !== -1 ? String(row[statusIdx] || "").trim().toLowerCase() : "rascunho";
 
-      const match = (targetId && rItemId === targetId) || (targetCode && rCode === targetCode);
-      if (match && (rStatus === "rascunho" || rStatus === "")) {
+      const match = (targetId && rItemId === targetId) || 
+                    (targetCode && rCode === targetCode) ||
+                    (targetCode && parseInt(rCode, 10) === parseInt(targetCode, 10));
+      if (match) {
         rowsToDelete.push(i + 2);
       }
     }
@@ -1882,29 +2021,8 @@ function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
   try {
     let resolvedItemNumber = itemNumber;
 
-    // Se itemNumber não foi passado diretamente, tenta recuperar da linha do catálogo
     if ((resolvedItemNumber === undefined || resolvedItemNumber === null || resolvedItemNumber === "") && catalogId) {
-      const catSheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
-      if (catSheet) {
-        const catLastRow = catSheet.getLastRow();
-        const catLastCol = catSheet.getLastColumn();
-        if (catLastRow > 1) {
-          const catHeaders = catSheet.getRange(1, 1, 1, catLastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
-          const catIdCol = catHeaders.indexOf("id");
-          const catItemCol = catHeaders.indexOf("item");
-          if (catItemCol !== -1) {
-            const catVals = catSheet.getRange(2, 1, catLastRow - 1, catLastCol).getValues();
-            for (let i = 0; i < catVals.length; i++) {
-              const rId = catIdCol !== -1 ? String(catVals[i][catIdCol] || "").trim().toLowerCase() : "";
-              const rItem = String(catVals[i][catItemCol] || "").trim();
-              if ((catalogId && rId === String(catalogId).trim().toLowerCase()) || rItem === String(catalogId).trim()) {
-                resolvedItemNumber = catVals[i][catItemCol];
-                break;
-              }
-            }
-          }
-        }
-      }
+      resolvedItemNumber = lookupItemFromServicosCatalog(catalogId);
     }
 
     const sheet = getSs().getSheetByName(SHEETS.SERVICOS);
@@ -1927,13 +2045,35 @@ function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
     const ctdIdx = headers.indexOf("contratada");
     const gerColIdx = headers.indexOf("gerencia_id");
     const dirColIdx = headers.indexOf("diretoria_id");
+    const undIdx = headers.indexOf("unidade_demandante");
     const updIdx = headers.indexOf("updated_at");
+
+    let gerSigla = "";
+    if (updates.gerencia_id) {
+      const gSheet = getSs().getSheetByName(SHEETS.GERENCIAS);
+      if (gSheet && gSheet.getLastRow() > 1) {
+        const gData = gSheet.getDataRange().getValues();
+        const gHeaders = gData[0].map(h => String(h).trim().toLowerCase());
+        const gIdIdx = gHeaders.indexOf("id");
+        const gSiglaIdx = gHeaders.indexOf("sigla");
+        if (gIdIdx !== -1 && gSiglaIdx !== -1) {
+          const targetGId = String(updates.gerencia_id).trim().toLowerCase();
+          for (let g = 1; g < gData.length; g++) {
+            if (String(gData[g][gIdIdx] || "").trim().toLowerCase() === targetGId) {
+              gerSigla = String(gData[g][gSiglaIdx] || "").trim();
+              break;
+            }
+          }
+        }
+      }
+    }
 
     const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
     const targetItem = resolvedItemNumber !== undefined && resolvedItemNumber !== null ? String(resolvedItemNumber).trim() : "";
 
     const allValues = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     let hasChanges = false;
+    let matchCount = 0;
 
     for (let i = 0; i < allValues.length; i++) {
       const row = allValues[i];
@@ -1944,6 +2084,11 @@ function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
                     (targetItem && rItem === targetItem) ||
                     (targetItem && parseInt(rItem, 10) === parseInt(targetItem, 10));
       if (match) {
+        matchCount++;
+        if (catIdIdx !== -1 && !row[catIdIdx] && catalogId) {
+          row[catIdIdx] = catalogId;
+          hasChanges = true;
+        }
         if (updates.objeto !== undefined && objIdx !== -1) {
           row[objIdx] = String(updates.objeto).trim();
           hasChanges = true;
@@ -1984,6 +2129,10 @@ function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
           row[gerColIdx] = String(updates.gerencia_id).trim();
           hasChanges = true;
         }
+        if (gerSigla && undIdx !== -1) {
+          row[undIdx] = gerSigla;
+          hasChanges = true;
+        }
         if (updates.diretoria_id !== undefined && dirColIdx !== -1) {
           row[dirColIdx] = String(updates.diretoria_id).trim();
           hasChanges = true;
@@ -1998,6 +2147,42 @@ function propagateServicoCatalogoToServicos(catalogId, updates, itemNumber) {
     if (hasChanges) {
       sheet.getRange(2, 1, lastRow - 1, lastCol).setValues(allValues);
     }
+
+    if (matchCount === 0 && (catalogId || resolvedItemNumber)) {
+      const pSheet = getSs().getSheetByName(SHEETS.PERIODOS);
+      let activePerId = "";
+      if (pSheet && pSheet.getLastRow() > 1) {
+        const pData = pSheet.getDataRange().getValues();
+        const pHeaders = pData[0].map(h => String(h).trim().toLowerCase());
+        const pIdIdx = pHeaders.indexOf("id");
+        if (pIdIdx !== -1) activePerId = String(pData[1][pIdIdx] || "").trim();
+      }
+
+      const newServicoRow = {
+        id: generateCanonicalUuid(),
+        servico_catalogo_id: catalogId || "",
+        periodo_id: activePerId,
+        diretoria_id: updates.diretoria_id || "",
+        gerencia_id: updates.gerencia_id || "",
+        item: resolvedItemNumber || updates.item || 1,
+        tipo_contratacao: updates.tipo_contratacao || "Serviço",
+        unidade_demandante: gerSigla || "",
+        objeto: updates.objeto || "",
+        justificativa: updates.justificativa || "",
+        previsao_inicio: "",
+        estimativa_valor: parseSafeNumberGAS(updates.estimativa_valor, 0),
+        dotacao_orcamentaria: parseSafeNumberGAS(updates.dotacao_orcamentaria || updates.estimativa_valor, 0),
+        grau_prioridade: updates.grau_prioridade || "Médio",
+        vinculacao: updates.vinculacao || "Não",
+        dependencia_descricao: updates.dependencia_descricao || "",
+        contrato: updates.contrato || "",
+        contratada: updates.contratada || "",
+        status: "rascunho",
+        observacao: "",
+        created_at: new Date().toISOString()
+      };
+      appendRow(SHEETS.SERVICOS, newServicoRow);
+    }
   } catch (err) {
     Logger.log("Erro ao propagar atualizacao para servicos: " + err);
   }
@@ -2007,27 +2192,7 @@ function deleteServicoFromServicos(catalogId, itemNumber) {
   try {
     let resolvedItemNumber = itemNumber;
     if ((resolvedItemNumber === undefined || resolvedItemNumber === null || resolvedItemNumber === "") && catalogId) {
-      const catSheet = getSs().getSheetByName(SHEETS.SERVICOS_CATALOGO);
-      if (catSheet) {
-        const catLastRow = catSheet.getLastRow();
-        const catLastCol = catSheet.getLastColumn();
-        if (catLastRow > 1) {
-          const catHeaders = catSheet.getRange(1, 1, 1, catLastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
-          const catIdCol = catHeaders.indexOf("id");
-          const catItemCol = catHeaders.indexOf("item");
-          if (catItemCol !== -1) {
-            const catVals = catSheet.getRange(2, 1, catLastRow - 1, catLastCol).getValues();
-            for (let i = 0; i < catVals.length; i++) {
-              const rId = catIdCol !== -1 ? String(catVals[i][catIdCol] || "").trim().toLowerCase() : "";
-              const rItem = String(catVals[i][catItemCol] || "").trim();
-              if ((catalogId && rId === String(catalogId).trim().toLowerCase()) || rItem === String(catalogId).trim()) {
-                resolvedItemNumber = catVals[i][catItemCol];
-                break;
-              }
-            }
-          }
-        }
-      }
+      resolvedItemNumber = lookupItemFromServicosCatalog(catalogId);
     }
     const sheet = getSs().getSheetByName(SHEETS.SERVICOS);
     if (!sheet) return;
@@ -2038,7 +2203,6 @@ function deleteServicoFromServicos(catalogId, itemNumber) {
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim().toLowerCase());
     const catIdIdx = headers.indexOf("servico_catalogo_id");
     const itemIdx = headers.indexOf("item");
-    const statusIdx = headers.indexOf("status");
 
     const targetId = catalogId ? String(catalogId).trim().toLowerCase() : "";
     const targetItem = resolvedItemNumber !== undefined && resolvedItemNumber !== null ? String(resolvedItemNumber).trim() : "";
@@ -2050,12 +2214,11 @@ function deleteServicoFromServicos(catalogId, itemNumber) {
       const row = dataRange[i];
       const rCatId = catIdIdx !== -1 ? String(row[catIdIdx] || "").trim().toLowerCase() : "";
       const rItem = itemIdx !== -1 ? String(row[itemIdx] || "").trim() : "";
-      const rStatus = statusIdx !== -1 ? String(row[statusIdx] || "").trim().toLowerCase() : "rascunho";
 
       const match = (targetId && rCatId === targetId) || 
                     (targetItem && rItem === targetItem) ||
                     (targetItem && parseInt(rItem, 10) === parseInt(targetItem, 10));
-      if (match && (rStatus === "rascunho" || rStatus === "")) {
+      if (match) {
         rowsToDelete.push(i + 2);
       }
     }

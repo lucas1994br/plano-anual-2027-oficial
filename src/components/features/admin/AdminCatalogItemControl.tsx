@@ -260,7 +260,7 @@ export function AdminCatalogItemControl() {
 
     setIsDeleting(true);
     try {
-      await deleteItemCatalogoAdmin(deletingItem.id);
+      await deleteItemCatalogoAdmin(deletingItem.id, deletingItem.codigo);
       setDeletingItem(null);
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
@@ -284,7 +284,12 @@ export function AdminCatalogItemControl() {
 
     setIsDeletingBulk(true);
     try {
-      await deleteItensCatalogoBulkAdmin(selectedIds);
+      const selectedCodigos = selectedIds.map(id => {
+        const it = (uniqueItens as ItemCatalogo[]).find(item => item.id === id);
+        return it ? it.codigo : undefined;
+      }).filter((c): c is number => c !== undefined && c > 0);
+
+      await deleteItensCatalogoBulkAdmin(selectedIds, selectedCodigos);
       setSelectedIds([]);
       await refetchItens();
       queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });

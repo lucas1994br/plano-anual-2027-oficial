@@ -135,6 +135,7 @@ export function AdminServicosControl() {
   // Estados de busca e seleção
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [categoriaServico, setCategoriaServico] = useState<"existentes" | "novos" | "todos">("existentes");
   
   // Paginação
   const [currentPage, setCurrentPage] = useState(1);
@@ -142,7 +143,7 @@ export function AdminServicosControl() {
 
   // Formulário de criação
   const [formData, setFormData] = useState({
-    tipo_contratacao: "Novo",
+    tipo_contratacao: "Renovação",
     objeto: "",
     justificativa: "",
     grau_prioridade: "Médio" as GrauPrioridade,
@@ -241,17 +242,33 @@ export function AdminServicosControl() {
     enabled: !!editFormData.diretoria_id && !!editingServico,
   });
 
+  const isNovoServico = (s: ServicoCatalogo) => {
+    const tipo = (s.tipo_contratacao || "").trim().toLowerCase();
+    const itemNum = Number(s.item);
+    return tipo === "novo" || (!isNaN(itemNum) && itemNum >= 9000000);
+  };
+
+  const servicosDaCategoria = useMemo(() => {
+    if (categoriaServico === "existentes") {
+      return (servicos as ServicoCatalogo[]).filter((s) => !isNovoServico(s));
+    }
+    if (categoriaServico === "novos") {
+      return (servicos as ServicoCatalogo[]).filter((s) => isNovoServico(s));
+    }
+    return (servicos as ServicoCatalogo[]);
+  }, [servicos, categoriaServico]);
+
   const filteredServicos = useMemo(() => {
-    if (!searchTerm) return servicos;
+    if (!searchTerm) return servicosDaCategoria;
     const term = searchTerm.toLowerCase();
-    return (servicos as ServicoCatalogo[]).filter(servico => 
+    return servicosDaCategoria.filter(servico => 
       String(servico.item).toLowerCase().includes(term) ||
       servico.objeto.toLowerCase().includes(term) ||
       (servico.contrato && servico.contrato.toLowerCase().includes(term)) ||
       (servico.contratada && servico.contratada.toLowerCase().includes(term)) ||
       servico.tipo_contratacao.toLowerCase().includes(term)
     );
-  }, [servicos, searchTerm]);
+  }, [servicosDaCategoria, searchTerm]);
 
   const { sortedItems, requestSort, sortConfig } = useSortableTable(filteredServicos as ServicoCatalogo[]);
 
@@ -264,8 +281,8 @@ export function AdminServicosControl() {
   }, [sortedItems, currentPage]);
 
   const summary = useMemo(() => {
-    const totalItens = servicos.length;
-    const somaValores = (servicos as ServicoCatalogo[]).reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0);
+    const totalItens = servicosDaCategoria.length;
+    const somaValores = servicosDaCategoria.reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0);
     const mediaValor = totalItens > 0 ? somaValores / totalItens : 0;
     
     return {
@@ -273,11 +290,11 @@ export function AdminServicosControl() {
       mediaValor,
       somaTotal: somaValores,
     };
-  }, [servicos]);
+  }, [servicosDaCategoria]);
 
   const resetForm = () => {
     setFormData({
-      tipo_contratacao: "Novo",
+      tipo_contratacao: categoriaServico === "novos" ? "Novo" : "Renovação",
       objeto: "",
       justificativa: "",
       grau_prioridade: "Médio",
@@ -289,6 +306,14 @@ export function AdminServicosControl() {
       diretoria_id: "",
       gerencia_id: "",
     });
+  };
+
+  const handleOpenCreateDialog = () => {
+    setFormData(prev => ({
+      ...prev,
+      tipo_contratacao: categoriaServico === "novos" ? "Novo" : "Renovação",
+    }));
+    setCreateDialogOpen(true);
   };
 
   const resetEditForm = () => {
@@ -430,7 +455,7 @@ export function AdminServicosControl() {
 
     setIsDeleting(true);
     try {
-      await deleteServicoCatalogoAdmin(deletingServico.id);
+      await deleteServicoCatalogoAdmin(deletingServico.id, deletingServico.item);
       setDeletingServico(null);
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
@@ -454,7 +479,12 @@ export function AdminServicosControl() {
 
     setIsDeletingBulk(true);
     try {
-      await deleteServicosCatalogoBulkAdmin(selectedIds);
+      const selectedItems = selectedIds.map(id => {
+        const s = (servicos as ServicoCatalogo[]).find(item => item.id === id);
+        return s ? s.item : undefined;
+      }).filter((it): it is number => it !== undefined && it > 0);
+
+      await deleteServicosCatalogoBulkAdmin(selectedIds, selectedItems);
       setSelectedIds([]);
       await refetchServicos();
       queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
@@ -532,15 +562,17 @@ export function AdminServicosControl() {
     const wb = XLSX.utils.book_new();
     const wsData: (string | number | undefined)[][] = [];
 
-    wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Serviços`]);
+    const catLabel = categoriaServico === "novos" ? "Novos Serviços" : categoriaServico === "existentes" ? "Serviços Existentes" : "Todos os Serviços";
+    wsData.push([`Plano Anual de Contratações 2027 — Catálogo de Serviços (${catLabel})`]);
     wsData.push([`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`]);
     wsData.push([]);
-    wsData.push(["Item", "Contrato", "Objeto", "Tipo", "Prioridade", "Estimativa Valor", "Vinculação", "Diretoria", "Gerência", "Status"]);
+    wsData.push(["Item", "Contrato", "Contratada", "Objeto", "Tipo", "Prioridade", "Estimativa Valor", "Vinculação", "Diretoria", "Gerência", "Status"]);
 
     (filteredServicos as ServicoCatalogo[]).forEach((s) => {
       wsData.push([
         s.item,
         s.contrato || "-",
+        s.contratada || "-",
         s.objeto,
         s.tipo_contratacao,
         s.grau_prioridade,
@@ -553,15 +585,17 @@ export function AdminServicosControl() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [{ wch: 10 }, { wch: 15 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws["!cols"] = [{ wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws, "Serviços");
-    XLSX.writeFile(wb, `PAC_2027_Catalogo_Servicos_${new Date().toISOString().split("T")[0]}.xlsx`);
+    const fileSuffix = categoriaServico === "novos" ? "Novos_Servicos" : categoriaServico === "existentes" ? "Servicos_Existentes" : "Servicos";
+    XLSX.writeFile(wb, `PAC_2027_Catalogo_${fileSuffix}_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
   const handleExportPDF = () => {
     const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+    const catLabel = categoriaServico === "novos" ? "Novos Serviços" : categoriaServico === "existentes" ? "Serviços Existentes" : "Serviços";
     doc.setFontSize(14);
-    doc.text(`PAC 2027 — Catálogo de Serviços`, 14, 18);
+    doc.text(`PAC 2027 — Catálogo de ${catLabel}`, 14, 18);
     doc.setFontSize(9);
     doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 25);
     
@@ -586,7 +620,8 @@ export function AdminServicosControl() {
       headStyles: { fillColor: [22, 163, 74], textColor: 255 },
       alternateRowStyles: { fillColor: [245, 250, 246] },
     });
-    doc.save(`PAC_2027_Catalogo_Servicos_${new Date().toISOString().split("T")[0]}.pdf`);
+    const fileSuffix = categoriaServico === "novos" ? "Novos_Servicos" : categoriaServico === "existentes" ? "Servicos_Existentes" : "Servicos";
+    doc.save(`PAC_2027_Catalogo_${fileSuffix}_${new Date().toISOString().split("T")[0]}.pdf`);
   };
 
   const getPrioridadeColor = (prioridade: GrauPrioridade): string => {
@@ -600,28 +635,61 @@ export function AdminServicosControl() {
 
   return (
     <div className="space-y-6">
-      {/* Card principal com botão Novo Serviço */}
+      {/* Card principal com seletor de tipo de serviço e botão Novo Serviço */}
       <Card className="p-6 card-shadow">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <PlusCircle className="h-5 w-5 text-primary" />
-            <h2 className="text-lg font-semibold text-foreground">Cadastrar novo serviço</h2>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+            <div className="space-y-2 w-full sm:w-64">
+              <Label className="text-sm font-medium">Tipo de Serviço</Label>
+              <Select
+                value={categoriaServico}
+                onValueChange={(val: "existentes" | "novos" | "todos") => {
+                  setCategoriaServico(val);
+                  setCurrentPage(1);
+                  setSelectedIds([]);
+                }}
+              >
+                <SelectTrigger className="w-full bg-white">
+                  <SelectValue placeholder="Selecione o tipo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="existentes">Serviços Existentes</SelectItem>
+                  <SelectItem value="novos">Novos Serviços</SelectItem>
+                  <SelectItem value="todos">Todos os Serviços</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="hidden sm:block h-12 w-[1px] bg-border"></div>
+            <div>
+              <div className="flex items-center gap-2">
+                <PlusCircle className="h-5 w-5 text-primary" />
+                <h2 className="text-lg font-semibold text-foreground">
+                  {categoriaServico === "novos"
+                    ? "Cadastrar novo serviço"
+                    : categoriaServico === "existentes"
+                    ? "Cadastrar serviço existente"
+                    : "Cadastrar serviço no catálogo"}
+                </h2>
+              </div>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Ao cadastrar, o serviço entra no catálogo e já é distribuído para todas as gerências ativas como rascunho.
+              </p>
+            </div>
           </div>
-          <Button onClick={() => setCreateDialogOpen(true)} className="gap-2">
+          <Button onClick={handleOpenCreateDialog} className="gap-2 shrink-0 self-start md:self-auto">
             <PlusCircle className="h-4 w-4" />
             Novo Serviço
           </Button>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Ao cadastrar, o serviço entra no catálogo e já é distribuído para todas as gerências ativas como rascunho.
-        </p>
       </Card>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600 rounded-l-lg"></div>
-          <p className="text-sm text-muted-foreground font-medium z-10">Total de Serviços</p>
+          <p className="text-sm text-muted-foreground font-medium z-10">
+            Total de Serviços {categoriaServico === "novos" ? "(Novos)" : categoriaServico === "existentes" ? "(Existentes)" : ""}
+          </p>
           <p className="text-3xl font-bold text-slate-800 z-10 mt-1">{summary.totalItens}</p>
         </Card>
         <Card className="p-6 flex flex-col justify-center relative overflow-hidden card-shadow">
@@ -643,7 +711,18 @@ export function AdminServicosControl() {
       {/* Lista de Serviços */}
       <Card className="p-6 card-shadow">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-          <h2 className="text-lg font-semibold text-foreground">Serviços Cadastrados</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">
+              {categoriaServico === "novos"
+                ? "Novos Serviços Cadastrados"
+                : categoriaServico === "existentes"
+                ? "Serviços Existentes Cadastrados"
+                : "Serviços Cadastrados"}
+            </h2>
+            <Badge variant="outline" className="font-normal text-xs">
+              {summary.totalItens} {summary.totalItens === 1 ? "item" : "itens"}
+            </Badge>
+          </div>
           <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto">
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -828,9 +907,11 @@ export function AdminServicosControl() {
       }}>
         <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Cadastrar Novo Serviço</DialogTitle>
+            <DialogTitle>
+              {categoriaServico === "novos" ? "Cadastrar Novo Serviço" : "Cadastrar Serviço Existente"}
+            </DialogTitle>
             <DialogDescription>
-              Preencha os dados do serviço. Após cadastrado, será distribuído para todas as gerências ativas.
+              Preencha os dados do serviço. Após cadastrado, será distribuído para todas as gerências ativas como rascunho.
             </DialogDescription>
           </DialogHeader>
 
@@ -862,7 +943,7 @@ export function AdminServicosControl() {
             {/* Contrato */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm font-medium">Contrato</Label>
+                <Label className="text-sm font-medium">Contrato {categoriaServico === "novos" ? "(Opcional)" : ""}</Label>
                 <Input
                   value={formData.contrato}
                   onChange={(e) => setFormData(prev => ({ ...prev, contrato: formatContratoMask(e.target.value) }))}
@@ -872,7 +953,7 @@ export function AdminServicosControl() {
               </div>
 
               <div>
-                <Label className="text-sm font-medium">Contratada</Label>
+                <Label className="text-sm font-medium">Contratada {categoriaServico === "novos" ? "(Opcional)" : ""}</Label>
                 <Input
                   value={formData.contratada}
                   onChange={(e) => setFormData(prev => ({ ...prev, contratada: e.target.value }))}

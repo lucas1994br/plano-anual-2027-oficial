@@ -1790,7 +1790,7 @@ import {
       const isServicoSentStatus = ["enviado", "em_analise", "aprovado", "rejeitado"].includes(item.status || "rascunho");
 
       // Curto-circuito ultrarrápido numérico e booleano
-      if (showOnlyComQuantidade && (val <= 0 || isServicoSentStatus)) return false;
+      if (showOnlyComQuantidade && val <= 0) return false;
       if (showOnlySent && !isServicoSentStatus) return false;
       if (showOnlyZerados && val !== 0) return false;
       if (prioridade !== "todas" && item.grauPrioridade !== prioridade) return false;
