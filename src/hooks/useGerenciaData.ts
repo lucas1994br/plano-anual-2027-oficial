@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useEffect } from "react";
 import {
   getDiretorias,
   getGerenciasByDiretoria,
@@ -16,6 +16,8 @@ import { Gerencia } from "@/types/plan";
 import { resolveGerenciaNome } from "@/data/gerencias";
 
 export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
+  const queryClient = useQueryClient();
+
   const { data: diretorias = [], isLoading: isLoadingDiretorias } = useQuery<any[]>({
     queryKey: ["diretorias"],
     queryFn: getDiretorias,
@@ -76,16 +78,40 @@ export function useGerenciaData(siglaUpper: string, gerenciaUpper: string) {
         ? getServicosByGerencia(gerenciaAtual.id, periodAtivo.id)
         : [],
     enabled: !!periodAtivo && !!gerenciaAtual,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
     refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   const { data: servicosCatalogoData = [], isLoading: isLoadingServicosCatalogo } = useQuery<any[]>({
     queryKey: ["servicos-catalogo"],
     queryFn: () => getServicosCatalogo(),
-    staleTime: 30 * 1000,
+    staleTime: 0,
     refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
+
+  // Listener para sincronização automática quando serviços forem atualizados no Painel Administrativo
+  useEffect(() => {
+    const handleServicosCatalogoUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ["servicos"] });
+      queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+    };
+
+    const handleStorageUpdate = (e: StorageEvent) => {
+      if (e.key === "servicos_catalogo_last_updated") {
+        queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      }
+    };
+
+    window.addEventListener("servicos_catalogo_updated", handleServicosCatalogoUpdate);
+    window.addEventListener("storage", handleStorageUpdate);
+    return () => {
+      window.removeEventListener("servicos_catalogo_updated", handleServicosCatalogoUpdate);
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, [queryClient]);
 
   const orcamentoConfig = useMemo(() => {
     const localConfig = loadAdminBudgetConfig();

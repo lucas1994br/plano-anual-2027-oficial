@@ -354,9 +354,32 @@ const DiretoriaAprovacao = () => {
     queryKey: ["servicos-catalogo"],
     queryFn: getServicosCatalogo,
     enabled: !!authenticated,
-    staleTime: 30 * 1000,
+    staleTime: 0,
     refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
+
+  // Listener para sincronização automática quando serviços forem atualizados no Painel Administrativo
+  useEffect(() => {
+    const handleServicosCatalogoUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+      queryClient.invalidateQueries({ queryKey: servicosQueryKey });
+    };
+
+    const handleStorageUpdate = (e: StorageEvent) => {
+      if (e.key === "servicos_catalogo_last_updated") {
+        queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+        queryClient.invalidateQueries({ queryKey: servicosQueryKey });
+      }
+    };
+
+    window.addEventListener("servicos_catalogo_updated", handleServicosCatalogoUpdate);
+    window.addEventListener("storage", handleStorageUpdate);
+    return () => {
+      window.removeEventListener("servicos_catalogo_updated", handleServicosCatalogoUpdate);
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, [queryClient, servicosQueryKey]);
 
   const servicosCatalogoSet = useMemo(() => {
     return new Set((servicosCatalogoData as any[]).map(c => String(c.item || "").trim()));
@@ -880,6 +903,24 @@ const DiretoriaAprovacao = () => {
       return found ? found.contratada : null;
     };
 
+    const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+    const isDiretoriaSelected = 
+      ownServicosGerenciaId === "diretoria" || 
+      ownServicosGerenciaId === diretoria?.id || 
+      (dgGerencia && ownServicosGerenciaId === dgGerencia.id);
+
+    const selectedGerenciaSigla = ownServicosGerenciaId === "todas"
+      ? undefined
+      : isDiretoriaSelected
+        ? siglaUpper
+        : (gerenciaMap[ownServicosGerenciaId] || ownServicosGerenciaId);
+
+    const targetGerenciaId = ownServicosGerenciaId === "todas"
+      ? undefined
+      : isDiretoriaSelected
+        ? (dgGerencia?.id || diretoria?.id)
+        : ownServicosGerenciaId;
+
     const servicosDaDiretoria = servicosData
       .filter((s: ServicoItem) => 
         s.unidadeDemandante === siglaUpper || 
@@ -889,7 +930,11 @@ const DiretoriaAprovacao = () => {
       )
       .map((s: ServicoItem) => {
         const rawG = s.gerencia || (s as any).gerencia_id;
-        const resolvedGer = gerenciaMap[rawG] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) || siglaUpper;
+        const resolvedGer = (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
+          gerenciaMap[rawG] ||
+          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) ||
+          s.unidadeDemandante ||
+          siglaUpper;
         return {
           ...s,
           gerencia: resolvedGer,
@@ -900,16 +945,31 @@ const DiretoriaAprovacao = () => {
     const isNovoTipo = (tipo?: string) => String(tipo || "").trim().toLowerCase() === "novo";
 
     if (selectedOption === "servicos_existentes") {
-      return (servicosCatalogoData as any[])
+      const catalogoExistentes = (servicosCatalogoData as any[])
         .filter((catalogoItem) => !isNovoTipo(catalogoItem.tipo_contratacao))
         .map((catalogoItem) => {
-          const servicoDb = servicosDaDiretoria.find(s => String(s.item).trim() === String(catalogoItem.item).trim() || (Number(s.item) > 0 && Number(s.item) === Number(catalogoItem.item)));
-          const resolvedGer = (catalogoItem.gerencia_id && gerenciaMap[catalogoItem.gerencia_id]) || (servicoDb && servicoDb.gerencia) || siglaUpper;
+          let servicoDb = selectedGerenciaSigla
+            ? servicosDaDiretoria.find(s => 
+                (String(s.item).trim() === String(catalogoItem.item).trim() || (Number(s.item) > 0 && Number(s.item) === Number(catalogoItem.item))) &&
+                (s.gerencia === selectedGerenciaSigla || s.unidadeDemandante === selectedGerenciaSigla || (targetGerenciaId && (s as any).gerencia_id === targetGerenciaId))
+              )
+            : undefined;
+
+          if (!servicoDb) {
+            servicoDb = servicosDaDiretoria.find(s => String(s.item).trim() === String(catalogoItem.item).trim() || (Number(s.item) > 0 && Number(s.item) === Number(catalogoItem.item)));
+          }
+
+          const resolvedGer = (servicoDb && servicoDb.gerencia && !String(servicoDb.gerencia).includes("-") && servicoDb.gerencia !== "N/A" ? servicoDb.gerencia : undefined) ||
+            (servicoDb && (servicoDb as any).unidadeDemandante) ||
+            selectedGerenciaSigla ||
+            (catalogoItem.gerencia_id && gerenciaMap[catalogoItem.gerencia_id]) ||
+            siglaUpper;
+
           if (servicoDb) {
             return {
               ...servicoDb,
               gerencia: resolvedGer,
-              gerencia_id: (servicoDb as any).gerencia_id || catalogoItem.gerencia_id,
+              gerencia_id: (servicoDb as any).gerencia_id || targetGerenciaId || catalogoItem.gerencia_id,
               diretoria_id: (servicoDb as any).diretoria_id || catalogoItem.diretoria_id || diretoria.id,
               objeto: catalogoItem.objeto || servicoDb.objeto,
               tipoContratacao: catalogoItem.tipo_contratacao || servicoDb.tipoContratacao,
@@ -942,22 +1002,44 @@ const DiretoriaAprovacao = () => {
             contratada: catalogoItem.contratada,
             observacao: catalogoItem.observacao || "",
             gerencia: resolvedGer,
-            gerencia_id: catalogoItem.gerencia_id,
+            gerencia_id: targetGerenciaId || catalogoItem.gerencia_id,
             diretoria_id: catalogoItem.diretoria_id || diretoria.id,
             diretoriaSigla: siglaUpper,
           } as unknown as ServicoItem;
         });
+
+      const catalogoExistentesItemsSet = new Set(catalogoExistentes.map(s => String(s.item || "").trim()));
+      const customExistentes = servicosDaDiretoria.filter(s => 
+        !isNovoTipo(s.tipoContratacao) && 
+        !catalogoExistentesItemsSet.has(String(s.item || "").trim())
+      );
+      return [...catalogoExistentes, ...customExistentes];
     } else if (selectedOption === "servicos_novos") {
       const catalogoNovos = (servicosCatalogoData as any[])
         .filter((catalogoItem) => isNovoTipo(catalogoItem.tipo_contratacao))
         .map((catalogoItem) => {
-          const servicoDb = servicosDaDiretoria.find(s => Number(s.item) === Number(catalogoItem.item));
-          const resolvedGer = (catalogoItem.gerencia_id && gerenciaMap[catalogoItem.gerencia_id]) || (servicoDb && servicoDb.gerencia) || siglaUpper;
+          let servicoDb = selectedGerenciaSigla
+            ? servicosDaDiretoria.find(s => 
+                (Number(s.item) === Number(catalogoItem.item)) &&
+                (s.gerencia === selectedGerenciaSigla || s.unidadeDemandante === selectedGerenciaSigla || (targetGerenciaId && (s as any).gerencia_id === targetGerenciaId))
+              )
+            : undefined;
+
+          if (!servicoDb) {
+            servicoDb = servicosDaDiretoria.find(s => Number(s.item) === Number(catalogoItem.item));
+          }
+
+          const resolvedGer = (servicoDb && servicoDb.gerencia && !String(servicoDb.gerencia).includes("-") && servicoDb.gerencia !== "N/A" ? servicoDb.gerencia : undefined) ||
+            (servicoDb && (servicoDb as any).unidadeDemandante) ||
+            selectedGerenciaSigla ||
+            (catalogoItem.gerencia_id && gerenciaMap[catalogoItem.gerencia_id]) ||
+            siglaUpper;
+
           if (servicoDb) {
             return {
               ...servicoDb,
               gerencia: resolvedGer,
-              gerencia_id: (servicoDb as any).gerencia_id || catalogoItem.gerencia_id,
+              gerencia_id: (servicoDb as any).gerencia_id || targetGerenciaId || catalogoItem.gerencia_id,
               diretoria_id: (servicoDb as any).diretoria_id || catalogoItem.diretoria_id || diretoria.id,
               objeto: catalogoItem.objeto || servicoDb.objeto,
               tipoContratacao: "Novo",
@@ -988,7 +1070,7 @@ const DiretoriaAprovacao = () => {
             status: catalogoItem.status || "rascunho",
             observacao: catalogoItem.observacao || "",
             gerencia: resolvedGer,
-            gerencia_id: catalogoItem.gerencia_id,
+            gerencia_id: targetGerenciaId || catalogoItem.gerencia_id,
             diretoria_id: catalogoItem.diretoria_id || diretoria.id,
             diretoriaSigla: siglaUpper,
             contrato: catalogoItem.contrato,
@@ -1000,16 +1082,36 @@ const DiretoriaAprovacao = () => {
       return [...catalogoNovos, ...customNovos];
     }
     return [];
-  }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet, gerenciaMap]);
+  }, [servicosData, diretoria, siglaUpper, selectedOption, servicosCatalogoData, servicosCatalogoSet, gerenciaMap, ownServicosGerenciaId, gerenciasData]);
 
   const servicosProprios = useMemo(() => {
     let list = servicosPropriosBase;
     
-    if (ownServicosGerenciaId !== "diretoria" && ownServicosGerenciaId !== "todas") {
-      list = list.filter(s => (s as any).gerencia_id === ownServicosGerenciaId || s.gerencia === (gerenciaMap[ownServicosGerenciaId] || "N/A"));
-    } else if (ownServicosGerenciaId === "diretoria") {
-      list = list.filter(s => (s as any).gerencia_id === diretoria?.id || s.gerencia === siglaUpper || !s.gerencia || s.gerencia === "N/A");
+    if (ownServicosGerenciaId !== "todas") {
+      const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+      const isDiretoriaSelected = 
+        ownServicosGerenciaId === "diretoria" || 
+        ownServicosGerenciaId === diretoria?.id || 
+        (dgGerencia && ownServicosGerenciaId === dgGerencia.id);
+
+      if (isDiretoriaSelected) {
+        list = list.filter(s => 
+          s.gerencia === siglaUpper || 
+          s.unidadeDemandante === siglaUpper || 
+          s.diretoriaSigla === siglaUpper || 
+          (s as any).gerencia_id === diretoria?.id || 
+          (dgGerencia && (s as any).gerencia_id === dgGerencia.id) || 
+          (!s.gerencia || s.gerencia === "N/A")
+        );
+      } else {
+        const targetSigla = gerenciaMap[ownServicosGerenciaId];
+        list = list.filter(s => 
+          (s as any).gerencia_id === ownServicosGerenciaId || 
+          (targetSigla && (s.gerencia === targetSigla || s.unidadeDemandante === targetSigla))
+        );
+      }
     }
+
     if (ownServicosShowOnlyAprovados) {
       list = list.filter(s => s.status === "aprovado");
     } else {
@@ -1034,7 +1136,7 @@ const DiretoriaAprovacao = () => {
     }
     
     return list;
-  }, [servicosPropriosBase, ownServicosShowOnlyAprovados, ownServicosGerenciaId, ownServicosShowOnlyZerados, ownServicosShowOnlyComValor, gerenciaMap, debouncedOwnServicosSearchTerm]);
+  }, [servicosPropriosBase, ownServicosShowOnlyAprovados, ownServicosGerenciaId, ownServicosShowOnlyZerados, ownServicosShowOnlyComValor, gerenciaMap, debouncedOwnServicosSearchTerm, gerenciasData, siglaUpper, diretoria]);
 
   const ownServicosPaginationData = useMemo(() => {
     const totalItems = servicosProprios.length;
@@ -1072,7 +1174,11 @@ const DiretoriaAprovacao = () => {
       .filter((s: ServicoItem) => s.status !== "rascunho")
       .map((s: ServicoItem) => {
         const rawG = s.gerencia || (s as any).gerencia_id;
-        const resolvedGer = gerenciaMap[rawG] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) || s.gerencia;
+        const resolvedGer = (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
+          gerenciaMap[rawG] ||
+          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) ||
+          s.unidadeDemandante ||
+          s.gerencia;
         
         const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
         const catItem = (s.id && catalogoMapById.get(String(s.id).toLowerCase())) || (itemKey ? catalogoMapByItem.get(itemKey) : null);
@@ -1081,18 +1187,23 @@ const DiretoriaAprovacao = () => {
           return {
             ...s,
             gerencia: resolvedGer,
+            gerencia_id: (s as any).gerencia_id,
+            diretoria_id: (s as any).diretoria_id,
+            unidadeDemandante: s.unidadeDemandante || resolvedGer,
             objeto: (catItem.objeto && String(catItem.objeto).trim().length > 0) ? catItem.objeto : s.objeto,
             tipoContratacao: catItem.tipo_contratacao || catItem.tipoContratacao || s.tipoContratacao || "Serviço",
             estimativaValor: (catItem.estimativa_valor !== undefined && catItem.estimativa_valor !== null && Number(catItem.estimativa_valor) > 0)
               ? Number(catItem.estimativa_valor)
-              : s.estimativaValor,
+              : (s.estimativaValor !== undefined && Number(s.estimativaValor) > 0 ? Number(s.estimativaValor) : 0),
             dotacaoOrcamentaria: (catItem.dotacao_orcamentaria !== undefined && catItem.dotacao_orcamentaria !== null && Number(catItem.dotacao_orcamentaria) > 0)
               ? Number(catItem.dotacao_orcamentaria)
-              : (s.dotacaoOrcamentaria || s.estimativaValor || 0),
+              : (catItem.estimativa_valor !== undefined && catItem.estimativa_valor !== null && Number(catItem.estimativa_valor) > 0)
+                ? Number(catItem.estimativa_valor)
+                : (s.dotacaoOrcamentaria || s.estimativaValor || 0),
             grauPrioridade: catItem.grau_prioridade || catItem.grauPrioridade || s.grauPrioridade || "Baixo",
             vinculacao: catItem.vinculacao || s.vinculacao || "Não",
             dependenciaDescricao: catItem.dependencia_descricao !== undefined ? catItem.dependencia_descricao : s.dependenciaDescricao,
-            contrato: catItem.contrato !== undefined ? catItem.contrato : s.contrato,
+            contrato: (catItem.contrato !== undefined && catItem.contrato !== null && catItem.contrato !== "") ? catItem.contrato : s.contrato,
             contratada: catItem.contratada || s.contratada || getContratadaFallback(catItem.contrato || s.contrato),
           };
         }
@@ -1100,20 +1211,55 @@ const DiretoriaAprovacao = () => {
         return {
           ...s,
           gerencia: resolvedGer,
+          gerencia_id: (s as any).gerencia_id,
+          diretoria_id: (s as any).diretoria_id,
+          unidadeDemandante: s.unidadeDemandante || resolvedGer,
           contratada: s.contratada || getContratadaFallback(s.contrato),
         };
       });
   }, [servicosData, servicosCatalogoData, gerenciaMap]);
 
-  const filteredServicos = useMemo(() => {
-    let list = selectedGerencia === "todas"
-      ? servicosRecebidosBase
-      : servicosRecebidosBase.filter((s: ServicoItem) => s.gerencia === selectedGerencia);
+  const isNovoServicoItem = (s: ServicoItem) => {
+    const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
+    if (itemKey && servicosCatalogoNovosSet.has(itemKey)) return true;
+    if (itemKey && servicosCatalogoExistentesSet.has(itemKey)) return false;
+    const tipo = String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase();
+    if (tipo.includes("novo")) return true;
+    if (tipo.includes("renov") || tipo.includes("cont") || tipo.includes("existente")) return false;
+    if (itemKey && servicosCatalogoSet.has(itemKey)) return false;
+    return true;
+  };
 
+  const servicosRecebidosPorTipo = useMemo(() => {
     if (selectedOption === "servicos_novos") {
-      list = list.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()));
-    } else if (selectedOption === "servicos_existentes") {
-      list = list.filter(s => servicosCatalogoSet.has(String(s.item || "").trim()));
+      return servicosRecebidosBase.filter(isNovoServicoItem);
+    }
+    if (selectedOption === "servicos_existentes") {
+      return servicosRecebidosBase.filter((s: ServicoItem) => !isNovoServicoItem(s));
+    }
+    return servicosRecebidosBase;
+  }, [servicosRecebidosBase, selectedOption, servicosCatalogoNovosSet, servicosCatalogoExistentesSet, servicosCatalogoSet]);
+
+  const filteredServicos = useMemo(() => {
+    let list = servicosRecebidosPorTipo;
+    if (selectedGerencia !== "todas") {
+      const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+      const isDiretoriaFilter = selectedGerencia === siglaUpper || (dgGerencia && selectedGerencia === dgGerencia.sigla);
+      if (isDiretoriaFilter) {
+        list = list.filter((s: ServicoItem) => 
+          s.gerencia === siglaUpper || 
+          s.unidadeDemandante === siglaUpper || 
+          s.diretoriaSigla === siglaUpper ||
+          (dgGerencia && (s as any).gerencia_id === dgGerencia.id) ||
+          ((s as any).diretoria_id === diretoria?.id && (!s.gerencia || s.gerencia === siglaUpper || s.gerencia === "N/A"))
+        );
+      } else {
+        list = list.filter((s: ServicoItem) => 
+          s.gerencia === selectedGerencia || 
+          s.unidadeDemandante === selectedGerencia || 
+          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id] === selectedGerencia)
+        );
+      }
     }
 
     const term = debouncedServicosRecebidosSearchTerm.trim().toLowerCase();
@@ -1130,7 +1276,7 @@ const DiretoriaAprovacao = () => {
     }
 
     return list;
-  }, [servicosRecebidosBase, selectedGerencia, selectedOption, servicosCatalogoSet, debouncedServicosRecebidosSearchTerm]);
+  }, [servicosRecebidosPorTipo, selectedGerencia, gerenciasData, siglaUpper, diretoria, gerenciaMap, debouncedServicosRecebidosSearchTerm]);
 
   useEffect(() => {
     setServicosCurrentPage(1);
@@ -2125,7 +2271,18 @@ const DiretoriaAprovacao = () => {
       const catalogoItem: any = servicosCatalogoData.find((c: any) => String(c.item) === String(itemCode));
       if (!catalogoItem) return;
 
-      const gerenciaIdAlvo = gerenciasData[0]?.id ?? ""; 
+      const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+      const isDiretoriaSelected = 
+        ownServicosGerenciaId === "diretoria" || 
+        ownServicosGerenciaId === diretoria?.id || 
+        (dgGerencia && ownServicosGerenciaId === dgGerencia.id);
+
+      const targetGerencia = (ownServicosGerenciaId !== "todas" && !isDiretoriaSelected)
+        ? gerenciasData.find((g: any) => g.id === ownServicosGerenciaId)
+        : dgGerencia;
+
+      const gerenciaIdAlvo = targetGerencia?.id || dgGerencia?.id || gerenciasData[0]?.id || "";
+      const gerenciaSiglaAlvo = targetGerencia?.sigla || siglaUpper;
 
       await createServico({
         periodo_id: periodAtivo.id,
@@ -2133,7 +2290,7 @@ const DiretoriaAprovacao = () => {
         gerencia_id: gerenciaIdAlvo,
         item: catalogoItem.item,
         tipo_contratacao: updates.tipoContratacao !== undefined ? updates.tipoContratacao : (catalogoItem.tipo_contratacao || ""),
-        unidade_demandante: siglaUpper,
+        unidade_demandante: gerenciaSiglaAlvo,
         objeto: updates.objeto !== undefined ? updates.objeto : (catalogoItem.objeto || ""),
         justificativa: updates.justificativa !== undefined ? updates.justificativa : (catalogoItem.justificativa || null),
         contrato: updates.contrato !== undefined ? updates.contrato : (catalogoItem.contrato || null),
@@ -2182,7 +2339,8 @@ const DiretoriaAprovacao = () => {
     if (!diretoria || !periodAtivo) return;
     if (!novoServicoForm.objeto.trim() || !novoServicoForm.justificativa.trim()) return;
 
-    const gerenciaIdAlvo = novoServicoForm.gerenciaId || (gerenciasData[0]?.id ?? "");
+    const dgGerencia = gerenciasData.find((g: any) => g.sigla === siglaUpper);
+    const gerenciaIdAlvo = novoServicoForm.gerenciaId || (dgGerencia?.id ?? gerenciasData[0]?.id ?? "");
     if (!gerenciaIdAlvo) return;
 
     setNovoServicoLoading(true);
@@ -2273,6 +2431,14 @@ const DiretoriaAprovacao = () => {
     const servicosToUpdate = actionServicosDialog.action === "enviar_compras"
       ? servicosSelecionados.filter((s: any) => s.status === "aprovado")
       : servicosSelecionados;
+
+    // Se houver itens selecionados sem ID ainda (itens do catálogo de Seus Serviços), persiste-os com o novo status
+    const unpersistedToCreate = servicosProprios.filter(
+      (s: any) => !s.id && (selectedServicos.has(String(s.item)) || selectedServicos.has(s.item))
+    );
+    for (const item of unpersistedToCreate) {
+      await ensureServicoDiretoria(item.item, { status: newStatus });
+    }
 
     if (actionServicosDialog.action === "enviar_compras" && servicosToUpdate.length === 0) {
       setActionServicosDialog({ open: false, action: null });
@@ -3444,9 +3610,18 @@ const DiretoriaAprovacao = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="todas">Todas ({filteredServicos.length})</SelectItem>
+                      <SelectItem value="todas">Todas ({servicosRecebidosPorTipo.length})</SelectItem>
+                      {!gerenciasData.some((g: any) => g.sigla === siglaUpper) && (
+                        <SelectItem value={siglaUpper}>
+                          {siglaUpper} ({servicosRecebidosPorTipo.filter((s: ServicoItem) => s.gerencia === siglaUpper || s.unidadeDemandante === siglaUpper || s.diretoriaSigla === siglaUpper).length})
+                        </SelectItem>
+                      )}
                       {gerenciasData.map((g: any) => {
-                        const count = filteredServicos.filter((s: ServicoItem) => s.gerencia === g.sigla).length;
+                        const count = servicosRecebidosPorTipo.filter((s: ServicoItem) => 
+                          s.gerencia === g.sigla || 
+                          s.unidadeDemandante === g.sigla || 
+                          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id] === g.sigla)
+                        ).length;
                         return (
                           <SelectItem key={g.id} value={g.sigla}>
                             {g.sigla} ({count})

@@ -2056,6 +2056,42 @@ export async function updateServicoCatalogoAdmin(
 ): Promise<unknown> {
   if (gs.isGoogleSheetsActive()) {
     const updated = await gs.gsUpdateServicoCatalogo(servicoId, updates);
+
+    // Sincroniza também as linhas correspondentes na tabela 'servicos' para que os painéis de gerência e diretoria acompanhem
+    try {
+      const itemNum = updates.item !== undefined ? Number(updates.item) : undefined;
+      if (itemNum) {
+        const rows = await gs.gsGetServicos();
+        const matching = (rows || []).filter((r: any) => Number(r.item) === itemNum || r.item_id === servicoId);
+        if (matching.length > 0) {
+          const bulkUpdates = matching.map((r: any) => ({
+            id: r.id,
+            tipo_contratacao: updates.tipo_contratacao !== undefined ? updates.tipo_contratacao : r.tipo_contratacao,
+            objeto: updates.objeto !== undefined ? updates.objeto : r.objeto,
+            justificativa: (r.status === "rascunho" && updates.justificativa) ? updates.justificativa : r.justificativa,
+            grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : r.grau_prioridade,
+            estimativa_valor: updates.estimativa_valor !== undefined ? updates.estimativa_valor : r.estimativa_valor,
+            contrato: updates.contrato !== undefined ? updates.contrato : r.contrato,
+            contratada: updates.contratada !== undefined ? updates.contratada : r.contratada,
+            vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : r.vinculacao,
+            dependencia_descricao: updates.dependencia_descricao !== undefined ? updates.dependencia_descricao : r.dependencia_descricao,
+          }));
+          await gs.gsUpdateServicosBulkData(bulkUpdates);
+        }
+      }
+    } catch (syncErr) {
+      console.warn("Aviso ao sincronizar servicos em lote:", syncErr);
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(new CustomEvent("servicos_catalogo_updated"));
+        localStorage.setItem("servicos_catalogo_last_updated", Date.now().toString());
+      } catch (_err) {
+        // Ignora erros ao emitir evento ou acessar localStorage
+      }
+    }
+
     await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, updates);
     return { success: true, data: updated };
   }
@@ -2080,7 +2116,15 @@ export async function updateServicoCatalogoAdmin(
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
 
-  
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(new CustomEvent("servicos_catalogo_updated"));
+      localStorage.setItem("servicos_catalogo_last_updated", Date.now().toString());
+    } catch (_err) {
+      // Ignora erros ao emitir evento ou acessar localStorage
+    }
+  }
+
   await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, { acao: "updateServicoCatalogoAdmin", updates });
 
   return data;
@@ -2092,6 +2136,14 @@ export async function deleteServicoCatalogoAdmin(
 ): Promise<unknown> {
   if (gs.isGoogleSheetsActive()) {
     await gs.gsDeleteServicoCatalogo(servicoId, item);
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(new CustomEvent("servicos_catalogo_updated"));
+        localStorage.setItem("servicos_catalogo_last_updated", Date.now().toString());
+      } catch (_err) {
+        // Ignora erros ao emitir evento ou acessar localStorage
+      }
+    }
     await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId);
     return { success: true };
   }
@@ -2114,6 +2166,15 @@ export async function deleteServicoCatalogoAdmin(
 
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(new CustomEvent("servicos_catalogo_updated"));
+      localStorage.setItem("servicos_catalogo_last_updated", Date.now().toString());
+    } catch (_err) {
+      // Ignora erros ao emitir evento ou acessar localStorage
+    }
+  }
 
   await registrarLogAtividade("EXCLUIR", "servicos_catalogo", servicoId, { acao: "deleteServicoCatalogoAdmin" });
 
@@ -2364,6 +2425,9 @@ function mapDbToServicoItem(row: any): ServicoItem {
       ?? row.gerencia
       ?? row.gerencia_id,
     diretoriaSigla: row.diretorias?.sigla ?? row.diretoriaSigla ?? row.diretoria_id,
+    gerencia_id: row.gerencia_id,
+    diretoria_id: row.diretoria_id,
+    periodo_id: row.periodo_id,
     status: row.status,
     observacao: row.observacao,
     justificativaRejeicao: row.justificativa_rejeicao ?? row.justificativaRejeicao,
