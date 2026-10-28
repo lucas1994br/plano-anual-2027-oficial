@@ -240,6 +240,7 @@ export function DiretoriaVisaoGerencial({
         status: st as SolicitacaoStatus,
         gerencia_id: gerenciaId,
         gerencia: gerenciaSigla,
+        diretoriaSigla: rawItem.diretoriaSigla || rawItem.diretoriaOrcamentariaSigla || siglaUpper,
       };
 
       const key = rawItem.id ? String(rawItem.id) : `cod-${codigo}-${gerenciaId || gerenciaSigla}`;
@@ -289,6 +290,7 @@ export function DiretoriaVisaoGerencial({
         status: st as SolicitacaoStatus,
         gerencia_id: gerenciaId,
         gerencia: gerenciaSigla,
+        diretoriaSigla: rawServico.diretoriaSigla || rawServico.diretoria || siglaUpper,
       };
 
       const key = rawServico.id ? String(rawServico.id) : `serv-${itemKey}-${gerenciaId || gerenciaSigla}`;
@@ -327,9 +329,13 @@ export function DiretoriaVisaoGerencial({
       };
 
       // Aquisição da gerência
-      const aquisicaoItems = allAquisicao.filter((i) =>
-        isMatchGerencia(i.gerencia_id, i.gerencia)
-      );
+      const aquisicaoItems = allAquisicao
+        .filter((i) => isMatchGerencia(i.gerencia_id, i.gerencia))
+        .map((i) => ({
+          ...i,
+          gerencia: i.gerencia || gSigla,
+          diretoria: i.diretoriaSigla || siglaUpper,
+        }));
 
       let aprovadasAquisicaoCount = 0;
       let aprovadasAquisicaoValor = 0;
@@ -361,9 +367,13 @@ export function DiretoriaVisaoGerencial({
         isMatchGerencia(s.gerencia_id || s.gerencia, s.gerencia || s.unidadeDemandante)
       );
 
-      const servicosExistentes = servicosItems.filter((s) =>
-        servicosCatalogoSet.has(s.itemKey)
-      );
+      const servicosExistentes = servicosItems
+        .filter((s) => servicosCatalogoSet.has(s.itemKey))
+        .map((s) => ({
+          ...s,
+          gerencia: s.gerencia || gSigla,
+          diretoria: s.diretoriaSigla || siglaUpper,
+        }));
 
       let aprovadasExistentesCount = 0;
       let aprovadasExistentesValor = 0;
@@ -390,9 +400,13 @@ export function DiretoriaVisaoGerencial({
       const qtdServicosExistentes = aprovadasExistentesCount + pendentesExistentesCount + rejeitadasExistentesCount;
       const valorServicosExistentes = aprovadasExistentesValor + pendentesExistentesValor + rejeitadasExistentesValor;
 
-      const servicosNovos = servicosItems.filter((s) =>
-        !servicosCatalogoSet.has(s.itemKey)
-      );
+      const servicosNovos = servicosItems
+        .filter((s) => !servicosCatalogoSet.has(s.itemKey))
+        .map((s) => ({
+          ...s,
+          gerencia: s.gerencia || gSigla,
+          diretoria: s.diretoriaSigla || siglaUpper,
+        }));
 
       let aprovadasNovosCount = 0;
       let aprovadasNovosValor = 0;
@@ -770,7 +784,8 @@ export function DiretoriaVisaoGerencial({
         String(item.unidade || "").toLowerCase().includes(term) ||
         String(item.status || "").toLowerCase().includes(term) ||
         String(item.prioridade || "").toLowerCase().includes(term) ||
-        String(item.gerencia || "").toLowerCase().includes(term)
+        String(item.gerencia || "").toLowerCase().includes(term) ||
+        String(item.diretoria || "").toLowerCase().includes(term)
       );
     });
   }, [selectedGerenciaDetail, detailSearchTerm]);
@@ -788,7 +803,8 @@ export function DiretoriaVisaoGerencial({
         String(s.contratada || "").toLowerCase().includes(term) ||
         String(s.status || "").toLowerCase().includes(term) ||
         String(s.grauPrioridade || "").toLowerCase().includes(term) ||
-        String(s.gerencia || "").toLowerCase().includes(term)
+        String(s.gerencia || "").toLowerCase().includes(term) ||
+        String(s.diretoria || "").toLowerCase().includes(term)
       );
     });
   }, [selectedGerenciaDetail, detailSearchTerm]);
@@ -806,7 +822,8 @@ export function DiretoriaVisaoGerencial({
         String(s.previsaoInicio || "").toLowerCase().includes(term) ||
         String(s.status || "").toLowerCase().includes(term) ||
         String(s.grauPrioridade || "").toLowerCase().includes(term) ||
-        String(s.gerencia || "").toLowerCase().includes(term)
+        String(s.gerencia || "").toLowerCase().includes(term) ||
+        String(s.diretoria || "").toLowerCase().includes(term)
       );
     });
   }, [selectedGerenciaDetail, detailSearchTerm]);
@@ -867,6 +884,8 @@ export function DiretoriaVisaoGerencial({
       // 1. Aba Aquisições
       const aquisicoes = selectedGerenciaDetail.aquisicaoItems || [];
       const aqHeaders = [
+        "Gerência",
+        "ID_DIRETORIA",
         "Código",
         "Descrição do Item",
         "Categoria",
@@ -880,6 +899,8 @@ export function DiretoriaVisaoGerencial({
         "Justificativa Rejeição",
       ];
       const aqRows = aquisicoes.map((i: any) => [
+        i.gerencia || gSigla,
+        i.diretoria || siglaUpper,
         i.codigo,
         i.descricao,
         i.categoria,
@@ -899,7 +920,9 @@ export function DiretoriaVisaoGerencial({
       );
       const aqTotalRow = [
         "TOTAL",
+        "",
         `${aquisicoes.length} item(ns)`,
+        "",
         "",
         "",
         totalQtdAq,
@@ -920,6 +943,8 @@ export function DiretoriaVisaoGerencial({
         aqTotalRow,
       ]);
       wsAq["!cols"] = [
+        { wch: 14 },
+        { wch: 16 },
         { wch: 12 },
         { wch: 45 },
         { wch: 25 },
@@ -947,6 +972,8 @@ export function DiretoriaVisaoGerencial({
       // 2. Aba Serviços Existentes
       const servExistentes = selectedGerenciaDetail.servicosExistentes || [];
       const seHeaders = [
+        "Gerência",
+        "ID_DIRETORIA",
         "Item",
         "Objeto do Serviço",
         "Tipo de Contratação",
@@ -959,6 +986,8 @@ export function DiretoriaVisaoGerencial({
         "Justificativa Rejeição",
       ];
       const seRows = servExistentes.map((s: any) => [
+        s.gerencia || gSigla,
+        s.diretoria || siglaUpper,
         s.item,
         s.objeto,
         s.tipoContratacao,
@@ -973,7 +1002,9 @@ export function DiretoriaVisaoGerencial({
       const totalValSE = servExistentes.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0);
       const seTotalRow = [
         "TOTAL",
+        "",
         `${servExistentes.length} serviço(s)`,
+        "",
         "",
         "",
         "",
@@ -993,6 +1024,8 @@ export function DiretoriaVisaoGerencial({
         seTotalRow,
       ]);
       wsSE["!cols"] = [
+        { wch: 14 },
+        { wch: 16 },
         { wch: 10 },
         { wch: 45 },
         { wch: 22 },
@@ -1019,6 +1052,8 @@ export function DiretoriaVisaoGerencial({
       // 3. Aba Novos Serviços
       const servNovos = selectedGerenciaDetail.servicosNovos || [];
       const snHeaders = [
+        "Gerência",
+        "ID_DIRETORIA",
         "Item",
         "Objeto do Novo Serviço",
         "Justificativa da Demanda",
@@ -1031,6 +1066,8 @@ export function DiretoriaVisaoGerencial({
         "Justificativa Rejeição",
       ];
       const snRows = servNovos.map((s: any) => [
+        s.gerencia || gSigla,
+        s.diretoria || siglaUpper,
         s.item,
         s.objeto,
         s.justificativa || "-",
@@ -1045,7 +1082,9 @@ export function DiretoriaVisaoGerencial({
       const totalValSN = servNovos.reduce((acc: number, cur: any) => acc + (cur.valor || 0), 0);
       const snTotalRow = [
         "TOTAL",
+        "",
         `${servNovos.length} novo(s) serviço(s)`,
+        "",
         "",
         "",
         "",
@@ -1065,6 +1104,8 @@ export function DiretoriaVisaoGerencial({
         snTotalRow,
       ]);
       wsSN["!cols"] = [
+        { wch: 14 },
+        { wch: 16 },
         { wch: 10 },
         { wch: 45 },
         { wch: 40 },
@@ -1172,8 +1213,10 @@ export function DiretoriaVisaoGerencial({
         doc.text(`1. Aquisições (${aquisicoes.length} itens - Total: ${formatCurrency(selectedGerenciaDetail.valorAquisicao || 0)})`, 14, currentY);
         currentY += 4;
 
-        const aqHeaders = ["Código", "Descrição do Item", "Categoria", "Unid.", "Qtd", "Valor Unit.", "Valor Total", "Prioridade", "Status"];
+        const aqHeaders = ["Gerência", "ID_DIRETORIA", "Código", "Descrição do Item", "Categoria", "Unid.", "Qtd", "Valor Unit.", "Valor Total", "Prioridade", "Status"];
         const aqRows = aquisicoes.map((i: any) => [
+          String(i.gerencia || gSigla),
+          String(i.diretoria || siglaUpper),
           String(i.codigo),
           String(i.descricao || ""),
           String(i.categoria || "-"),
@@ -1204,14 +1247,16 @@ export function DiretoriaVisaoGerencial({
           },
           columnStyles: {
             0: { halign: "center", cellWidth: 16 },
-            1: { halign: "left" },
-            2: { halign: "left", cellWidth: 40 },
-            3: { halign: "center", cellWidth: 12 },
-            4: { halign: "center", cellWidth: 14, fontStyle: "bold" },
-            5: { halign: "right", cellWidth: 24 },
-            6: { halign: "right", cellWidth: 26, fontStyle: "bold" },
-            7: { halign: "center", cellWidth: 20 },
-            8: { halign: "center", cellWidth: 22 },
+            1: { halign: "center", cellWidth: 18 },
+            2: { halign: "center", cellWidth: 14 },
+            3: { halign: "left" },
+            4: { halign: "left", cellWidth: 32 },
+            5: { halign: "center", cellWidth: 10 },
+            6: { halign: "center", cellWidth: 12, fontStyle: "bold" },
+            7: { halign: "right", cellWidth: 20 },
+            8: { halign: "right", cellWidth: 22, fontStyle: "bold" },
+            9: { halign: "center", cellWidth: 16 },
+            10: { halign: "center", cellWidth: 18 },
           },
         });
 
@@ -1231,8 +1276,10 @@ export function DiretoriaVisaoGerencial({
         doc.text(`2. Serviços Existentes (${servExistentes.length} serviços - Total: ${formatCurrency(selectedGerenciaDetail.valorServicosExistentes || 0)})`, 14, currentY);
         currentY += 4;
 
-        const seHeaders = ["Item", "Objeto do Serviço", "Tipo Contratação", "Contrato / Contratada", "Valor Estimado / Dotação", "Prioridade", "Status"];
+        const seHeaders = ["Gerência", "ID_DIRETORIA", "Item", "Objeto do Serviço", "Tipo Contratação", "Contrato / Contratada", "Valor Estimado / Dotação", "Prioridade", "Status"];
         const seRows = servExistentes.map((s: any) => [
+          String(s.gerencia || gSigla),
+          String(s.diretoria || siglaUpper),
           String(s.item || "-"),
           String(s.objeto || ""),
           String(s.tipoContratacao || "-"),
@@ -1261,12 +1308,14 @@ export function DiretoriaVisaoGerencial({
           },
           columnStyles: {
             0: { halign: "center", cellWidth: 16 },
-            1: { halign: "left" },
-            2: { halign: "left", cellWidth: 42 },
-            3: { halign: "left", cellWidth: 45 },
-            4: { halign: "right", cellWidth: 32, fontStyle: "bold" },
-            5: { halign: "center", cellWidth: 22 },
-            6: { halign: "center", cellWidth: 24 },
+            1: { halign: "center", cellWidth: 18 },
+            2: { halign: "center", cellWidth: 12 },
+            3: { halign: "left" },
+            4: { halign: "left", cellWidth: 35 },
+            5: { halign: "left", cellWidth: 38 },
+            6: { halign: "right", cellWidth: 28, fontStyle: "bold" },
+            7: { halign: "center", cellWidth: 18 },
+            8: { halign: "center", cellWidth: 20 },
           },
         });
 
@@ -1286,8 +1335,10 @@ export function DiretoriaVisaoGerencial({
         doc.text(`3. Novos Serviços (${servNovos.length} novos serviços - Total: ${formatCurrency(selectedGerenciaDetail.valorServicosNovos || 0)})`, 14, currentY);
         currentY += 4;
 
-        const snHeaders = ["Item", "Objeto do Novo Serviço", "Justificativa da Demanda", "Tipo Contratação", "Previsão Início", "Estimativa de Valor", "Prioridade", "Status"];
+        const snHeaders = ["Gerência", "ID_DIRETORIA", "Item", "Objeto do Novo Serviço", "Justificativa da Demanda", "Tipo Contratação", "Previsão Início", "Estimativa de Valor", "Prioridade", "Status"];
         const snRows = servNovos.map((s: any) => [
+          String(s.gerencia || gSigla),
+          String(s.diretoria || siglaUpper),
           String(s.item || "-"),
           String(s.objeto || ""),
           String(s.justificativa || "-"),
@@ -1317,13 +1368,15 @@ export function DiretoriaVisaoGerencial({
           },
           columnStyles: {
             0: { halign: "center", cellWidth: 16 },
-            1: { halign: "left" },
-            2: { halign: "left", cellWidth: 45 },
-            3: { halign: "left", cellWidth: 35 },
-            4: { halign: "center", cellWidth: 24 },
-            5: { halign: "right", cellWidth: 32, fontStyle: "bold" },
+            1: { halign: "center", cellWidth: 18 },
+            2: { halign: "center", cellWidth: 12 },
+            3: { halign: "left" },
+            4: { halign: "left", cellWidth: 38 },
+            5: { halign: "left", cellWidth: 30 },
             6: { halign: "center", cellWidth: 20 },
-            7: { halign: "center", cellWidth: 22 },
+            7: { halign: "right", cellWidth: 28, fontStyle: "bold" },
+            8: { halign: "center", cellWidth: 16 },
+            9: { halign: "center", cellWidth: 18 },
           },
         });
       }
@@ -1844,6 +1897,8 @@ export function DiretoriaVisaoGerencial({
                 <table className="w-full text-xs text-left text-slate-700">
                   <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
                     <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Gerência</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">ID_Diretoria</th>
                       <th className="px-3.5 py-3 font-bold text-center w-16">Código</th>
                       <th className="px-3.5 py-3 font-bold">Descrição do Item</th>
                       <th className="px-3.5 py-3 font-bold">Categoria</th>
@@ -1858,6 +1913,16 @@ export function DiretoriaVisaoGerencial({
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredModalAquisicoes.map((item: any, idx: number) => (
                       <tr key={item.id || idx} className="hover:bg-blue-50/40 transition-colors">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-semibold text-slate-800 border border-slate-200">
+                            {item.gerencia || selectedGerenciaDetail.sigla}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-blue-50 px-2 py-0.5 rounded text-[11px] font-semibold text-blue-900 border border-blue-200/60">
+                            {item.diretoria || siglaUpper}
+                          </span>
+                        </td>
                         <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
                           {item.codigo}
                         </td>
@@ -1890,7 +1955,7 @@ export function DiretoriaVisaoGerencial({
                   </tbody>
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
                     <tr>
-                      <td colSpan={4} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                      <td colSpan={6} className="px-3.5 py-2.5 text-left text-xs uppercase">
                         Total Aquisições Exibidas ({filteredModalAquisicoes.length} itens)
                       </td>
                       <td className="px-3.5 py-2.5 text-center text-xs">
@@ -1928,6 +1993,8 @@ export function DiretoriaVisaoGerencial({
                 <table className="w-full text-xs text-left text-slate-700">
                   <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
                     <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Gerência</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">ID_Diretoria</th>
                       <th className="px-3.5 py-3 font-bold text-center w-16">Item</th>
                       <th className="px-3.5 py-3 font-bold">Objeto do Serviço</th>
                       <th className="px-3.5 py-3 font-bold">Tipo Contratação</th>
@@ -1940,6 +2007,16 @@ export function DiretoriaVisaoGerencial({
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredModalServicosExistentes.map((servico: any, idx: number) => (
                       <tr key={servico.id || idx} className="hover:bg-emerald-50/40 transition-colors">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-semibold text-slate-800 border border-slate-200">
+                            {servico.gerencia || selectedGerenciaDetail.sigla}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-emerald-50 px-2 py-0.5 rounded text-[11px] font-semibold text-emerald-900 border border-emerald-200/60">
+                            {servico.diretoria || siglaUpper}
+                          </span>
+                        </td>
                         <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
                           {servico.item}
                         </td>
@@ -1971,7 +2048,7 @@ export function DiretoriaVisaoGerencial({
                   </tbody>
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
                     <tr>
-                      <td colSpan={4} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                      <td colSpan={6} className="px-3.5 py-2.5 text-left text-xs uppercase">
                         Total Serviços Existentes ({filteredModalServicosExistentes.length} serviços)
                       </td>
                       <td className="px-3.5 py-2.5 text-right text-xs text-emerald-800 font-black">
@@ -2002,6 +2079,8 @@ export function DiretoriaVisaoGerencial({
                 <table className="w-full text-xs text-left text-slate-700">
                   <thead className="text-[11px] text-slate-600 uppercase bg-slate-100 border-b border-slate-200">
                     <tr>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">Gerência</th>
+                      <th className="px-3.5 py-3 font-bold text-center w-24">ID_Diretoria</th>
                       <th className="px-3.5 py-3 font-bold text-center w-16">Item</th>
                       <th className="px-3.5 py-3 font-bold">Objeto do Novo Serviço</th>
                       <th className="px-3.5 py-3 font-bold">Justificativa da Demanda</th>
@@ -2015,6 +2094,16 @@ export function DiretoriaVisaoGerencial({
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredModalServicosNovos.map((servico: any, idx: number) => (
                       <tr key={servico.id || idx} className="hover:bg-purple-50/40 transition-colors">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-semibold text-slate-800 border border-slate-200">
+                            {servico.gerencia || selectedGerenciaDetail.sigla}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                          <span className="bg-purple-50 px-2 py-0.5 rounded text-[11px] font-semibold text-purple-900 border border-purple-200/60">
+                            {servico.diretoria || siglaUpper}
+                          </span>
+                        </td>
                         <td className="px-3.5 py-2.5 text-center font-mono font-bold text-slate-800">
                           {servico.item}
                         </td>
@@ -2044,7 +2133,7 @@ export function DiretoriaVisaoGerencial({
                   </tbody>
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
                     <tr>
-                      <td colSpan={5} className="px-3.5 py-2.5 text-left text-xs uppercase">
+                      <td colSpan={7} className="px-3.5 py-2.5 text-left text-xs uppercase">
                         Total Novos Serviços ({filteredModalServicosNovos.length} serviços)
                       </td>
                       <td className="px-3.5 py-2.5 text-right text-xs text-purple-800 font-black">
