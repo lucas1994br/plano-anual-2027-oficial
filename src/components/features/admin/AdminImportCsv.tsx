@@ -120,6 +120,17 @@ export function AdminImportCsv() {
     }
   };
 
+  const normalizeHeader = (val: string): string => {
+    return String(val || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/_+/g, "_");
+  };
+
   const validateAndSetData = (
     headers: string[], 
     rawRows: any[], 
@@ -132,8 +143,24 @@ export function AdminImportCsv() {
 
     const parseNumber = (val: any, col: string, rowNum: number) => {
       if (val === undefined || val === null || val === "") return 0;
-      if (typeof val === "number") return val;
-      const cleanVal = val.toString().replace(/R\$\s*/g, "").replace(/\./g, "").replace(/,/g, ".");
+      if (typeof val === "number") return isNaN(val) ? 0 : val;
+      const str = String(val).replace(/R\$\s*/g, "").trim();
+      if (!str) return 0;
+
+      let cleanVal = str;
+      if (str.includes(",") && str.includes(".")) {
+        if (str.indexOf(".") < str.indexOf(",")) {
+          // pt-BR: 1.250,50
+          cleanVal = str.replace(/\./g, "").replace(",", ".");
+        } else {
+          // en-US: 1,250.50
+          cleanVal = str.replace(/,/g, "");
+        }
+      } else if (str.includes(",")) {
+        // Ex: 26,1 -> 26.1
+        cleanVal = str.replace(",", ".");
+      }
+
       const num = parseFloat(cleanVal);
       if (isNaN(num)) {
         errors.push({ row: rowNum, col, message: `Valor numérico inválido: ${val}` });
@@ -198,7 +225,13 @@ export function AdminImportCsv() {
     // ========================================================
     if (op === "update") {
       const requiredKey = type === "aquisicao" ? "codigo" : "item";
-      const hasKey = normalizedHeaders.includes(requiredKey) || normalizedHeaders.includes("id");
+      const normHeaders = headers.map(normalizeHeader);
+      const hasKey = normHeaders.some(h => 
+        h === requiredKey || 
+        h === "id" || 
+        (type === "aquisicao" && (h.startsWith("codigo") || h === "cod")) ||
+        (type !== "aquisicao" && (h.startsWith("item") || h === "n_item" || h === "num_item"))
+      );
 
       if (!hasKey) {
         errors.push({
@@ -217,19 +250,32 @@ export function AdminImportCsv() {
         const processedRow: any = { ...row };
         const rowKeys = Object.keys(row);
 
-        const getRowVal = (name: string) => {
-          const k = rowKeys.find(key => key.trim().toLowerCase() === name.toLowerCase());
-          return k ? row[k] : undefined;
+        const findVal = (possibleKeys: string[]) => {
+          for (const key of rowKeys) {
+            const normK = normalizeHeader(key);
+            if (possibleKeys.includes(normK)) {
+              return row[key];
+            }
+          }
+          return undefined;
         };
 
         if (type === "aquisicao") {
-          const rawCodigo = getRowVal("codigo");
+          const rawCodigo = findVal(["codigo", "cod", "codigo_do_item", "cod_item", "id_codigo"]);
+          const rawId = findVal(["id", "item_id", "_id"]);
+
+          if (rawId) {
+            processedRow.id = String(rawId).trim();
+          }
+
           if (rawCodigo === undefined || rawCodigo === null || String(rawCodigo).trim() === "") {
-            errors.push({ row: rowNum, col: "codigo", message: "Código numérico do item é obrigatório" });
-            hasError = true;
+            if (!rawId) {
+              errors.push({ row: rowNum, col: "codigo", message: "Código numérico do item é obrigatório" });
+              hasError = true;
+            }
           } else {
             const num = parseNumber(rawCodigo, "codigo", rowNum);
-            if (num <= 0) {
+            if (num <= 0 && !rawId) {
               errors.push({ row: rowNum, col: "codigo", message: "Código inválido" });
               hasError = true;
             } else {
@@ -237,19 +283,42 @@ export function AdminImportCsv() {
             }
           }
 
-          const rawValUnit = getRowVal("valor_unitario") ?? getRowVal("valorunitario");
+          const rawDesc = findVal(["descricao", "descricao_do_item", "descricao_material", "material", "objeto", "nome"]);
+          if (rawDesc !== undefined && String(rawDesc).trim() !== "") {
+            processedRow.descricao = String(rawDesc).trim();
+          }
+
+          const rawCat = findVal(["categoria", "grupo", "classe"]);
+          if (rawCat !== undefined && String(rawCat).trim() !== "") {
+            processedRow.categoria = String(rawCat).trim();
+          }
+
+          const rawUn = findVal(["unidade", "un", "und", "unidade_de_medida"]);
+          if (rawUn !== undefined && String(rawUn).trim() !== "") {
+            processedRow.unidade = String(rawUn).trim();
+          }
+
+          const rawValUnit = findVal(["valor_unitario", "valorunitario", "valor", "preco", "preco_unitario", "val_unit"]);
           if (rawValUnit !== undefined && String(rawValUnit).trim() !== "") {
             processedRow.valor_unitario = parseNumber(rawValUnit, "valor_unitario", rowNum);
           }
         } else {
           // servicos ou servicos_novos
-          const rawItem = getRowVal("item");
+          const rawItem = findVal(["item", "n_item", "numero_item", "num_item", "numero", "cod"]);
+          const rawId = findVal(["id", "servico_id", "_id"]);
+
+          if (rawId) {
+            processedRow.id = String(rawId).trim();
+          }
+
           if (rawItem === undefined || rawItem === null || String(rawItem).trim() === "") {
-            errors.push({ row: rowNum, col: "item", message: "Item numérico do serviço é obrigatório" });
-            hasError = true;
+            if (!rawId) {
+              errors.push({ row: rowNum, col: "item", message: "Item numérico do serviço é obrigatório" });
+              hasError = true;
+            }
           } else {
             const num = parseNumber(rawItem, "item", rowNum);
-            if (num <= 0) {
+            if (num <= 0 && !rawId) {
               errors.push({ row: rowNum, col: "item", message: "Item numérico inválido" });
               hasError = true;
             } else {
@@ -257,7 +326,27 @@ export function AdminImportCsv() {
             }
           }
 
-          const rawDir = getRowVal("diretoria");
+          const rawObjeto = findVal(["objeto", "descricao", "servico", "especificacao"]);
+          if (rawObjeto !== undefined && String(rawObjeto).trim() !== "") {
+            processedRow.objeto = String(rawObjeto).trim();
+          }
+
+          const rawTipo = findVal(["tipo", "tipo_contratacao", "tipo_de_contratacao"]);
+          if (rawTipo !== undefined && String(rawTipo).trim() !== "") {
+            processedRow.tipo = String(rawTipo).trim();
+          }
+
+          const rawContrato = findVal(["contrato", "num_contrato", "numero_contrato"]);
+          if (rawContrato !== undefined) {
+            processedRow.contrato = String(rawContrato).trim() || null;
+          }
+
+          const rawContratada = findVal(["contratada", "empresa", "fornecedor"]);
+          if (rawContratada !== undefined) {
+            processedRow.contratada = String(rawContratada).trim() || null;
+          }
+
+          const rawDir = findVal(["diretoria", "sigla_diretoria", "dir"]);
           if (rawDir && String(rawDir).trim() !== "") {
             const diretoriaSigla = String(rawDir).toUpperCase().trim();
             if (!diretoriasMap[diretoriaSigla]) {
@@ -269,22 +358,41 @@ export function AdminImportCsv() {
             }
           }
 
-          const prioridadeVal = getRowVal("prioridade")?.toString().trim();
-          if (prioridadeVal && !["Baixo", "Médio", "Alto"].includes(prioridadeVal)) {
-            errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
-            hasError = true;
+          const prioridadeVal = findVal(["prioridade", "grau_prioridade", "grau_de_prioridade"])?.toString().trim();
+          if (prioridadeVal) {
+            const normPrio = prioridadeVal.charAt(0).toUpperCase() + prioridadeVal.slice(1).toLowerCase();
+            const mappedPrio = normPrio === "Medio" ? "Médio" : normPrio;
+            if (!["Baixo", "Médio", "Alto"].includes(mappedPrio)) {
+              errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
+              hasError = true;
+            } else {
+              processedRow.prioridade = mappedPrio;
+            }
           }
 
-          const vinculacaoVal = (getRowVal("vinculação") || getRowVal("vinculacao"))?.toString().trim();
-          if (vinculacaoVal && !["Sim", "Não"].includes(vinculacaoVal)) {
-            errors.push({ row: rowNum, col: "vinculação", message: "Deve ser: Sim ou Não" });
-            hasError = true;
+          const rawVinc = findVal(["vinculacao", "vinculacao_pac", "vinculado"]);
+          if (rawVinc !== undefined && String(rawVinc).trim() !== "") {
+            const normVinc = String(rawVinc).trim().toLowerCase();
+            const mappedVinc = (normVinc === "sim" || normVinc === "s" || normVinc === "true") ? "Sim" : "Não";
+            processedRow.vinculacao = mappedVinc;
+            processedRow.vinculação = mappedVinc;
           }
 
-          const rawStatus = getRowVal("status");
+          const rawStatus = findVal(["status", "ativo", "situacao"]);
           if (rawStatus !== undefined && String(rawStatus).trim() !== "") {
-            processedRow._ativo = String(rawStatus).toLowerCase().trim() !== "inativo";
+            const strStatus = String(rawStatus).toLowerCase().trim();
+            processedRow._ativo = strStatus !== "inativo" && strStatus !== "false" && strStatus !== "desativado";
             processedRow.ativo = processedRow._ativo;
+          }
+
+          const rawEstimativa = findVal(["estimativa_valor", "valor_estimado", "valor", "estimativa"]);
+          if (rawEstimativa !== undefined && String(rawEstimativa).trim() !== "") {
+            processedRow.estimativa_valor = parseNumber(rawEstimativa, "estimativa_valor", rowNum);
+          }
+
+          const rawJust = findVal(["justificativa", "motivo"]);
+          if (rawJust !== undefined) {
+            processedRow.justificativa = String(rawJust).trim() || null;
           }
         }
 
@@ -407,10 +515,34 @@ export function AdminImportCsv() {
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           
-          const rawData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-          const rawHeaders = (XLSX.utils.sheet_to_json(worksheet, { header: 1 })[0] as string[]) || [];
-          const headers = rawHeaders.map(h => String(h || "").trim());
-          
+          const aoa: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+          let headerIndex = 0;
+          for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+            const rowVals = (aoa[i] || []).map(cell => normalizeHeader(String(cell)));
+            if (rowVals.some(v => v === "codigo" || v === "item" || v === "id" || v.startsWith("codigo") || v.startsWith("item"))) {
+              headerIndex = i;
+              break;
+            }
+          }
+
+          const rawHeaders = (aoa[headerIndex] || []).map(h => String(h || "").trim());
+          const headers = rawHeaders;
+
+          let rawData: any[] = [];
+          if (headerIndex > 0) {
+            for (let r = headerIndex + 1; r < aoa.length; r++) {
+              const rowVals = aoa[r];
+              if (!rowVals || rowVals.length === 0 || rowVals.every(c => c === "" || c === null || c === undefined)) continue;
+              const obj: Record<string, any> = {};
+              rawHeaders.forEach((h, colIdx) => {
+                if (h) obj[h] = rowVals[colIdx] ?? "";
+              });
+              rawData.push(obj);
+            }
+          } else {
+            rawData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+          }
+
           validateAndSetData(headers, rawData, type, op);
         } catch (error: any) {
           toast({
@@ -517,17 +649,34 @@ export function AdminImportCsv() {
       // ========================================================
       if (operation === "update") {
         if (importType === "aquisicao") {
+          let existingCatalog: any[] = [];
+          try {
+            existingCatalog = (await getItensCatalogo()) || [];
+          } catch (e) {
+            console.warn("Could not fetch catalog for update mapping:", e);
+          }
+          const idMap = new Map<number, string>();
+          existingCatalog.forEach((item: any) => {
+            const code = parseInt(item.codigo, 10);
+            if (!isNaN(code) && item.id) {
+              idMap.set(code, String(item.id));
+            }
+          });
+
           const payload = data.rows.map(row => {
+            const codNum = parseInt(row.codigo, 10);
             const p: any = {
-              codigo: parseInt(row.codigo, 10)
+              codigo: codNum
             };
+            const resolvedId = row.id || idMap.get(codNum) || (codNum ? "item-" + codNum : undefined);
+            if (resolvedId) p.id = String(resolvedId).trim();
+
             if (row.descricao !== undefined && row.descricao !== "") p.descricao = String(row.descricao).trim();
             if (row.categoria !== undefined && row.categoria !== "") p.categoria = String(row.categoria).trim();
             if (row.unidade !== undefined && row.unidade !== "") p.unidade = String(row.unidade).trim();
             if (row.valor_unitario !== undefined && row.valor_unitario !== "") {
               p.valor_unitario = Number(row.valor_unitario) || 0;
             }
-            if (row.id) p.id = String(row.id).trim();
             return p;
           });
 
@@ -544,10 +693,28 @@ export function AdminImportCsv() {
         } else {
           // servicos ou servicos_novos
           const isNovos = importType === "servicos_novos";
+          let existingServicos: any[] = [];
+          try {
+            existingServicos = (await getServicosCatalogo()) || [];
+          } catch (e) {
+            console.warn("Could not fetch servicos catalog for update mapping:", e);
+          }
+          const idMap = new Map<number, string>();
+          existingServicos.forEach((s: any) => {
+            const itNum = parseInt(s.item, 10);
+            if (!isNaN(itNum) && s.id) {
+              idMap.set(itNum, String(s.id));
+            }
+          });
+
           const payload = data.rows.map(row => {
+            const itemNum = parseInt(row.item, 10);
             const s: any = {
-              item: parseInt(row.item, 10)
+              item: itemNum
             };
+            const resolvedId = row.id || idMap.get(itemNum) || (itemNum ? String(itemNum) : undefined);
+            if (resolvedId) s.id = String(resolvedId).trim();
+
             if (row.tipo !== undefined && row.tipo !== "") s.tipo_contratacao = String(row.tipo).trim();
             else if (isNovos) s.tipo_contratacao = "Novo";
             if (row.objeto !== undefined && row.objeto !== "") s.objeto = String(row.objeto).trim();
@@ -557,14 +724,16 @@ export function AdminImportCsv() {
             if (row.vinculação !== undefined && row.vinculação !== "") s.vinculacao = String(row.vinculação).trim();
             if (row.vinculacao !== undefined && row.vinculacao !== "") s.vinculacao = String(row.vinculacao).trim();
             if (row._diretoria_id) s.diretoria_id = row._diretoria_id;
+            else if (row.diretoria_id) s.diretoria_id = row.diretoria_id;
             if (row.status !== undefined && row.status !== "") {
               s.ativo = String(row.status).toLowerCase().trim() !== "inativo";
+            } else if (row.ativo !== undefined) {
+              s.ativo = Boolean(row.ativo);
             }
             if (row.estimativa_valor !== undefined && row.estimativa_valor !== "") {
               s.estimativa_valor = Number(row.estimativa_valor) || 0;
             }
             if (row.justificativa !== undefined) s.justificativa = row.justificativa ? String(row.justificativa).trim() : null;
-            if (row.id) s.id = String(row.id).trim();
             return s;
           });
 
@@ -704,6 +873,7 @@ export function AdminImportCsv() {
 
   const getTemplateExcel = () => {
     let headers: string[] = [];
+
     if (operation === "delete") {
       headers = importType === "aquisicao" ? ["codigo"] : ["item"];
     } else {
@@ -711,7 +881,7 @@ export function AdminImportCsv() {
       if (importType === "servicos") headers = servicosHeaders;
       if (importType === "servicos_novos") headers = servicosNovosHeaders;
     }
-    
+
     const worksheet = XLSX.utils.aoa_to_sheet([headers]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Modelo");
@@ -842,7 +1012,7 @@ export function AdminImportCsv() {
                       <FileSpreadsheet className="h-6 w-6 text-primary" />
                     </div>
                     <div>
-                      <p className="font-medium text-sm truncate max-w-[200px]">{file.name}</p>
+                      <p className="font-medium text-sm truncate max-w-50">{file.name}</p>
                       <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
                     </div>
                   </div>

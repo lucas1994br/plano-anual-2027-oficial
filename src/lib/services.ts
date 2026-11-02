@@ -2200,16 +2200,45 @@ export async function updateServicosCatalogoBulkAdmin(
   }>
 ): Promise<unknown> {
   if (!items || items.length === 0) return { success: true };
-  if (gs.isGoogleSheetsActive()) {
-    const res = await gs.gsUpdateServicosCatalogoBulk(items);
-    await registrarLogAtividadeBulk("EDITAR", "servicos_catalogo", items.map(i => i.id || String(i.item)), { acao: "updateServicosCatalogoBulkAdmin", count: items.length });
-    return res;
-  }
-  return Promise.all(items.map(servico => {
-    if (servico.id) {
-      return updateServicoCatalogoAdmin(servico.id, servico as any);
+
+  items.forEach(s => {
+    if (!s.id && s.item) {
+      s.id = String(s.item);
     }
-    return supabase.from("servicos_catalogo").update(servico).eq("item", servico.item);
+  });
+
+  if (gs.isGoogleSheetsActive()) {
+    // Para atualização individual ou pequenos lotes (até 20 itens),
+    // executa diretamente via updateServicoCatalogoAdmin
+    if (items.length <= 20) {
+      const results = [];
+      for (const s of items) {
+        const idToUse = s.id || String(s.item);
+        const r = await updateServicoCatalogoAdmin(idToUse, s as any);
+        results.push(r);
+      }
+      return results;
+    }
+
+    try {
+      const res = await gs.gsUpdateServicosCatalogoBulk(items);
+      await registrarLogAtividadeBulk("EDITAR", "servicos_catalogo", items.map(i => i.id || String(i.item)), { acao: "updateServicosCatalogoBulkAdmin", count: items.length });
+      return res;
+    } catch (bulkErr) {
+      console.warn("Falha em gsUpdateServicosCatalogoBulk, tentando fallback individual:", bulkErr);
+      const results = [];
+      for (const s of items) {
+        const idToUse = s.id || String(s.item);
+        const r = await updateServicoCatalogoAdmin(idToUse, s as any);
+        results.push(r);
+      }
+      return results;
+    }
+  }
+
+  return Promise.all(items.map(servico => {
+    const idToUse = servico.id || String(servico.item);
+    return updateServicoCatalogoAdmin(idToUse, servico as any);
   }));
 }
 
@@ -2995,17 +3024,55 @@ export async function updateItensCatalogoBulkAdmin(
   }>
 ): Promise<unknown> {
   if (!items || items.length === 0) return { success: true };
-  if (gs.isGoogleSheetsActive()) {
-    const res = await gs.gsUpdateItensCatalogoBulk(items);
-    await registrarLogAtividadeBulk("EDITAR", "itens_catalogo", items.map(i => i.id || String(i.codigo)), { acao: "updateItensCatalogoBulkAdmin", count: items.length });
-    return res;
-  }
-  return Promise.all(items.map(item => {
-    if (item.id) {
-      return updateItemCatalogoAdmin(item.id, item as any);
+
+  // Garante que o ID do item esteja preenchido usando o cache em memória por código
+  items.forEach(it => {
+    if (!it.id && it.codigo) {
+      const cached = memoryCatalogByCode.get(Number(it.codigo));
+      if (cached?.id) it.id = String(cached.id);
+      if (!it.id) it.id = "item-" + it.codigo;
     }
-    return supabase.from("itens_catalogo").update(item).eq("codigo", item.codigo);
+  });
+
+  if (gs.isGoogleSheetsActive()) {
+    // Para atualização individual ou pequenos lotes (até 20 itens),
+    // executa diretamente via updateItemCatalogoAdmin, garantindo sincronização
+    // imediata no catálogo e propagação para as solicitações
+    if (items.length <= 20) {
+      const results = [];
+      for (const item of items) {
+        const idToUse = item.id || ("item-" + item.codigo);
+        const r = await updateItemCatalogoAdmin(idToUse, item as any);
+        results.push(r);
+      }
+      updateCatalogCache(items);
+      return results;
+    }
+
+    try {
+      const res = await gs.gsUpdateItensCatalogoBulk(items);
+      updateCatalogCache(items);
+      await registrarLogAtividadeBulk("EDITAR", "itens_catalogo", items.map(i => i.id || String(i.codigo)), { acao: "updateItensCatalogoBulkAdmin", count: items.length });
+      return res;
+    } catch (bulkErr) {
+      console.warn("Falha em gsUpdateItensCatalogoBulk, tentando fallback individual:", bulkErr);
+      const results = [];
+      for (const item of items) {
+        const idToUse = item.id || ("item-" + item.codigo);
+        const r = await updateItemCatalogoAdmin(idToUse, item as any);
+        results.push(r);
+      }
+      updateCatalogCache(items);
+      return results;
+    }
+  }
+
+  const res = await Promise.all(items.map(item => {
+    const idToUse = item.id || ("item-" + item.codigo);
+    return updateItemCatalogoAdmin(idToUse, item as any);
   }));
+  updateCatalogCache(items);
+  return res;
 }
 
 export async function deleteItensCatalogoBulkAdmin(

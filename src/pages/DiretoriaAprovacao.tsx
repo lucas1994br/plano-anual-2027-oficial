@@ -388,7 +388,15 @@ const DiretoriaAprovacao = () => {
   const servicosCatalogoExistentesSet = useMemo(() => {
     return new Set(
       (servicosCatalogoData as any[])
-        .filter(c => String(c.tipo_contratacao || "").trim().toLowerCase() !== "novo")
+        .filter(c => {
+          const contrato = String(c.contrato || "").trim();
+          const contratada = String(c.contratada || "").trim();
+          const hasContrato = (contrato !== "" && contrato !== "-") || (contratada !== "" && contratada !== "-");
+          if (hasContrato) return true;
+          const itemNum = Number(c.item);
+          if (!isNaN(itemNum) && itemNum >= 9000000) return false;
+          return String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() !== "novo";
+        })
         .map(c => String(c.item || "").trim())
     );
   }, [servicosCatalogoData]);
@@ -396,7 +404,15 @@ const DiretoriaAprovacao = () => {
   const servicosCatalogoNovosSet = useMemo(() => {
     return new Set(
       (servicosCatalogoData as any[])
-        .filter(c => String(c.tipo_contratacao || "").trim().toLowerCase() === "novo")
+        .filter(c => {
+          const contrato = String(c.contrato || "").trim();
+          const contratada = String(c.contratada || "").trim();
+          const hasContrato = (contrato !== "" && contrato !== "-") || (contratada !== "" && contratada !== "-");
+          if (hasContrato) return false;
+          const itemNum = Number(c.item);
+          if (!isNaN(itemNum) && itemNum >= 9000000) return true;
+          return String(c.tipo_contratacao || c.tipoContratacao || "").trim().toLowerCase() === "novo";
+        })
         .map(c => String(c.item || "").trim())
     );
   }, [servicosCatalogoData]);
@@ -846,46 +862,66 @@ const DiretoriaAprovacao = () => {
   }, [items, itensProprios, filteredOwnItems, selectedOwnItems, selectedItems, selectedOption]);
 
   const gastoServicosExistentesDiretoria = useMemo(() => {
+    const isExistente = (s: ServicoItem) => {
+      const c = String(s.contrato || (s as any).contrato || "").trim();
+      const emp = String(s.contratada || (s as any).contratada || "").trim();
+      if ((c !== "" && c !== "-") || (emp !== "" && emp !== "-")) return true;
+      const itemKey = String(s.item || "").trim();
+      if (servicosCatalogoExistentesSet.has(itemKey)) return true;
+      if (servicosCatalogoNovosSet.has(itemKey)) return false;
+      const itemNum = Number(s.item);
+      if (!isNaN(itemNum) && itemNum >= 9000000) return false;
+      const tipo = String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase();
+      return !tipo.includes("novo");
+    };
+
     if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
       return servicosData
         .filter((s: ServicoItem) => {
           const itemKey = String(s.item || "").trim();
           const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          const isExistente = servicosCatalogoExistentesSet.has(itemKey) || (!servicosCatalogoNovosSet.has(itemKey) && String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() !== "novo");
-          return isExistente && (matchItem || matchId);
+          return isExistente(s) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
       .filter((s: ServicoItem) => {
-        const itemKey = String(s.item || "").trim();
-        const isExistente = servicosCatalogoExistentesSet.has(itemKey) || (!servicosCatalogoNovosSet.has(itemKey) && String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() !== "novo");
-        return isEnviadoOuAprovado(s.status) && isExistente;
+        return isEnviadoOuAprovado(s.status) && isExistente(s);
       })
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
   }, [servicosData, servicosCatalogoExistentesSet, servicosCatalogoNovosSet, selectedServicos, selectedOption]);
 
   const gastoServicosNovosDiretoria = useMemo(() => {
+    const isNovo = (s: ServicoItem) => {
+      const c = String(s.contrato || (s as any).contrato || "").trim();
+      const emp = String(s.contratada || (s as any).contratada || "").trim();
+      if ((c !== "" && c !== "-") || (emp !== "" && emp !== "-")) return false;
+      const itemKey = String(s.item || "").trim();
+      if (servicosCatalogoNovosSet.has(itemKey)) return true;
+      if (servicosCatalogoExistentesSet.has(itemKey)) return false;
+      const itemNum = Number(s.item);
+      if (!isNaN(itemNum) && itemNum >= 9000000) return true;
+      const tipo = String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase();
+      return tipo.includes("novo");
+    };
+
     if (selectedServicos.size > 0 && selectedOption !== "aquisicao") {
       return servicosData
         .filter((s: ServicoItem) => {
           const itemKey = String(s.item || "").trim();
           const matchItem = selectedServicos.has(s.item as any) || selectedServicos.has(itemKey);
           const matchId = s.id && selectedServicos.has(s.id as any);
-          const isNovo = servicosCatalogoNovosSet.has(itemKey) || (!servicosCatalogoExistentesSet.has(itemKey) && (String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() === "novo" || !servicosCatalogoSet.has(itemKey)));
-          return isNovo && (matchItem || matchId);
+          return isNovo(s) && (matchItem || matchId);
         })
         .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
     }
     return servicosData
       .filter((s: ServicoItem) => {
-        const itemKey = String(s.item || "").trim();
-        const isNovo = servicosCatalogoNovosSet.has(itemKey) || (!servicosCatalogoExistentesSet.has(itemKey) && (String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase() === "novo" || !servicosCatalogoSet.has(itemKey)));
-        return isEnviadoOuAprovado(s.status) && isNovo;
+        return isEnviadoOuAprovado(s.status) && isNovo(s);
       })
       .reduce((acc: number, s: ServicoItem) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || (s as any).estimativa_valor || (s as any).valor_total || (s as any).valorTotal || 0), 0);
-  }, [servicosData, servicosCatalogoExistentesSet, servicosCatalogoNovosSet, servicosCatalogoSet, selectedServicos, selectedOption]);
+  }, [servicosData, servicosCatalogoExistentesSet, servicosCatalogoNovosSet, selectedServicos, selectedOption]);
 
   const gastoServicosDiretoria = useMemo(() => {
     return selectedOption === "servicos_existentes"
@@ -942,11 +978,26 @@ const DiretoriaAprovacao = () => {
         };
       });
     
-    const isNovoTipo = (tipo?: string) => String(tipo || "").trim().toLowerCase() === "novo";
+    const hasContratoOuContratada = (s: any) => {
+      const c = String(s.contrato || "").trim();
+      const emp = String(s.contratada || "").trim();
+      return (c !== "" && c !== "-") || (emp !== "" && emp !== "-");
+    };
+
+    const isNovoServico = (s: any) => {
+      if (hasContratoOuContratada(s)) return false;
+      const itemNum = Number(s.item);
+      if (!isNaN(itemNum) && itemNum >= 9000000) return true;
+      const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
+      if (itemKey && servicosCatalogoNovosSet.has(itemKey)) return true;
+      if (itemKey && servicosCatalogoExistentesSet.has(itemKey)) return false;
+      const tipo = String(s.tipoContratacao || s.tipo_contratacao || "").trim().toLowerCase();
+      return tipo.includes("novo");
+    };
 
     if (selectedOption === "servicos_existentes") {
       const catalogoExistentes = (servicosCatalogoData as any[])
-        .filter((catalogoItem) => !isNovoTipo(catalogoItem.tipo_contratacao))
+        .filter((catalogoItem) => !isNovoServico(catalogoItem))
         .map((catalogoItem) => {
           let servicoDb = selectedGerenciaSigla
             ? servicosDaDiretoria.find(s => 
@@ -1010,13 +1061,13 @@ const DiretoriaAprovacao = () => {
 
       const catalogoExistentesItemsSet = new Set(catalogoExistentes.map(s => String(s.item || "").trim()));
       const customExistentes = servicosDaDiretoria.filter(s => 
-        !isNovoTipo(s.tipoContratacao) && 
+        !isNovoServico(s) && 
         !catalogoExistentesItemsSet.has(String(s.item || "").trim())
       );
       return [...catalogoExistentes, ...customExistentes];
     } else if (selectedOption === "servicos_novos") {
       const catalogoNovos = (servicosCatalogoData as any[])
-        .filter((catalogoItem) => isNovoTipo(catalogoItem.tipo_contratacao))
+        .filter((catalogoItem) => isNovoServico(catalogoItem))
         .map((catalogoItem) => {
           let servicoDb = selectedGerenciaSigla
             ? servicosDaDiretoria.find(s => 
@@ -1078,7 +1129,7 @@ const DiretoriaAprovacao = () => {
           } as unknown as ServicoItem;
         });
       const catalogoNovosItemsSet = new Set(catalogoNovos.map(s => Number(s.item)));
-      const customNovos = servicosDaDiretoria.filter(s => !servicosCatalogoSet.has(String(s.item || "").trim()) && !catalogoNovosItemsSet.has(Number(s.item)));
+      const customNovos = servicosDaDiretoria.filter(s => isNovoServico(s) && !servicosCatalogoSet.has(String(s.item || "").trim()) && !catalogoNovosItemsSet.has(Number(s.item)));
       return [...catalogoNovos, ...customNovos];
     }
     return [];
@@ -1220,14 +1271,20 @@ const DiretoriaAprovacao = () => {
   }, [servicosData, servicosCatalogoData, gerenciaMap]);
 
   const isNovoServicoItem = (s: ServicoItem) => {
+    const c = String(s.contrato || (s as any).contrato || "").trim();
+    const emp = String(s.contratada || (s as any).contratada || "").trim();
+    if ((c !== "" && c !== "-") || (emp !== "" && emp !== "-")) return false;
+
+    const itemNum = Number(s.item);
+    if (!isNaN(itemNum) && itemNum >= 9000000) return true;
+
     const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
     if (itemKey && servicosCatalogoNovosSet.has(itemKey)) return true;
     if (itemKey && servicosCatalogoExistentesSet.has(itemKey)) return false;
+
     const tipo = String(s.tipoContratacao || (s as any).tipo_contratacao || "").trim().toLowerCase();
     if (tipo.includes("novo")) return true;
-    if (tipo.includes("renov") || tipo.includes("cont") || tipo.includes("existente")) return false;
-    if (itemKey && servicosCatalogoSet.has(itemKey)) return false;
-    return true;
+    return false;
   };
 
   const servicosRecebidosPorTipo = useMemo(() => {

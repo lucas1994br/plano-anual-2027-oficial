@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -34,6 +34,7 @@ export function AccessCodeScreen({
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,7 +118,7 @@ export function AccessCodeScreen({
         ]}
       />
 
-      <div className={`bg-gradient-to-r ${gradientClass} px-6 py-8`}>
+      <div className={`bg-linear-to-r ${gradientClass} px-6 py-8`}>
         <div className="max-w-md mx-auto text-center">
           <span className="text-4xl mb-3 block">{icon}</span>
           <h1 className="text-2xl font-bold text-white mb-1">{title}</h1>
@@ -140,18 +141,33 @@ export function AccessCodeScreen({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              type="password"
-              placeholder="Digite o código de acesso..."
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value);
-                setError("");
-              }}
-              className="text-center text-lg tracking-widest"
-              maxLength={64}
-              required
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="Digite o código de acesso..."
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setError("");
+                }}
+                className="text-center text-lg tracking-widest pr-10"
+                maxLength={64}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-5 w-5" />
+                ) : (
+                  <Eye className="h-5 w-5" />
+                )}
+              </button>
+            </div>
             {error && (
               <p className="text-sm text-destructive text-center">{error}</p>
             )}
