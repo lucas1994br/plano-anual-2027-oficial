@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { supabase } from "./supabaseClient.ts";
+export { supabase };
 import * as gs from "./googleSheetsClient.ts";
 
 function normalizePeriodo(p: any) {
@@ -260,8 +261,20 @@ export async function registrarLogAtividadeBulk(
       : (accessCode.replace(/\D/g, "") || "desconhecido");
 
     if (gs.isGoogleSheetsActive()) {
-      for (const id of registrosIds) {
-        await gs.gsRegistrarLogAtividade(matricula, acao, tabelaAfetada, id, detalhes);
+      try {
+        if (registrosIds.length <= 3) {
+          for (const id of registrosIds) {
+            await gs.gsRegistrarLogAtividade(matricula, acao, tabelaAfetada, id, detalhes);
+          }
+        } else {
+          await gs.gsRegistrarLogAtividade(matricula, acao, tabelaAfetada, `BULK (${registrosIds.length})`, {
+            ...detalhes,
+            totalItens: registrosIds.length,
+            primeirosIds: registrosIds.slice(0, 10),
+          });
+        }
+      } catch (logErr) {
+        console.warn("Falha ao registrar log de atividade bulk no Google Sheets:", logErr);
       }
       return;
     }
@@ -1381,6 +1394,8 @@ export async function updateSolicitacaoStatusBulk(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
+  if (ids.length === 0) return;
+
   let atividade: AtividadeTipo = "edicao_em_lote";
   if (status === "enviado") atividade = "enviar_solicitacao";
   else if (status === "aprovado") atividade = "aprovar";
@@ -1388,20 +1403,31 @@ export async function updateSolicitacaoStatusBulk(
   else if (status === "rascunho") atividade = "devolver_solicitacao";
   else if (status === "em_compra") atividade = "enviar_compras";
 
-  // Pega dados originais para o log orçamentário e checagem de permissão
-  const { data: originais } = await supabase
-    .from("solicitacoes")
-    .select("id, periodo_id, gerencia_id, diretoria_id, qtd_estimada, valor_unitario")
-    .in("id", ids);
+  if (gs.isGoogleSheetsActive()) {
+    await gs.gsUpdateSolicitacaoStatusBulk(ids, status, justificativa);
+    await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
+    return;
+  }
 
-  if (originais && originais[0]) {
-    await assertActivityAllowed({
-      periodoId: originais[0].periodo_id,
-      gerenciaId: originais[0].gerencia_id,
-      diretoriaId: originais[0].diretoria_id,
-      modulo: "aquisicao",
-      atividade,
-    });
+  // Pega dados originais para o log orçamentário e checagem de permissão no Supabase
+  try {
+    const { data: originais } = await supabase
+      .from("solicitacoes")
+      .select("id, periodo_id, gerencia_id, diretoria_id, qtd_estimada, valor_unitario")
+      .in("id", ids);
+
+    if (originais && originais[0]) {
+      await assertActivityAllowed({
+        periodoId: originais[0].periodo_id,
+        gerenciaId: originais[0].gerencia_id,
+        diretoriaId: originais[0].diretoria_id,
+        modulo: "aquisicao",
+        atividade,
+      });
+    }
+  } catch (permErr: any) {
+    if (permErr.message && permErr.message.includes("Ação bloqueada")) throw permErr;
+    console.warn("Aviso ao checar permissão no Supabase:", permErr);
   }
 
   const updates: Record<string, unknown> = { 
@@ -1417,49 +1443,18 @@ export async function updateSolicitacaoStatusBulk(
     updates.justificativa_rejeicao = justificativa;
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsUpdateSolicitacaoStatusBulk(ids, status, justificativa);
-    await registrarLogAtividadeBulk("EDITAR", "solicitacoes", ids, { acao: "updateSolicitacaoStatusBulk", status_novo: status, justificativa });
-    return;
+  try {
+    const { error } = await supabase
+      .from("solicitacoes")
+      .update(updates)
+      .in("id", ids);
+
+    if (error) console.warn("Aviso ao atualizar solicitacoes no Supabase:", error);
+  } catch (supaErr) {
+    console.warn("Aviso de rede no Supabase:", supaErr);
   }
-
-  const { error } = await supabase
-    .from("solicitacoes")
-    .update(updates)
-    .in("id", ids);
-
-  if (error) throw error;
 
   // Registrar histórico e logs orçamentários em lote de forma resiliente
-  if (originais) {
-    const logsToInsert: {
-      solicitacaoId: string;
-      diretoriaId: string;
-      acao: 'reservar' | 'estornar_reserva' | 'executar' | 'estornar_execucao';
-      valor: number;
-    }[] = [];
-
-    for (const item of originais) {
-      const valorTotal = (item.qtd_estimada || 0) * (item.valor_unitario || 0);
-      if (status === "enviado") {
-        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'reservar', valor: valorTotal });
-      } else if (status === "aprovado") {
-        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'estornar_reserva', valor: valorTotal });
-        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'executar', valor: valorTotal });
-      } else if (status === "rejeitado") {
-        logsToInsert.push({ solicitacaoId: item.id, diretoriaId: item.diretoria_id, acao: 'estornar_reserva', valor: valorTotal });
-      }
-    }
-
-    if (logsToInsert.length > 0) {
-      try {
-        await registrarLogsOrcamentariosBulk(logsToInsert);
-      } catch (logErr) {
-        console.warn("Aviso ao registrar logs orçamentários em lote:", logErr);
-      }
-    }
-  }
-
   try {
     const historicoRecords = ids.map((id) => ({
       solicitacao_id: id,
@@ -1490,6 +1485,8 @@ export async function updateServicoStatusBulk(
   status: SolicitacaoStatus,
   justificativa?: string
 ): Promise<void> {
+  if (ids.length === 0) return;
+
   let atividade: AtividadeTipo = "edicao_em_lote";
   if (status === "enviado") atividade = "enviar_solicitacao";
   else if (status === "aprovado") atividade = "aprovar";
@@ -1497,20 +1494,31 @@ export async function updateServicoStatusBulk(
   else if (status === "rascunho") atividade = "devolver_solicitacao";
   else if (status === "em_compra") atividade = "enviar_compras";
 
-  const { data: originais } = await supabase
-    .from("servicos")
-    .select("id, periodo_id, gerencia_id, diretoria_id, tipo_contratacao")
-    .in("id", ids);
+  if (gs.isGoogleSheetsActive()) {
+    await gs.gsUpdateServicoStatusBulk(ids, status, justificativa);
+    await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicoStatusBulk", status_novo: status, justificativa });
+    return;
+  }
 
-  if (originais && originais[0]) {
-    const isNovo = originais[0].tipo_contratacao === "Novo";
-    await assertActivityAllowed({
-      periodoId: originais[0].periodo_id,
-      gerenciaId: originais[0].gerencia_id,
-      diretoriaId: originais[0].diretoria_id,
-      modulo: isNovo ? "servicos_novos" : "servicos_existentes",
-      atividade,
-    });
+  try {
+    const { data: originais } = await supabase
+      .from("servicos")
+      .select("id, periodo_id, gerencia_id, diretoria_id, tipo_contratacao")
+      .in("id", ids);
+
+    if (originais && originais[0]) {
+      const isNovo = originais[0].tipo_contratacao === "Novo";
+      await assertActivityAllowed({
+        periodoId: originais[0].periodo_id,
+        gerenciaId: originais[0].gerencia_id,
+        diretoriaId: originais[0].diretoria_id,
+        modulo: isNovo ? "servicos_novos" : "servicos_existentes",
+        atividade,
+      });
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes("Ação bloqueada")) throw err;
+    console.warn("Aviso ao checar permissão no Supabase:", err);
   }
 
   const updates: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
@@ -1519,18 +1527,16 @@ export async function updateServicoStatusBulk(
     updates.justificativa_rejeicao = justificativa;
   }
 
-  if (gs.isGoogleSheetsActive()) {
-    await gs.gsUpdateServicoStatusBulk(ids, status, justificativa);
-    await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicoStatusBulk", status_novo: status, justificativa });
-    return;
+  try {
+    const { error } = await supabase
+      .from("servicos")
+      .update(updates)
+      .in("id", ids);
+
+    if (error) console.warn("Aviso ao atualizar servicos no Supabase:", error);
+  } catch (supaErr) {
+    console.warn("Aviso de rede no Supabase:", supaErr);
   }
-
-  const { error } = await supabase
-    .from("servicos")
-    .update(updates)
-    .in("id", ids);
-
-  if (error) throw error;
 
   await registrarLogAtividadeBulk("EDITAR", "servicos", ids, { acao: "updateServicoStatusBulk", status_novo: status, justificativa });
 }
@@ -4620,75 +4626,1353 @@ export async function assertActivityAllowed(
 
 export async function transferirSolicitacoesParaGerenciaBulk(
   ids: string[],
-  targetGerenciaId: string
+  targetGerenciaId: string,
+  targetDiretoriaId?: string,
+  origemSigla?: string,
+  novoStatus: SolicitacaoStatus = "rascunho"
 ): Promise<void> {
   if (ids.length === 0) return;
+
+  let finalTargetDirId = targetDiretoriaId || "";
+  let finalTargetGerId = targetGerenciaId || "";
+
+  try {
+    const gerencias = await getTodasGerencias();
+    const todasDiretorias = await getDiretorias();
+
+    // Se o destino for a própria Diretoria (ID ou Sigla)
+    const dirMatched = (todasDiretorias || []).find((d: any) =>
+      String(d.id) === String(finalTargetGerId) ||
+      String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
+    );
+
+    if (dirMatched) {
+      finalTargetDirId = String(dirMatched.id);
+      const gerDaDir = (gerencias || []).find((g: any) =>
+        String(g.diretoria_id) === String(dirMatched.id) &&
+        (String(g.sigla).toUpperCase() === String(dirMatched.sigla).toUpperCase() || String(g.nome).toLowerCase().includes("diretoria"))
+      ) || (gerencias || []).find((g: any) => String(g.diretoria_id) === String(dirMatched.id));
+      if (gerDaDir?.id) {
+        finalTargetGerId = String(gerDaDir.id);
+      }
+    }
+
+    if (!finalTargetDirId) {
+      const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+      if (targetGer?.diretoria_id) {
+        finalTargetDirId = String(targetGer.diretoria_id);
+      }
+    }
+  } catch (e) {
+    console.warn("Não foi possível inferir diretoria_id da gerência:", e);
+  }
+
+  const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
+
   if (gs.isGoogleSheetsActive()) {
     const gerencias = await gs.gsGetGerencias();
-    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(targetGerenciaId));
-    const targetDirId = targetGer?.diretoria_id || "";
-    await gs.gsTransferirSolicitacoesParaGerenciaBulk(ids, targetGerenciaId, targetDirId);
+    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+    const targetDirId = finalTargetDirId || targetGer?.diretoria_id || "";
+    await gs.gsTransferirSolicitacoesParaGerenciaBulk(ids, finalTargetGerId, targetDirId);
+    if (novoStatus && novoStatus !== "rascunho") {
+      await gs.gsUpdateSolicitacaoStatusBulk(ids, novoStatus);
+    }
     await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
       acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: targetGerenciaId,
+      gerencia_destino_id: finalTargetGerId,
+      diretoria_destino_id: targetDirId,
+      origem_sigla: origemSigla,
+      status: novoStatus,
     });
     return;
   }
 
-  const { error } = await supabase
-    .from("solicitacoes")
-    .update({
-      status: "rascunho",
-      gerencia_id: targetGerenciaId,
-      updated_at: new Date().toISOString(),
-    })
-    .in("id", ids);
+  const updateData: any = {
+    status: novoStatus,
+    gerencia_id: finalTargetGerId,
+    updated_at: new Date().toISOString(),
+  };
+  if (novoStatus === "aprovado") {
+    updateData.aprovado_em = new Date().toISOString();
+  }
+  if (finalTargetDirId) {
+    updateData.diretoria_id = finalTargetDirId;
+  }
 
-  if (error) {
-    console.error("Erro ao transferir solicitacoes em massa:", error);
-    throw error;
+  if (tagOrigem) {
+    const { data: currentRows } = await supabase
+      .from("solicitacoes")
+      .select("id, observacao")
+      .in("id", ids);
+
+    if (currentRows && currentRows.length > 0) {
+      for (const row of currentRows) {
+        const obsAtual = row.observacao || "";
+        const novaObs = obsAtual.includes(tagOrigem)
+          ? obsAtual
+          : obsAtual
+            ? `${tagOrigem} ${obsAtual}`
+            : tagOrigem;
+        await supabase
+          .from("solicitacoes")
+          .update({
+            ...updateData,
+            observacao: novaObs,
+          })
+          .eq("id", row.id);
+      }
+    } else {
+      await supabase
+        .from("solicitacoes")
+        .update(updateData)
+        .in("id", ids);
+    }
+  } else {
+    const { error } = await supabase
+      .from("solicitacoes")
+      .update(updateData)
+      .in("id", ids);
+
+    if (error) {
+      console.error("Erro ao transferir solicitacoes em massa:", error);
+      throw error;
+    }
   }
 
   await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
     acao: "transferir_para_gerencia_bulk",
-    gerencia_destino_id: targetGerenciaId,
+    gerencia_destino_id: finalTargetGerId,
+    diretoria_destino_id: finalTargetDirId,
+    origem_sigla: origemSigla,
+    status: novoStatus,
   });
 }
 
 export async function transferirServicosParaGerenciaBulk(
   ids: string[],
-  targetGerenciaId: string
+  targetGerenciaId: string,
+  targetDiretoriaId?: string,
+  origemSigla?: string,
+  novoStatus: SolicitacaoStatus = "rascunho"
 ): Promise<void> {
   if (ids.length === 0) return;
+
+  let finalTargetDirId = targetDiretoriaId || "";
+  let finalTargetGerId = targetGerenciaId || "";
+
+  try {
+    const gerencias = await getTodasGerencias();
+    const todasDiretorias = await getDiretorias();
+
+    const dirMatched = (todasDiretorias || []).find((d: any) =>
+      String(d.id) === String(finalTargetGerId) ||
+      String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
+    );
+
+    if (dirMatched) {
+      finalTargetDirId = String(dirMatched.id);
+      const gerDaDir = (gerencias || []).find((g: any) =>
+        String(g.diretoria_id) === String(dirMatched.id) &&
+        (String(g.sigla).toUpperCase() === String(dirMatched.sigla).toUpperCase() || String(g.nome).toLowerCase().includes("diretoria"))
+      ) || (gerencias || []).find((g: any) => String(g.diretoria_id) === String(dirMatched.id));
+      if (gerDaDir?.id) {
+        finalTargetGerId = String(gerDaDir.id);
+      }
+    }
+
+    if (!finalTargetDirId) {
+      const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+      if (targetGer?.diretoria_id) {
+        finalTargetDirId = String(targetGer.diretoria_id);
+      }
+    }
+  } catch (e) {
+    console.warn("Não foi possível inferir diretoria_id da gerência:", e);
+  }
+
+  const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
+
   if (gs.isGoogleSheetsActive()) {
     const gerencias = await gs.gsGetGerencias();
-    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(targetGerenciaId));
-    const targetDirId = targetGer?.diretoria_id || "";
-    await gs.gsTransferirServicosParaGerenciaBulk(ids, targetGerenciaId, targetDirId);
+    const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+    const targetDirId = finalTargetDirId || targetGer?.diretoria_id || "";
+    await gs.gsTransferirServicosParaGerenciaBulk(ids, finalTargetGerId, targetDirId);
+    if (novoStatus && novoStatus !== "rascunho") {
+      await gs.gsUpdateServicoStatusBulk(ids, novoStatus);
+    }
     await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
       acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: targetGerenciaId,
+      gerencia_destino_id: finalTargetGerId,
+      diretoria_destino_id: targetDirId,
+      origem_sigla: origemSigla,
+      status: novoStatus,
     });
     return;
   }
 
-  const { error } = await supabase
-    .from("servicos")
-    .update({
-      status: "rascunho",
-      gerencia_id: targetGerenciaId,
-      updated_at: new Date().toISOString(),
-    })
-    .in("id", ids);
+  const updateData: any = {
+    status: novoStatus,
+    gerencia_id: finalTargetGerId,
+    updated_at: new Date().toISOString(),
+  };
+  if (novoStatus === "aprovado") {
+    updateData.aprovado_em = new Date().toISOString();
+  }
+  if (finalTargetDirId) {
+    updateData.diretoria_id = finalTargetDirId;
+  }
 
-  if (error) {
-    console.error("Erro ao transferir servicos em massa:", error);
-    throw error;
+  if (tagOrigem) {
+    const { data: currentRows } = await supabase
+      .from("servicos")
+      .select("id, observacao")
+      .in("id", ids);
+
+    if (currentRows && currentRows.length > 0) {
+      for (const row of currentRows) {
+        const obsAtual = row.observacao || "";
+        const novaObs = obsAtual.includes(tagOrigem)
+          ? obsAtual
+          : obsAtual
+            ? `${tagOrigem} ${obsAtual}`
+            : tagOrigem;
+        await supabase
+          .from("servicos")
+          .update({
+            ...updateData,
+            observacao: novaObs,
+          })
+          .eq("id", row.id);
+      }
+    } else {
+      await supabase
+        .from("servicos")
+        .update(updateData)
+        .in("id", ids);
+    }
+  } else {
+    const { error } = await supabase
+      .from("servicos")
+      .update(updateData)
+      .in("id", ids);
+
+    if (error) {
+      console.error("Erro ao transferir servicos em massa:", error);
+      throw error;
+    }
   }
 
   await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
     acao: "transferir_para_gerencia_bulk",
     gerencia_destino_id: targetGerenciaId,
+    diretoria_destino_id: finalTargetDirId,
+    origem_sigla: origemSigla,
   });
+}
+
+export async function transferirCategoriaAquisicao(params: {
+  categoria?: string;
+  categorias?: string[];
+  sourceDiretoriaId?: string;
+  targetDiretoriaId?: string;
+  targetDiretoriaIds?: string[];
+  targetGerenciaId?: string;
+  periodoId?: string;
+  origemSigla?: string;
+  incluirCustoFinanceiro?: boolean;
+}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[] }> {
+  const {
+    categoria,
+    categorias,
+    sourceDiretoriaId,
+    targetDiretoriaId,
+    targetDiretoriaIds,
+    targetGerenciaId,
+    periodoId,
+    origemSigla,
+    incluirCustoFinanceiro = true,
+  } = params;
+
+  const rawCategorias = categorias && categorias.length > 0
+    ? categorias
+    : categoria ? [categoria] : [];
+  const finalCategorias = Array.from(new Set(rawCategorias)).filter(Boolean);
+
+  const rawDirIds = targetDiretoriaIds && targetDiretoriaIds.length > 0
+    ? targetDiretoriaIds
+    : targetDiretoriaId
+      ? [targetDiretoriaId]
+      : [];
+
+  const finalDirIds = Array.from(new Set(rawDirIds)).filter(Boolean);
+  if (finalCategorias.length === 0 || finalDirIds.length === 0) {
+    throw new Error("Ao menos uma categoria e ao menos uma diretoria de destino são obrigatórios.");
+  }
+
+  const todasGerencias = await getTodasGerencias();
+  const firstDirId = String(finalDirIds[0]);
+  const gersDaFirstDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(firstDirId));
+  const firstGerId = String((finalDirIds.length === 1 && targetGerenciaId)
+    ? targetGerenciaId
+    : gersDaFirstDir[0]?.id || (todasGerencias[0]?.id || ""));
+
+  const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
+  const tagSemCusto = origemSigla
+    ? `[Categoria transferida da Diretoria ${origemSigla} sem custo financeiro]`
+    : "[Categoria transferida sem custo financeiro]";
+
+  // SUPORTE COMPLETO AO GOOGLE SHEETS
+  if (gs.isGoogleSheetsActive()) {
+    const finalCatsLower = new Set(finalCategorias.map(c => c.trim().toLowerCase()));
+
+    let allSols: any[] = [];
+    let itensCatalogo: any[] = [];
+    try {
+      const [solsResult, itensResult] = await Promise.all([
+        gs.gsGetSolicitacoes(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {}),
+        gs.gsGetItensCatalogo().catch(() => []),
+      ]);
+      allSols = solsResult || [];
+      itensCatalogo = itensResult || [];
+    } catch (e) {
+      console.warn("Erro ao buscar dados no Sheets:", e);
+    }
+
+    const catPorItemId = new Map<string, string>();
+    const catPorCodigo = new Map<string, string>();
+    (itensCatalogo || []).forEach((item: any) => {
+      const cat = String(item.categoria || "").trim().toLowerCase();
+      if (item.id) catPorItemId.set(String(item.id), cat);
+      if (item.codigo) catPorCodigo.set(String(item.codigo), cat);
+    });
+
+    const solsFiltradas = (allSols || []).filter((s: any) => {
+      const catDireta = String(s.categoria || "").trim().toLowerCase();
+      if (catDireta && finalCatsLower.has(catDireta)) return true;
+
+      const catPorId = s.item_id ? catPorItemId.get(String(s.item_id)) : undefined;
+      if (catPorId && finalCatsLower.has(catPorId)) return true;
+
+      const catPorCod = s.codigo ? catPorCodigo.get(String(s.codigo)) : undefined;
+      if (catPorCod && finalCatsLower.has(catPorCod)) return true;
+
+      return false;
+    });
+
+    const idsOrigem = solsFiltradas.map((s: any) => s.id).filter(Boolean);
+    const itensCatCount = (itensCatalogo || []).filter((i: any) => finalCatsLower.has(String(i.categoria || "").trim().toLowerCase())).length;
+    const totalItens = idsOrigem.length > 0 ? idsOrigem.length : (itensCatCount > 0 ? itensCatCount : finalCategorias.length);
+
+    const totalValor = solsFiltradas.reduce((acc: number, s: any) => {
+      const q = Number(s.qtd_estimada) || 0;
+      const v = Number(s.valor_unitario) || 0;
+      return acc + (q * v);
+    }, 0);
+
+    if (incluirCustoFinanceiro && idsOrigem.length > 0 && firstGerId) {
+      await gs.gsTransferirSolicitacoesParaGerenciaBulk(idsOrigem, firstGerId, firstDirId);
+      // Status vai para "aprovado" para contabilizar no custo financeiro e ir para a aba de Aprovados da Diretoria
+      await gs.gsUpdateSolicitacaoStatusBulk(idsOrigem, "aprovado");
+    }
+
+    try {
+      await registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCategorias.join(", "), {
+        acao: "transferir_categoria_aquisicao",
+        categorias: finalCategorias,
+        solicitacao_ids: idsOrigem,
+        count: totalItens,
+        totalValor: incluirCustoFinanceiro ? totalValor : 0,
+        sourceDiretoriaId,
+        targetDiretoriaIds: finalDirIds,
+        origemSigla,
+        incluirCustoFinanceiro,
+      });
+    } catch (logErr) {
+      console.warn("Falha ao registrar log no Sheets:", logErr);
+    }
+
+    return {
+      count: totalItens,
+      totalValor: incluirCustoFinanceiro ? totalValor : 0,
+      diretoriasDestino: finalDirIds,
+    };
+  }
+
+  // SUPORTE AO SUPABASE
+  let query = supabase.from("solicitacoes").select("*");
+  if (sourceDiretoriaId) {
+    query = query.eq("diretoria_id", sourceDiretoriaId);
+  }
+  if (periodoId) {
+    query = query.eq("periodo_id", periodoId);
+  }
+  if (finalCategorias.length === 1) {
+    query = query.ilike("categoria", finalCategorias[0]);
+  } else {
+    query = query.in("categoria", finalCategorias);
+  }
+
+  let solicitacoesData: any[] = [];
+  try {
+    const { data, error } = await query;
+    if (!error && data) {
+      solicitacoesData = data;
+    }
+  } catch (err) {
+    console.warn("Aviso ao consultar solicitacoes no Supabase:", err);
+  }
+
+  let totalValorTransferido = 0;
+  let totalItensAfetados = (solicitacoesData || []).length;
+  let idsOrigem: string[] = [];
+
+  if (incluirCustoFinanceiro) {
+    // CONDIÇÃO 1: Transferir itens/serviços e o custo financeiro para a(s) diretoria(s) selecionada(s)
+    idsOrigem = (solicitacoesData || []).map((s: any) => s.id).filter(Boolean);
+    const valorOriginal = (solicitacoesData || []).reduce((acc: number, s: any) => {
+      const q = Number(s.qtd_estimada) || 0;
+      const v = Number(s.valor_unitario) || 0;
+      return acc + (q * v);
+    }, 0);
+
+    totalValorTransferido = valorOriginal;
+    totalItensAfetados = idsOrigem.length;
+
+    if (idsOrigem.length > 0 && firstGerId) {
+      await transferirSolicitacoesParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado");
+    }
+
+    // Para as demais diretorias de destino: clona com quantidades e valores com status "aprovado"
+    for (let i = 1; i < finalDirIds.length; i++) {
+      const dirId = finalDirIds[i];
+      const gersDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(dirId));
+      const gerId = gersDaDir[0]?.id || "";
+      if (!gerId) continue;
+
+      for (const sol of (solicitacoesData || [])) {
+        try {
+          await supabase.from("solicitacoes").insert([{
+            periodo_id: sol.periodo_id || periodoId,
+            diretoria_id: dirId,
+            gerencia_id: gerId,
+            item_id: sol.item_id,
+            valor_unitario: sol.valor_unitario,
+            qtd_estimada: sol.qtd_estimada,
+            prioridade: sol.prioridade || "Média",
+            observacao: tagOrigem ? `${tagOrigem} ${sol.observacao || ""}`.trim() : sol.observacao,
+            status: "aprovado",
+            aprovado_em: new Date().toISOString(),
+          }]);
+        } catch (e) {
+          console.warn("Erro ao clonar para diretorias extras no Supabase:", e);
+        }
+      }
+    }
+  } else {
+    // CONDIÇÃO 2: Transferir apenas a categoria e itens para a(s) diretoria(s) sem enviar o custo financeiro
+    let queryItens = supabase
+      .from("itens_catalogo")
+      .select("id, codigo, descricao, categoria, unidade, valor_unitario");
+
+    if (finalCategorias.length === 1) {
+      queryItens = queryItens.ilike("categoria", finalCategorias[0]);
+    } else {
+      queryItens = queryItens.in("categoria", finalCategorias);
+    }
+
+    let itensCatalogo: any[] = [];
+    try {
+      const { data: catData } = await queryItens;
+      if (catData) itensCatalogo = catData;
+    } catch (e) {
+      console.warn("Erro ao buscar itens_catalogo no Supabase:", e);
+    }
+
+    const itensReferencia = (itensCatalogo && itensCatalogo.length > 0)
+      ? itensCatalogo
+      : (solicitacoesData || []);
+
+    totalValorTransferido = 0; // SEM CUSTO FINANCEIRO
+    totalItensAfetados = itensReferencia.length;
+
+    for (const dirId of finalDirIds) {
+      const gersDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(dirId));
+      const gerId = (finalDirIds.length === 1 && targetGerenciaId) ? targetGerenciaId : (gersDaDir[0]?.id || "");
+      if (!gerId) continue;
+
+      let existingItemIds = new Set<string>();
+      try {
+        const { data: solsExistentesDestino } = await supabase
+          .from("solicitacoes")
+          .select("id, item_id")
+          .eq("diretoria_id", dirId)
+          .eq("periodo_id", periodoId || "");
+        existingItemIds = new Set((solsExistentesDestino || []).map((s: any) => s.item_id).filter(Boolean));
+      } catch (e) {
+        console.warn("Aviso ao checar sols existentes:", e);
+      }
+
+      for (const itemRef of itensReferencia) {
+        const itemId = itemRef.id || itemRef.item_id;
+        if (itemId && existingItemIds.has(itemId)) {
+          continue;
+        }
+
+        try {
+          await supabase.from("solicitacoes").insert([{
+            periodo_id: periodoId || itemRef.periodo_id,
+            diretoria_id: dirId,
+            gerencia_id: gerId,
+            item_id: itemId || null,
+            valor_unitario: Number(itemRef.valor_unitario) || 0,
+            qtd_estimada: 0, // Custo financeiro ZERO
+            prioridade: "Média",
+            observacao: tagSemCusto,
+            status: "rascunho",
+          }]);
+        } catch (e) {
+          console.warn("Erro ao inserir solicitacao sem custo no Supabase:", e);
+        }
+      }
+    }
+  }
+
+  try {
+    await registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCategorias.join(", "), {
+      acao: "transferir_categoria_aquisicao",
+      categorias: finalCategorias,
+      solicitacao_ids: idsOrigem,
+      count: totalItensAfetados,
+      totalValor: totalValorTransferido,
+      sourceDiretoriaId,
+      targetDiretoriaIds: finalDirIds,
+      origemSigla,
+      incluirCustoFinanceiro,
+    });
+  } catch (e) {
+    console.warn("Falha ao registrar log de atividade:", e);
+  }
+
+  return { count: totalItensAfetados, totalValor: totalValorTransferido, diretoriasDestino: finalDirIds };
+}
+
+export async function transferirContratoServicos(params: {
+  contrato?: string;
+  contratos?: string[];
+  sourceDiretoriaId?: string;
+  targetDiretoriaId?: string;
+  targetDiretoriaIds?: string[];
+  targetGerenciaId?: string;
+  periodoId?: string;
+  origemSigla?: string;
+  incluirCustoFinanceiro?: boolean;
+}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[] }> {
+  const {
+    contrato,
+    contratos,
+    sourceDiretoriaId,
+    targetDiretoriaId,
+    targetDiretoriaIds,
+    targetGerenciaId,
+    periodoId,
+    origemSigla,
+    incluirCustoFinanceiro = true,
+  } = params;
+
+  const rawContratos = contratos && contratos.length > 0
+    ? contratos
+    : contrato ? [contrato] : [];
+  const finalContratos = Array.from(new Set(rawContratos)).filter(Boolean);
+
+  const rawDirIds = targetDiretoriaIds && targetDiretoriaIds.length > 0
+    ? targetDiretoriaIds
+    : targetDiretoriaId
+      ? [targetDiretoriaId]
+      : [];
+
+  const finalDirIds = Array.from(new Set(rawDirIds)).filter(Boolean);
+  if (finalContratos.length === 0 || finalDirIds.length === 0) {
+    throw new Error("Ao menos um contrato e ao menos uma diretoria de destino são obrigatórios.");
+  }
+
+  const todasGerencias = await getTodasGerencias();
+  const firstDirId = String(finalDirIds[0]);
+  const gersDaFirstDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(firstDirId));
+  const firstGerId = String((finalDirIds.length === 1 && targetGerenciaId)
+    ? targetGerenciaId
+    : gersDaFirstDir[0]?.id || (todasGerencias[0]?.id || ""));
+
+  const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
+  const tagSemCusto = origemSigla
+    ? `[Contrato transferido da Diretoria ${origemSigla} sem custo financeiro]`
+    : "[Contrato transferido sem custo financeiro]";
+
+  // SUPORTE AO GOOGLE SHEETS
+  if (gs.isGoogleSheetsActive()) {
+    let allServicos: any[] = [];
+    try {
+      allServicos = await gs.gsGetServicos(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {});
+    } catch (e) {
+      console.warn("Erro ao buscar serviços no Sheets:", e);
+    }
+
+    const finalContratosSet = new Set(finalContratos.map(c => String(c).trim()));
+    const servicosFiltrados = (allServicos || []).filter((s: any) =>
+      finalContratosSet.has(String(s.contrato || "").trim())
+    );
+
+    const idsOrigem = servicosFiltrados.map((s: any) => s.id).filter(Boolean);
+    const totalServicos = idsOrigem.length > 0 ? idsOrigem.length : finalContratos.length;
+    const totalValor = servicosFiltrados.reduce((acc: number, s: any) => {
+      const val = Number(s.estimativa_valor) || Number(s.dotacao_orcamentaria) || 0;
+      return acc + val;
+    }, 0);
+
+    if (incluirCustoFinanceiro && idsOrigem.length > 0 && firstGerId) {
+      await gs.gsTransferirServicosParaGerenciaBulk(idsOrigem, firstGerId, firstDirId);
+      await gs.gsUpdateServicoStatusBulk(idsOrigem, "aprovado");
+    }
+
+    try {
+      await registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
+        acao: "transferir_contrato_servicos",
+        contratos: finalContratos,
+        servico_ids: idsOrigem,
+        count: totalServicos,
+        totalValor: incluirCustoFinanceiro ? totalValor : 0,
+        sourceDiretoriaId,
+        targetDiretoriaIds: finalDirIds,
+        origemSigla,
+        incluirCustoFinanceiro,
+      });
+    } catch (logErr) {
+      console.warn("Falha ao registrar log de serviços no Sheets:", logErr);
+    }
+
+    return {
+      count: totalServicos,
+      totalValor: incluirCustoFinanceiro ? totalValor : 0,
+      diretoriasDestino: finalDirIds,
+    };
+  }
+
+  // SUPORTE AO SUPABASE
+  let query = supabase.from("servicos").select("*");
+  if (sourceDiretoriaId) {
+    query = query.eq("diretoria_id", sourceDiretoriaId);
+  }
+  if (periodoId) {
+    query = query.eq("periodo_id", periodoId);
+  }
+  if (finalContratos.length === 1) {
+    query = query.eq("contrato", finalContratos[0]);
+  } else {
+    query = query.in("contrato", finalContratos);
+  }
+
+  let servicosData: any[] = [];
+  try {
+    const { data, error } = await query;
+    if (!error && data) {
+      servicosData = data;
+    }
+  } catch (err) {
+    console.warn("Aviso ao consultar servicos no Supabase:", err);
+  }
+
+  let totalValorTransferido = 0;
+  const totalServicosAfetados = (servicosData || []).length;
+  let idsOrigem: string[] = [];
+
+  if (incluirCustoFinanceiro) {
+    idsOrigem = (servicosData || []).map((s: any) => s.id).filter(Boolean);
+    const valorOriginal = (servicosData || []).reduce((acc: number, s: any) => {
+      const val = Number(s.estimativa_valor) || Number(s.dotacao_orcamentaria) || 0;
+      return acc + val;
+    }, 0);
+
+    totalValorTransferido = valorOriginal;
+
+    if (idsOrigem.length > 0 && firstGerId) {
+      await transferirServicosParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado");
+    }
+
+    // Para as demais diretorias de destino: clona os serviços com valores
+    for (let i = 1; i < finalDirIds.length; i++) {
+      const dirId = finalDirIds[i];
+      const gersDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(dirId));
+      const gerId = gersDaDir[0]?.id || "";
+      if (!gerId) continue;
+
+      for (const serv of (servicosData || [])) {
+        const { id, created_at, updated_at, ...cleanServ } = serv;
+        try {
+          await supabase.from("servicos").insert([{
+            ...cleanServ,
+            periodo_id: serv.periodo_id || periodoId,
+            diretoria_id: dirId,
+            gerencia_id: gerId,
+            observacao: tagOrigem ? `${tagOrigem} ${serv.observacao || ""}`.trim() : serv.observacao,
+            status: "aprovado",
+            aprovado_em: new Date().toISOString(),
+          }]);
+        } catch (e) {
+          console.warn("Erro ao inserir servico clonado no Supabase:", e);
+        }
+      }
+    }
+  } else {
+    totalValorTransferido = 0;
+
+    for (const dirId of finalDirIds) {
+      const gersDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(dirId));
+      const gerId = (finalDirIds.length === 1 && targetGerenciaId) ? targetGerenciaId : (gersDaDir[0]?.id || "");
+      if (!gerId) continue;
+
+      for (const serv of (servicosData || [])) {
+        const { id, created_at, updated_at, ...cleanServ } = serv;
+        try {
+          await supabase.from("servicos").insert([{
+            ...cleanServ,
+            periodo_id: serv.periodo_id || periodoId,
+            diretoria_id: dirId,
+            gerencia_id: gerId,
+            estimativa_valor: 0,
+            dotacao_orcamentaria: 0,
+            observacao: tagSemCusto,
+            status: "rascunho",
+          }]);
+        } catch (e) {
+          console.warn("Erro ao inserir servico sem custo no Supabase:", e);
+        }
+      }
+    }
+  }
+
+  await registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
+    acao: "transferir_contrato_servicos",
+    contratos: finalContratos,
+    servico_ids: idsOrigem,
+    count: totalServicosAfetados,
+    totalValor: totalValorTransferido,
+    sourceDiretoriaId,
+    targetDiretoriaIds: finalDirIds,
+    origemSigla,
+    incluirCustoFinanceiro,
+  });
+
+  return { count: totalServicosAfetados, totalValor: totalValorTransferido, diretoriasDestino: finalDirIds };
+}
+
+export interface HistoricoTransferenciaItem {
+  id: string;
+  created_at: string;
+  tipoRegistro: "categoria" | "contrato" | "bulk" | "item";
+  titulo: string;
+  descricao: string;
+  sourceDiretoriaId?: string;
+  sourceDiretoriaSigla?: string;
+  targetDiretoriaIds?: string[];
+  targetDiretoriaSiglas?: string[];
+  count?: number;
+  totalValor?: number;
+  incluirCustoFinanceiro?: boolean;
+  detalhes: any;
+}
+
+export async function getHistoricoTransferencias(params: {
+  tipo: "aquisicao" | "servicos";
+  diretoriaId?: string;
+  limit?: number;
+}): Promise<HistoricoTransferenciaItem[]> {
+  const { tipo, diretoriaId, limit = 20 } = params;
+  const tabela = tipo === "aquisicao" ? "solicitacoes" : "servicos";
+
+  let logs: any[] = [];
+  try {
+    const todosLogs = await getLogsAtividades();
+
+    // 1. Coleta IDs de logs de transferência que já foram desfeitos
+    const logsDesfeitosIds = new Set<string>();
+
+    (todosLogs || []).forEach((l: any) => {
+      if (l.acao === "DESFAZER") {
+        if (l.registro_id) logsDesfeitosIds.add(String(l.registro_id));
+        let det: any = {};
+        if (typeof l.detalhes === "string") {
+          try { det = JSON.parse(l.detalhes); } catch { det = {}; }
+        } else if (typeof l.detalhes === "object" && l.detalhes) {
+          det = l.detalhes;
+        }
+        if (det.log_original_id) logsDesfeitosIds.add(String(det.log_original_id));
+      }
+    });
+
+    // 2. Persistência de segurança via localStorage no cliente
+    if (typeof window !== "undefined") {
+      try {
+        const cachedUndone = JSON.parse(localStorage.getItem("pac_transferencias_desfeitas_ids") || "[]");
+        (cachedUndone || []).forEach((id: string) => logsDesfeitosIds.add(String(id)));
+      } catch (e) {
+        console.warn("Aviso ao ler transferencias desfeitas do storage:", e);
+      }
+    }
+
+    // 3. Filtra apenas transferências ativas que NÃO foram desfeitas e não foram deletadas
+    logs = (todosLogs || []).filter(
+      (l: any) =>
+        l.tabela_afetada === tabela &&
+        l.acao === "TRANSFERIR" &&
+        !l.is_deleted &&
+        !logsDesfeitosIds.has(String(l.id))
+    );
+  } catch (e) {
+    console.warn("Erro ao buscar logs de transferências:", e);
+  }
+
+  const todasDiretorias = await getDiretorias();
+  const dirMap = new Map<string, string>();
+  (todasDiretorias || []).forEach((d: any) => {
+    if (d.id) dirMap.set(String(d.id), d.sigla || d.nome || String(d.id));
+  });
+
+  const itens: HistoricoTransferenciaItem[] = [];
+
+  for (const log of logs) {
+    let det: any = {};
+    if (typeof log.detalhes === "string") {
+      try {
+        det = JSON.parse(log.detalhes);
+      } catch {
+        det = {};
+      }
+    } else if (typeof log.detalhes === "object" && log.detalhes) {
+      det = log.detalhes;
+    }
+
+    const sourceId = det.sourceDiretoriaId ? String(det.sourceDiretoriaId) : undefined;
+    const rawTargets: any[] = Array.isArray(det.targetDiretoriaIds)
+      ? det.targetDiretoriaIds
+      : det.diretoria_destino_id
+      ? [det.diretoria_destino_id]
+      : [];
+    const targetIds = rawTargets.map(String).filter(Boolean);
+
+    // Se houver filtro de diretoria, confere se é origem ou destino
+    if (diretoriaId) {
+      const matchSource = sourceId === String(diretoriaId);
+      const matchTarget = targetIds.includes(String(diretoriaId));
+      if (!matchSource && !matchTarget) {
+        continue;
+      }
+    }
+
+    const sourceSigla = det.origemSigla || (sourceId ? dirMap.get(sourceId) : undefined) || "Origem";
+    const targetSiglas = targetIds.map(id => dirMap.get(id) || id);
+
+    let tipoRegistro: "categoria" | "contrato" | "bulk" | "item" = "item";
+    let titulo = "";
+    let descricao = "";
+
+    if (det.acao === "transferir_categoria_aquisicao" || det.categorias) {
+      tipoRegistro = "categoria";
+      const cats: string[] = det.categorias || (log.registro_id ? [log.registro_id] : []);
+      titulo = cats.length === 1 ? `Categoria: ${cats[0]}` : `${cats.length} Categorias: ${cats.join(", ")}`;
+      descricao = `De: ${sourceSigla} → Para: ${targetSiglas.join(", ") || "Destino"}`;
+    } else if (det.acao === "transferir_contrato_servicos" || det.contratos) {
+      tipoRegistro = "contrato";
+      const contratos: string[] = det.contratos || (log.registro_id ? [log.registro_id] : []);
+      titulo = contratos.length === 1 ? `Contrato: ${contratos[0]}` : `${contratos.length} Contratos: ${contratos.join(", ")}`;
+      descricao = `De: ${sourceSigla} → Para: ${targetSiglas.join(", ") || "Destino"}`;
+    } else {
+      tipoRegistro = "bulk";
+      titulo = tipo === "aquisicao" ? `Itens de Aquisição (${det.count || 1})` : `Serviços (${det.count || 1})`;
+      descricao = `De: ${sourceSigla} → Para: ${targetSiglas.join(", ") || "Destino"}`;
+    }
+
+    itens.push({
+      id: log.id,
+      created_at: log.created_at,
+      tipoRegistro,
+      titulo,
+      descricao,
+      sourceDiretoriaId: sourceId,
+      sourceDiretoriaSigla: sourceSigla,
+      targetDiretoriaIds: targetIds,
+      targetDiretoriaSiglas: targetSiglas,
+      count: det.count,
+      totalValor: det.totalValor,
+      incluirCustoFinanceiro: det.incluirCustoFinanceiro !== false,
+      detalhes: det,
+    });
+
+    if (itens.length >= limit) break;
+  }
+
+  return itens;
+}
+
+export async function desfazerTransferenciaAquisicao(params: {
+  logId?: string;
+  categorias?: string[];
+  sourceDiretoriaId?: string;
+  targetDiretoriaIds?: string[];
+  incluirCustoFinanceiro?: boolean;
+  origemSigla?: string;
+  solicitacaoIds?: string[];
+}): Promise<{ count: number; restoredToDiretoria: string }> {
+  const { logId } = params;
+  let {
+    categorias,
+    sourceDiretoriaId,
+    targetDiretoriaIds,
+    incluirCustoFinanceiro = true,
+    origemSigla,
+    solicitacaoIds,
+  } = params;
+
+  if (logId) {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = JSON.parse(localStorage.getItem("pac_transferencias_desfeitas_ids") || "[]");
+        if (!cached.includes(String(logId))) {
+          cached.push(String(logId));
+          localStorage.setItem("pac_transferencias_desfeitas_ids", JSON.stringify(cached));
+        }
+      } catch (e) {
+        console.warn("Aviso ao salvar transferencia desfeita no storage:", e);
+      }
+    }
+
+    try {
+      await deleteLogAtividade(logId);
+    } catch (e) {
+      console.warn("Aviso ao marcar log original como excluído:", e);
+    }
+
+    try {
+      const logs = await getLogsAtividades();
+      const logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
+      if (logRow) {
+        let det: any = {};
+        if (typeof logRow.detalhes === "string") {
+          try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
+        } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
+          det = logRow.detalhes;
+        }
+
+        if (!categorias && det.categorias) categorias = det.categorias;
+        if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
+        if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
+        if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
+        if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
+        if (!solicitacaoIds && det.solicitacao_ids) solicitacaoIds = det.solicitacao_ids;
+      }
+    } catch (e) {
+      console.warn("Erro ao buscar log original:", e);
+    }
+  }
+
+  const todasDiretorias = await getDiretorias();
+  if (!sourceDiretoriaId && origemSigla) {
+    const dFound = (todasDiretorias || []).find((d: any) =>
+      String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase()
+    );
+    if (dFound?.id) sourceDiretoriaId = String(dFound.id);
+  }
+  if (!sourceDiretoriaId && todasDiretorias && todasDiretorias.length > 0) {
+    sourceDiretoriaId = String(todasDiretorias[0].id);
+  }
+
+  const dirOrigemObj = (todasDiretorias || []).find((d: any) =>
+    String(d.id) === String(sourceDiretoriaId) ||
+    String(d.sigla).toUpperCase() === String(sourceDiretoriaId).toUpperCase() ||
+    (origemSigla && String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase())
+  );
+  const finalSourceDirId = dirOrigemObj?.id ? String(dirOrigemObj.id) : String(sourceDiretoriaId || "");
+
+  const todasGerencias = await getTodasGerencias();
+  const gersOrigem = (todasGerencias || []).filter((g: any) =>
+    String(g.diretoria_id) === String(finalSourceDirId) ||
+    (dirOrigemObj?.id && String(g.diretoria_id) === String(dirOrigemObj.id))
+  );
+  const gerenciaOrigemId = String(gersOrigem[0]?.id || todasGerencias[0]?.id || "");
+
+  let totalRestaurados = 0;
+  const idsParaReverterSet = new Set<string>();
+
+  // 1. Se recebemos solicitacaoIds explícitos no log ou parâmetros
+  if (solicitacaoIds && solicitacaoIds.length > 0) {
+    solicitacaoIds.forEach(id => idsParaReverterSet.add(String(id)));
+  }
+
+  // 2. Se não temos solicitacaoIds ou para complementar, busca nas diretorias de destino
+  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+    ? targetDiretoriaIds
+    : [];
+
+  const catsLower = new Set((categorias || []).map(c => String(c).trim().toLowerCase()));
+
+  if (idsParaReverterSet.size === 0 && targetDirIds.length > 0) {
+    for (const tDirId of targetDirIds) {
+      try {
+        const { data: solsDest } = await supabase
+          .from("solicitacoes")
+          .select("id, categoria, observacao")
+          .eq("diretoria_id", tDirId);
+
+        (solsDest || []).forEach((s: any) => {
+          const sCat = String(s.categoria || "").trim().toLowerCase();
+          const sObs = String(s.observacao || "");
+          const matchCat = sCat && catsLower.has(sCat);
+          const matchObs = sObs.includes("[Transferido da Diretoria") ||
+            (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
+
+          if (matchCat || matchObs) {
+            idsParaReverterSet.add(String(s.id));
+          }
+        });
+      } catch (e) {
+        console.warn("Aviso ao buscar solicitacoes do destino no Supabase:", e);
+      }
+    }
+  }
+
+  const idsParaReverter = Array.from(idsParaReverterSet).filter(Boolean);
+
+  // SUPORTE AO GOOGLE SHEETS
+  if (gs.isGoogleSheetsActive()) {
+    try {
+      let idsSheets = idsParaReverter;
+
+      if (idsSheets.length === 0 && targetDirIds.length > 0) {
+        for (const tDirId of targetDirIds) {
+          try {
+            const destSols = await gs.gsGetSolicitacoes({ diretoria_id: tDirId });
+            (destSols || []).forEach((s: any) => {
+              const sCat = String(s.categoria || "").trim().toLowerCase();
+              const sObs = String(s.observacao || "");
+              const matchCat = sCat && catsLower.has(sCat);
+              const matchObs = sObs.includes("[Transferido da Diretoria");
+              if (matchCat || matchObs) {
+                idsParaReverterSet.add(String(s.id));
+              }
+            });
+          } catch (e) {
+            console.warn("Aviso ao buscar solicitacoes no Sheets por diretoria:", e);
+          }
+        }
+        idsSheets = Array.from(idsParaReverterSet).filter(Boolean);
+      }
+
+      if (idsSheets.length > 0) {
+        for (let i = 0; i < idsSheets.length; i += 100) {
+          const chunk = idsSheets.slice(i, i + 100);
+          if (incluirCustoFinanceiro) {
+            await gs.gsTransferirSolicitacoesParaGerenciaBulk(chunk, gerenciaOrigemId, finalSourceDirId);
+            await gs.gsUpdateSolicitacaoStatusBulk(chunk, "rascunho");
+          } else {
+            for (const sId of chunk) {
+              await gs.gsDeleteSolicitacao(sId).catch(() => {});
+            }
+          }
+        }
+        totalRestaurados = Math.max(totalRestaurados, idsSheets.length);
+      }
+    } catch (sheetsErr) {
+      console.warn("Aviso ao desfazer no Google Sheets:", sheetsErr);
+    }
+  }
+
+  // SUPORTE AO SUPABASE
+  if (idsParaReverter.length > 0) {
+    for (let i = 0; i < idsParaReverter.length; i += 100) {
+      const chunk = idsParaReverter.slice(i, i + 100);
+      try {
+        if (incluirCustoFinanceiro) {
+          await supabase
+            .from("solicitacoes")
+            .update({
+              diretoria_id: finalSourceDirId,
+              gerencia_id: gerenciaOrigemId || undefined,
+              status: "rascunho",
+              updated_at: new Date().toISOString(),
+            })
+            .in("id", chunk);
+        } else {
+          await supabase
+            .from("solicitacoes")
+            .delete()
+            .in("id", chunk);
+        }
+      } catch (errSupabase) {
+        console.warn("Erro ao atualizar lote de solicitacoes no Supabase:", errSupabase);
+      }
+    }
+    totalRestaurados = Math.max(totalRestaurados, idsParaReverter.length);
+
+    // Se houve clonagem para múltiplas diretorias com custo financeiro, remove cópias extras
+    if (incluirCustoFinanceiro && targetDirIds.length > 1) {
+      const extraDirs = targetDirIds.slice(1);
+      for (const extraDir of extraDirs) {
+        try {
+          await supabase
+            .from("solicitacoes")
+            .delete()
+            .eq("diretoria_id", extraDir)
+            .ilike("observacao", `%[Transferido da Diretoria ${origemSigla || ""}%`);
+        } catch (e) {
+          console.warn("Erro ao limpar clones de diretorias extras no Supabase:", e);
+        }
+      }
+    }
+  }
+
+  try {
+    await registrarLogAtividade("DESFAZER", "solicitacoes", logId || "manual", {
+      acao: "desfazer_transferencia_aquisicao",
+      log_original_id: logId,
+      categorias,
+      sourceDiretoriaId: finalSourceDirId,
+      targetDiretoriaIds,
+      count: totalRestaurados,
+    });
+  } catch (e) {
+    console.warn("Erro ao registrar log de desfazer:", e);
+  }
+
+  return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
+}
+
+export async function desfazerTransferenciaServicos(params: {
+  logId?: string;
+  contratos?: string[];
+  sourceDiretoriaId?: string;
+  targetDiretoriaIds?: string[];
+  incluirCustoFinanceiro?: boolean;
+  origemSigla?: string;
+  servicoIds?: string[];
+}): Promise<{ count: number; restoredToDiretoria: string }> {
+  const { logId } = params;
+  let {
+    contratos,
+    sourceDiretoriaId,
+    targetDiretoriaIds,
+    incluirCustoFinanceiro = true,
+    origemSigla,
+    servicoIds,
+  } = params;
+
+  if (logId) {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = JSON.parse(localStorage.getItem("pac_transferencias_desfeitas_ids") || "[]");
+        if (!cached.includes(String(logId))) {
+          cached.push(String(logId));
+          localStorage.setItem("pac_transferencias_desfeitas_ids", JSON.stringify(cached));
+        }
+      } catch (e) {
+        console.warn("Aviso ao salvar transferencia desfeita no storage:", e);
+      }
+    }
+
+    try {
+      await deleteLogAtividade(logId);
+    } catch (e) {
+      console.warn("Aviso ao marcar log original de serviços como excluído:", e);
+    }
+
+    try {
+      const logs = await getLogsAtividades();
+      const logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
+      if (logRow) {
+        let det: any = {};
+        if (typeof logRow.detalhes === "string") {
+          try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
+        } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
+          det = logRow.detalhes;
+        }
+
+        if (!contratos && det.contratos) contratos = det.contratos;
+        if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
+        if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
+        if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
+        if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
+        if (!servicoIds && det.servico_ids) servicoIds = det.servico_ids;
+      }
+    } catch (e) {
+      console.warn("Erro ao buscar log original de serviços:", e);
+    }
+  }
+
+  const todasDiretorias = await getDiretorias();
+  if (!sourceDiretoriaId && origemSigla) {
+    const dFound = (todasDiretorias || []).find((d: any) =>
+      String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase()
+    );
+    if (dFound?.id) sourceDiretoriaId = String(dFound.id);
+  }
+  if (!sourceDiretoriaId && todasDiretorias && todasDiretorias.length > 0) {
+    sourceDiretoriaId = String(todasDiretorias[0].id);
+  }
+
+  const dirOrigemObj = (todasDiretorias || []).find((d: any) =>
+    String(d.id) === String(sourceDiretoriaId) ||
+    String(d.sigla).toUpperCase() === String(sourceDiretoriaId).toUpperCase() ||
+    (origemSigla && String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase())
+  );
+  const finalSourceDirId = dirOrigemObj?.id ? String(dirOrigemObj.id) : String(sourceDiretoriaId || "");
+
+  const todasGerencias = await getTodasGerencias();
+  const gersOrigem = (todasGerencias || []).filter((g: any) =>
+    String(g.diretoria_id) === String(finalSourceDirId) ||
+    (dirOrigemObj?.id && String(g.diretoria_id) === String(dirOrigemObj.id))
+  );
+  const gerenciaOrigemId = String(gersOrigem[0]?.id || todasGerencias[0]?.id || "");
+
+  let totalRestaurados = 0;
+  const idsParaReverterSet = new Set<string>();
+
+  // 1. Se recebemos servicoIds explícitos no log ou parâmetros
+  if (servicoIds && servicoIds.length > 0) {
+    servicoIds.forEach(id => idsParaReverterSet.add(String(id)));
+  }
+
+  // 2. Se não temos servicoIds ou para complementar, busca nas diretorias de destino
+  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+    ? targetDiretoriaIds
+    : [];
+
+  const contratosSet = new Set((contratos || []).map(c => String(c).trim().toLowerCase()));
+
+  if (idsParaReverterSet.size === 0 && targetDirIds.length > 0) {
+    for (const tDirId of targetDirIds) {
+      try {
+        const { data: servsDest } = await supabase
+          .from("servicos")
+          .select("id, contrato, observacao")
+          .eq("diretoria_id", tDirId);
+
+        (servsDest || []).forEach((s: any) => {
+          const sContrato = String(s.contrato || "").trim().toLowerCase();
+          const sObs = String(s.observacao || "");
+          const matchContrato = sContrato && contratosSet.has(sContrato);
+          const matchObs = sObs.includes("[Transferido da Diretoria") ||
+            (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
+
+          if (matchContrato || matchObs) {
+            idsParaReverterSet.add(String(s.id));
+          }
+        });
+      } catch (e) {
+        console.warn("Aviso ao buscar servicos do destino no Supabase:", e);
+      }
+    }
+  }
+
+  const idsParaReverter = Array.from(idsParaReverterSet).filter(Boolean);
+
+  // SUPORTE AO GOOGLE SHEETS
+  if (gs.isGoogleSheetsActive()) {
+    try {
+      let idsSheets = idsParaReverter;
+
+      if (idsSheets.length === 0 && targetDirIds.length > 0) {
+        for (const tDirId of targetDirIds) {
+          try {
+            const destServs = await gs.gsGetServicos({ diretoria_id: tDirId });
+            (destServs || []).forEach((s: any) => {
+              const sContrato = String(s.contrato || "").trim().toLowerCase();
+              const sObs = String(s.observacao || "");
+              const matchContrato = sContrato && contratosSet.has(sContrato);
+              const matchObs = sObs.includes("[Transferido da Diretoria");
+              if (matchContrato || matchObs) {
+                idsParaReverterSet.add(String(s.id));
+              }
+            });
+          } catch (e) {
+            console.warn("Aviso ao buscar servicos no Sheets por diretoria:", e);
+          }
+        }
+        idsSheets = Array.from(idsParaReverterSet).filter(Boolean);
+      }
+
+      if (idsSheets.length > 0) {
+        for (let i = 0; i < idsSheets.length; i += 100) {
+          const chunk = idsSheets.slice(i, i + 100);
+          if (incluirCustoFinanceiro) {
+            await gs.gsTransferirServicosParaGerenciaBulk(chunk, gerenciaOrigemId, finalSourceDirId);
+            await gs.gsUpdateServicoStatusBulk(chunk, "rascunho");
+          } else {
+            for (const sId of chunk) {
+              await gs.gsDeleteServico(sId).catch(() => {});
+            }
+          }
+        }
+        totalRestaurados = Math.max(totalRestaurados, idsSheets.length);
+      }
+    } catch (e) {
+      console.warn("Aviso ao desfazer servicos no Google Sheets:", e);
+    }
+  }
+
+  // SUPORTE AO SUPABASE
+  if (idsParaReverter.length > 0) {
+    for (let i = 0; i < idsParaReverter.length; i += 100) {
+      const chunk = idsParaReverter.slice(i, i + 100);
+      try {
+        if (incluirCustoFinanceiro) {
+          await supabase
+            .from("servicos")
+            .update({
+              diretoria_id: finalSourceDirId,
+              gerencia_id: gerenciaOrigemId || undefined,
+              status: "rascunho",
+              updated_at: new Date().toISOString(),
+            })
+            .in("id", chunk);
+        } else {
+          await supabase
+            .from("servicos")
+            .delete()
+            .in("id", chunk);
+        }
+      } catch (errSupabase) {
+        console.warn("Erro ao atualizar lote de servicos no Supabase:", errSupabase);
+      }
+    }
+    totalRestaurados = Math.max(totalRestaurados, idsParaReverter.length);
+
+    // Se houve clonagem para múltiplas diretorias com custo financeiro, remove cópias extras
+    if (incluirCustoFinanceiro && targetDirIds.length > 1) {
+      const extraDirs = targetDirIds.slice(1);
+      for (const extraDir of extraDirs) {
+        try {
+          await supabase
+            .from("servicos")
+            .delete()
+            .eq("diretoria_id", extraDir)
+            .ilike("observacao", `%[Transferido da Diretoria ${origemSigla || ""}%`);
+        } catch (e) {
+          console.warn("Erro ao limpar clones de servicos de diretorias extras no Supabase:", e);
+        }
+      }
+    }
+  }
+
+  try {
+    await registrarLogAtividade("DESFAZER", "servicos", logId || "manual", {
+      acao: "desfazer_transferencia_servicos",
+      log_original_id: logId,
+      contratos,
+      sourceDiretoriaId: finalSourceDirId,
+      targetDiretoriaIds,
+      count: totalRestaurados,
+    });
+  } catch (e) {
+    console.warn("Erro ao registrar log de desfazer servicos:", e);
+  }
+
+  return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
 }
 

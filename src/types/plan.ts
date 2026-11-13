@@ -26,6 +26,7 @@ export interface PlanItem {
   diretoriaOrcamentariaSigla?: string;
   isOrcamentoCompartilhado?: boolean;
   gerencia_id?: string;
+  diretoria_id?: string;
 }
 
 export interface PlanSummary {

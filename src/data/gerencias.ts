@@ -41,6 +41,14 @@ export const GERENCIA_NOME_POR_SIGLA: Record<string, string> = {
   PRR: "Assessoria de Governança e Regulação",
 };
 
+export const DIRETORIA_GERENCIAS: Record<string, string[]> = {
+  "DG": ["GCFI", "GCON", "GEPE", "GESL", "GSAD"],
+  "DE": ["EMAR", "EOBR", "EPRE", "EPRO"],
+  "DC": ["CCRC", "CCRF", "CCRR"],
+  "DO": ["ODCD", "OCNI", "OCNA", "OCNE", "OCNM", "OCND", "OCNC", "OCNP", "OCNB", "OCSZ", "OCSC", "OCSD", "OCSJ", "OCSI", "OCSU", "OCST"],
+  "PR": ["ASCOM", "AUDIT", "PRJ", "PRL", "PRO", "PRR", "UEP", "UTIN"]
+};
+
 export function resolveGerenciaNome(sigla?: string, nome?: string | null) {
   const nomeTrim = String(nome || "").trim();
   if (nomeTrim.length > 0) return nomeTrim;

@@ -1,13 +1,14 @@
 // deno-lint-ignore-file no-explicit-any
 // AdminServicosControl.tsx - Versão CORRIGIDA SEM ANY
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2, Undo2 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 import { formatContratoMask } from "@/lib/utils";
+import { DesfazerTransferenciaDialog } from "@/components/common/DesfazerTransferenciaDialog.tsx";
 
 import { Button } from "@/components/ui/button.tsx";
 import { SmartPagination } from "@/components/common/SmartPagination.tsx";
@@ -50,6 +51,9 @@ import {
   getDiretorias,
   getGerenciasByDiretoria,
   getTodasGerencias,
+  transferirContratoServicos,
+  transferirServicosParaGerenciaBulk,
+  supabase
 } from "@/lib/services.ts";
 import { GrauPrioridade } from "@/types/plan.ts";
 
@@ -280,6 +284,22 @@ export function AdminServicosControl() {
     return { totalPages, currentPage, paginatedItems, totalFiltered: sortedItems.length };
   }, [sortedItems, currentPage]);
 
+  const tiposContratacaoDisponiveis = useMemo(() => {
+    const set = new Set<string>(["Novo", "Renovação", "Prorrogação", "Contínuo", "Outros"]);
+    (servicos as any[]).forEach((s) => {
+      if (s.tipo_contratacao && String(s.tipo_contratacao).trim()) {
+        set.add(String(s.tipo_contratacao).trim());
+      }
+    });
+    if (editFormData?.tipo_contratacao && editFormData.tipo_contratacao.trim()) {
+      set.add(editFormData.tipo_contratacao.trim());
+    }
+    if (formData?.tipo_contratacao && formData.tipo_contratacao.trim()) {
+      set.add(formData.tipo_contratacao.trim());
+    }
+    return Array.from(set);
+  }, [servicos, editFormData?.tipo_contratacao, formData?.tipo_contratacao]);
+
   const summary = useMemo(() => {
     const totalItens = servicosDaCategoria.length;
     const somaValores = servicosDaCategoria.reduce((acc, servico) => acc + (servico.estimativa_valor || 0), 0);
@@ -306,6 +326,220 @@ export function AdminServicosControl() {
       diretoria_id: "",
       gerencia_id: "",
     });
+  };
+
+  // Estado do diálogo de transferência
+  const [transferDialog, setTransferDialog] = useState<{
+    open: boolean;
+    modo: "contrato" | "bulk" | "item";
+    selectedContrato: string;
+    selectedContratos?: string[];
+    item: ServicoCatalogo | null;
+    sourceDiretoriaId?: string;
+    targetDiretoriaId: string;
+    targetDiretoriaIds?: string[];
+    targetGerenciaId: string;
+    incluirCustoFinanceiro?: boolean;
+    loading: boolean;
+  }>({
+    open: false,
+    modo: "contrato",
+    selectedContrato: "",
+    selectedContratos: [],
+    item: null,
+    sourceDiretoriaId: "",
+    targetDiretoriaId: "",
+    targetDiretoriaIds: [],
+    targetGerenciaId: "",
+    incluirCustoFinanceiro: true,
+    loading: false,
+  });
+
+  const [filtroContratoAdminTransfer, setFiltroContratoAdminTransfer] = useState("");
+  const [desfazerTransferOpen, setDesfazerTransferOpen] = useState(false);
+
+  const contratosDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    (servicos as ServicoCatalogo[]).forEach((s) => {
+      const c = String(s.contrato || "").trim();
+      if (c && c !== "-" && c !== "null" && c !== "undefined") {
+        set.add(c);
+      }
+    });
+    return Array.from(set).sort();
+  }, [servicos]);
+
+  const gerenciasAlvo = useMemo(() => {
+    if (!transferDialog.targetDiretoriaId) return todasGerencias;
+    const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === transferDialog.targetDiretoriaId);
+    return gers.length > 0 ? gers : todasGerencias;
+  }, [transferDialog.targetDiretoriaId, todasGerencias]);
+
+  const handleOpenContratoTransfer = () => {
+    const firstDir = (diretorias as Diretoria[])[0]?.id || "";
+    const secondDir = (diretorias as Diretoria[])[1]?.id || firstDir;
+    const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === secondDir);
+    setFiltroContratoAdminTransfer("");
+    setTransferDialog({
+      open: true,
+      modo: "contrato",
+      selectedContrato: contratosDisponiveis[0] || "",
+      selectedContratos: contratosDisponiveis[0] ? [contratosDisponiveis[0]] : [],
+      item: null,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: secondDir ? [secondDir] : [],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleOpenBulkTransfer = () => {
+    const firstDir = (diretorias as Diretoria[])[0]?.id || "";
+    const secondDir = (diretorias as Diretoria[])[1]?.id || firstDir;
+    const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === secondDir);
+    setTransferDialog({
+      open: true,
+      modo: "bulk",
+      selectedContrato: "",
+      item: null,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: [secondDir],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleOpenItemTransfer = (item: ServicoCatalogo) => {
+    const firstDir = (diretorias as Diretoria[])[0]?.id || "";
+    const secondDir = (diretorias as Diretoria[])[1]?.id || firstDir;
+    const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === secondDir);
+    setTransferDialog({
+      open: true,
+      modo: "item",
+      selectedContrato: "",
+      item,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: [secondDir],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleConfirmTransferAdmin = async () => {
+    const { modo, selectedContrato, selectedContratos, item, sourceDiretoriaId, targetDiretoriaId, targetDiretoriaIds, targetGerenciaId, incluirCustoFinanceiro } = transferDialog;
+
+    const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+      ? targetDiretoriaIds
+      : targetDiretoriaId ? [targetDiretoriaId] : [];
+
+    const finalContratos = (selectedContratos && selectedContratos.length > 0)
+      ? selectedContratos
+      : (selectedContrato ? [selectedContrato] : []);
+
+    if (targetDirIds.length === 0) {
+      toast.error("Selecione ao menos uma diretoria de destino.");
+      return;
+    }
+
+    let finalTargetGerId = targetGerenciaId;
+    if (!finalTargetGerId && targetDirIds.length > 0) {
+      const gersDaDir = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === targetDirIds[0]);
+      finalTargetGerId = gersDaDir[0]?.id || "";
+    }
+
+    if (modo !== "contrato" && !finalTargetGerId) {
+      toast.error("Selecione a diretoria e gerência de destino.");
+      return;
+    }
+
+    setTransferDialog(prev => ({ ...prev, loading: true }));
+    const dirOrigemSigla = (diretorias as Diretoria[]).find(d => d.id === sourceDiretoriaId)?.sigla;
+    const dirDestinoSigla = (diretorias as Diretoria[]).find(d => d.id === targetDirIds[0])?.sigla || "Diretoria";
+    const gerDestinoSigla = (todasGerencias as Gerencia[]).find(g => g.id === finalTargetGerId)?.sigla || "Gerência";
+    const tagOrigem = dirOrigemSigla || "ADMIN";
+
+    const siglasDestino = targetDirIds
+      .map(id => (diretorias as Diretoria[]).find(d => d.id === id)?.sigla)
+      .filter(Boolean)
+      .join(", ");
+
+    try {
+      if (modo === "contrato") {
+        const comCusto = incluirCustoFinanceiro !== false;
+        const res = await transferirContratoServicos({
+          contrato: finalContratos[0] || selectedContrato,
+          contratos: finalContratos,
+          sourceDiretoriaId: sourceDiretoriaId || undefined,
+          targetDiretoriaId: targetDirIds[0],
+          targetDiretoriaIds: targetDirIds,
+          targetGerenciaId: finalTargetGerId,
+          origemSigla: tagOrigem,
+          incluirCustoFinanceiro: comCusto,
+        });
+
+        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+        for (const dirId of targetDirIds) {
+          await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dirId] });
+        }
+        refetchServicos();
+
+        const contratosLabel = finalContratos.length === 1 ? `"${finalContratos[0]}"` : `${finalContratos.length} contratos (${finalContratos.join(", ")})`;
+        if (comCusto) {
+          toast.success(`Contrato(s) ${contratosLabel} (${res.count} serviços, ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(res.totalValor)}) transferido(s) com custo financeiro para a(s) Diretoria(s) ${siglasDestino || dirDestinoSigla}.`);
+        } else {
+          toast.success(`Contrato(s) ${contratosLabel} (${res.count} serviços) disponibilizado(s) para a(s) Diretoria(s) ${siglasDestino || dirDestinoSigla} SEM custo financeiro.`);
+        }
+      } else {
+        const itemsToTransfer: ServicoCatalogo[] = modo === "item" && item
+          ? [item]
+          : (servicos as ServicoCatalogo[]).filter(s => selectedIds.includes(s.id));
+
+        const itemNumbers = itemsToTransfer.map(s => s.item);
+
+        let query = supabase.from("servicos").select("id, item");
+        if (sourceDiretoriaId) {
+          query = query.eq("diretoria_id", sourceDiretoriaId);
+        }
+        query = query.in("item", itemNumbers);
+
+        const { data: existingServicos } = await query;
+
+        const servIds = (existingServicos || []).map((s: any) => s.id);
+        if (servIds.length > 0) {
+          await transferirServicosParaGerenciaBulk(servIds, targetGerenciaId, targetDiretoriaId, tagOrigem);
+        }
+
+        for (const s of itemsToTransfer) {
+          await supabase
+            .from("servicos_catalogo")
+            .update({
+              diretoria_id: targetDiretoriaId,
+              gerencia_id: targetGerenciaId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", s.id);
+        }
+
+        setSelectedIds([]);
+        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
+        refetchServicos();
+        toast.success(`${itemsToTransfer.length} serviço(s) transferido(s)${dirOrigemSigla ? ` de ${dirOrigemSigla}` : ""} para a Diretoria ${dirDestinoSigla} (${gerDestinoSigla}) com sucesso.`);
+      }
+
+      setTransferDialog(prev => ({ ...prev, open: false, loading: false }));
+    } catch (err: any) {
+      console.error("Erro na transferência de serviços (Admin):", err);
+      toast.error(err?.message || "Erro ao transferir serviço/contrato.");
+      setTransferDialog(prev => ({ ...prev, loading: false }));
+    }
   };
 
   const handleOpenCreateDialog = () => {
@@ -755,9 +989,35 @@ export function AdminServicosControl() {
               >
                 <FileDown className="h-4 w-4" />PDF
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
+                onClick={handleOpenContratoTransfer}
+                title="Transferir um Contrato inteiro e seu custo financeiro para uma Diretoria"
+              >
+                <ArrowRightLeft className="h-4 w-4" />Transferir Contrato
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                onClick={() => setDesfazerTransferOpen(true)}
+                title="Desfazer envio/transferência de contratos ou serviços"
+              >
+                <Undo2 className="h-4 w-4" />Desfazer Transferência
+              </Button>
             </div>
             {selectedIds.length > 0 && (
               <>
+                <Button 
+                  variant="outline"
+                  className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 whitespace-nowrap w-full sm:w-auto"
+                  onClick={handleOpenBulkTransfer}
+                >
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Transferir ({selectedIds.length})
+                </Button>
                 <Button 
                   variant="outline"
                   className="gap-2 text-primary border-primary hover:bg-primary/10 whitespace-nowrap w-full sm:w-auto"
@@ -862,6 +1122,15 @@ export function AdminServicosControl() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Transferir para Diretoria"
+                          onClick={() => handleOpenItemTransfer(servico)}
+                        >
+                          <ArrowRightLeft className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -974,11 +1243,10 @@ export function AdminServicosControl() {
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Novo">Novo</SelectItem>
-                    <SelectItem value="Renovação">Renovação</SelectItem>
-                    <SelectItem value="Prorrogação">Prorrogação</SelectItem>
-                    <SelectItem value="Outros">Outros</SelectItem>
+                  <SelectContent className="max-h-72">
+                    {tiposContratacaoDisponiveis.map((tipo) => (
+                      <SelectItem key={tipo} value={tipo}>{tipo}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1181,11 +1449,10 @@ export function AdminServicosControl() {
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Novo">Novo</SelectItem>
-                    <SelectItem value="Renovação">Renovação</SelectItem>
-                    <SelectItem value="Prorrogação">Prorrogação</SelectItem>
-                    <SelectItem value="Outros">Outros</SelectItem>
+                  <SelectContent className="max-h-72">
+                    {tiposContratacaoDisponiveis.map((tipo) => (
+                      <SelectItem key={tipo} value={tipo}>{tipo}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1451,6 +1718,493 @@ export function AdminServicosControl() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ==================== DIALOG TRANSFERÊNCIA DE SERVIÇOS (ADMIN) ==================== */}
+      <Dialog
+        open={transferDialog.open}
+        onOpenChange={(open) => !transferDialog.loading && setTransferDialog(prev => ({ ...prev, open }))}
+      >
+        <DialogContent className="w-[95vw] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-blue-600" />
+              {transferDialog.modo === "contrato"
+                ? "Transferir Contrato de Serviço para uma Diretoria"
+                : transferDialog.modo === "bulk"
+                ? `Transferir ${selectedIds.length} Serviços para uma Diretoria`
+                : "Transferir Serviço para uma Diretoria"}
+            </DialogTitle>
+            <DialogDescription>
+              {transferDialog.modo === "contrato"
+                ? "Transfere todos os serviços e o custo financeiro do contrato selecionado para a Diretoria e Gerência de destino."
+                : "Transfere os serviços selecionados e seus respectivos custos para a Diretoria e Gerência de destino."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-4">
+            {transferDialog.modo === "contrato" ? (
+              <div className="space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">
+                      Contrato(s) a Transferir (escolha um ou mais):
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({
+                            ...prev,
+                            selectedContratos: [...contratosDisponiveis],
+                            selectedContrato: contratosDisponiveis[0] || "",
+                          }));
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:underline"
+                      >
+                        Todos ({contratosDisponiveis.length})
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({
+                            ...prev,
+                            selectedContratos: [],
+                            selectedContrato: "",
+                          }));
+                        }}
+                        className="text-[11px] text-muted-foreground hover:underline"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Input de filtro para contratos */}
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Pesquisar contrato..."
+                      value={filtroContratoAdminTransfer}
+                      onChange={(e) => setFiltroContratoAdminTransfer(e.target.value)}
+                      className="pl-8 h-8 text-xs bg-background"
+                      disabled={transferDialog.loading}
+                    />
+                  </div>
+
+                  {/* Lista com scroll e checkboxes */}
+                  <div className="space-y-1 p-2 rounded-lg border bg-background max-h-40 overflow-y-auto">
+                    {(() => {
+                      const termo = filtroContratoAdminTransfer.trim().toLowerCase();
+                      const contratosFiltrados = contratosDisponiveis.filter(c =>
+                        !termo || c.toLowerCase().includes(termo)
+                      );
+
+                      if (contratosFiltrados.length === 0) {
+                        return (
+                          <p className="text-xs text-muted-foreground text-center py-2">
+                            Nenhum contrato encontrado
+                          </p>
+                        );
+                      }
+
+                      const selectedList = transferDialog.selectedContratos || (transferDialog.selectedContrato ? [transferDialog.selectedContrato] : []);
+
+                      return contratosFiltrados.map((c: string) => {
+                        const isSelected = selectedList.includes(c);
+                        return (
+                          <label
+                            key={c}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer text-xs border transition-colors ${
+                              isSelected
+                                ? "bg-blue-50/80 border-blue-400 text-blue-900 font-semibold"
+                                : "border-transparent hover:bg-muted text-foreground"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setTransferDialog(prev => {
+                                  const current = prev.selectedContratos || (prev.selectedContrato ? [prev.selectedContrato] : []);
+                                  const updated = checked
+                                    ? [...new Set([...current, c])]
+                                    : current.filter(item => item !== c);
+                                  return {
+                                    ...prev,
+                                    selectedContratos: updated,
+                                    selectedContrato: updated[0] || "",
+                                  };
+                                });
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span className="truncate" title={`Contrato ${c}`}>
+                              Contrato {c}
+                            </span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {(() => {
+                  const selectedList = transferDialog.selectedContratos || (transferDialog.selectedContrato ? [transferDialog.selectedContrato] : []);
+                  const selectedSet = new Set(selectedList.map(c => (c || "").trim()));
+
+                  const servicosDosContratos = (servicos as ServicoCatalogo[]).filter(
+                    s => selectedSet.has(String(s.contrato || "").trim())
+                  );
+                  const valorTotalContrato = servicosDosContratos.reduce(
+                    (acc, s) => acc + (s.estimativa_valor || 0),
+                    0
+                  );
+                  return (
+                    <div className="rounded border bg-blue-50/60 border-blue-200 p-2.5 text-xs text-blue-900 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1.5">
+                      <span>
+                        Selecionados: <strong>{selectedList.length}</strong> | Serviços dos contratos: <strong>{servicosDosContratos.length}</strong>
+                      </span>
+                      <span>
+                        Custo Financeiro Total: <strong>{new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valorTotalContrato)}</strong>
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : transferDialog.modo === "item" && transferDialog.item ? (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Serviço Selecionado</p>
+                <p className="font-medium text-foreground mt-0.5">
+                  Item {transferDialog.item.item} - {transferDialog.item.objeto}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Contrato: {transferDialog.item.contrato || "-"} • Valor: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(transferDialog.item.estimativa_valor)}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Serviços Selecionados</p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {selectedIds.length} serviço(s) selecionado(s)
+                </p>
+              </div>
+            )}
+
+            {/* De: Diretoria de Origem */}
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                De: Diretoria de Origem
+              </label>
+              <Select
+                value={transferDialog.sourceDiretoriaId || "todas"}
+                onValueChange={(val) => setTransferDialog(prev => ({ ...prev, sourceDiretoriaId: val === "todas" ? "" : val }))}
+                disabled={transferDialog.loading}
+              >
+                <SelectTrigger className="w-full bg-background font-medium">
+                  <SelectValue placeholder="Selecione a diretoria de origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as Diretorias (Geral)</SelectItem>
+                  {(diretorias as Diretoria[]).map(d => (
+                    <SelectItem key={d.id} value={d.id}>
+                      Diretoria {d.sigla} - {d.nome || d.sigla}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Condições de Transferência (apenas para Contrato) */}
+            {transferDialog.modo === "contrato" && (
+              <div className="border-t border-border/50 pt-3">
+                <label className="text-xs font-semibold text-muted-foreground block mb-2">
+                  Escolha a condição de transferência:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div
+                    onClick={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: true }))}
+                    className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                      transferDialog.incluirCustoFinanceiro !== false
+                        ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-950 dark:text-blue-100 ring-1 ring-blue-600"
+                        : "border-border hover:border-muted-foreground/40 bg-card text-muted-foreground"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-medium text-xs sm:text-sm">
+                      <input
+                        type="radio"
+                        name="condicaoFinanceiraAdminServicos"
+                        checked={transferDialog.incluirCustoFinanceiro !== false}
+                        onChange={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: true }))}
+                        className="text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      />
+                      <span>1. Com Custo Financeiro</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 pl-6 leading-relaxed">
+                      Transfere os serviços e o custo financeiro para a(s) diretoria(s) selecionada(s).
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: false }))}
+                    className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                      transferDialog.incluirCustoFinanceiro === false
+                        ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-950 dark:text-blue-100 ring-1 ring-blue-600"
+                        : "border-border hover:border-muted-foreground/40 bg-card text-muted-foreground"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-medium text-xs sm:text-sm">
+                      <input
+                        type="radio"
+                        name="condicaoFinanceiraAdminServicos"
+                        checked={transferDialog.incluirCustoFinanceiro === false}
+                        onChange={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: false }))}
+                        className="text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      />
+                      <span>2. Sem Custo Financeiro</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 pl-6 leading-relaxed">
+                      Disponibiliza o contrato e serviços nas diretorias de destino sem enviar o custo (zerado).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="border-t border-border/50 pt-3 space-y-4">
+              {/* Para: Diretoria(s) de Destino */}
+              {transferDialog.modo === "contrato" ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">
+                      Para: Diretoria(s) de Destino (escolha uma ou mais):
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = (diretorias as Diretoria[]).map(d => d.id);
+                          setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: allIds, targetDiretoriaId: allIds[0] || "" }));
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:underline"
+                      >
+                        Todas
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: [], targetDiretoriaId: "" }));
+                        }}
+                        className="text-[11px] text-muted-foreground hover:underline"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2 rounded-lg border bg-background max-h-36 overflow-y-auto">
+                    {(diretorias as Diretoria[]).map((d: Diretoria) => {
+                      const selectedList = transferDialog.targetDiretoriaIds || (transferDialog.targetDiretoriaId ? [transferDialog.targetDiretoriaId] : []);
+                      const isSelected = selectedList.includes(d.id);
+                      return (
+                        <label
+                          key={d.id}
+                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer text-xs border transition-colors ${
+                            isSelected
+                              ? "bg-blue-50/80 border-blue-400 text-blue-900 font-semibold"
+                              : "border-transparent hover:bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setTransferDialog(prev => {
+                                const current = prev.targetDiretoriaIds || (prev.targetDiretoriaId ? [prev.targetDiretoriaId] : []);
+                                const updated = checked
+                                  ? [...new Set([...current, d.id])]
+                                  : current.filter(id => id !== d.id);
+                                const firstDir = updated[0] || "";
+                                const targetDir = (diretorias as Diretoria[]).find(dir => String(dir.id) === String(firstDir));
+                                const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === firstDir);
+                                const nextGerId = (updated.length === 1 && targetDir?.id)
+                                  ? targetDir.id
+                                  : (gers[0]?.id || prev.targetGerenciaId || "");
+                                return {
+                                  ...prev,
+                                  targetDiretoriaIds: updated,
+                                  targetDiretoriaId: firstDir,
+                                  targetGerenciaId: nextGerId,
+                                };
+                              });
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                          />
+                          <span className="truncate" title={`Diretoria ${d.sigla} - ${d.nome || d.sigla}`}>
+                            {d.sigla}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {((transferDialog.targetDiretoriaIds || []).length === 1 || (!transferDialog.targetDiretoriaIds?.length && transferDialog.targetDiretoriaId)) && (
+                    <div className="mt-3">
+                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                        Para: Gerência de Destino
+                      </label>
+                      <Select
+                        value={transferDialog.targetGerenciaId}
+                        onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
+                        disabled={transferDialog.loading}
+                      >
+                        <SelectTrigger className="w-full bg-background font-medium">
+                          <SelectValue placeholder="Selecione a gerência de destino" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(() => {
+                            const curTargetDirId = (transferDialog.targetDiretoriaIds && transferDialog.targetDiretoriaIds[0]) || transferDialog.targetDiretoriaId;
+                            const curTargetDirObj = (diretorias as Diretoria[]).find(d => String(d.id) === String(curTargetDirId));
+                            return (
+                              <>
+                                {curTargetDirObj && (
+                                  <SelectItem value={curTargetDirObj.id}>
+                                    {curTargetDirObj.sigla} - Diretoria ({curTargetDirObj.nome || curTargetDirObj.sigla})
+                                  </SelectItem>
+                                )}
+                                {gerenciasAlvo
+                                  .filter((g: any) => String(g.id) !== String(curTargetDirObj?.id))
+                                  .map((g: any) => (
+                                    <SelectItem key={g.id} value={g.id}>
+                                      {g.sigla} - {g.nome}
+                                    </SelectItem>
+                                  ))}
+                              </>
+                            );
+                          })()}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {((transferDialog.targetDiretoriaIds || []).length > 1) && (
+                    <p className="text-[11px] text-muted-foreground mt-2 bg-blue-50/50 p-2 rounded border border-blue-200/60">
+                      ℹ️ O envio será direcionado às gerências principais de cada uma das {(transferDialog.targetDiretoriaIds || []).length} diretorias selecionadas.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Para: Diretoria de Destino (Modo Item / Bulk) */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                      Para: Diretoria de Destino
+                    </label>
+                    <Select
+                      value={transferDialog.targetDiretoriaId}
+                      onValueChange={(val) => {
+                        const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === val);
+                        setTransferDialog(prev => ({
+                          ...prev,
+                          targetDiretoriaId: val,
+                          targetGerenciaId: gers[0]?.id || "",
+                        }));
+                      }}
+                      disabled={transferDialog.loading}
+                    >
+                      <SelectTrigger className="w-full bg-background font-medium">
+                        <SelectValue placeholder="Selecione a diretoria de destino" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(diretorias as Diretoria[]).map(d => (
+                          <SelectItem key={d.id} value={d.id}>
+                            Diretoria {d.sigla} - {d.nome || d.sigla}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Para: Gerência de Destino (Modo Item / Bulk) */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                      Para: Gerência de Destino
+                    </label>
+                    <Select
+                      value={transferDialog.targetGerenciaId}
+                      onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
+                      disabled={transferDialog.loading}
+                    >
+                      <SelectTrigger className="w-full bg-background font-medium">
+                        <SelectValue placeholder="Selecione a gerência de destino" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const curTargetDirId = transferDialog.targetDiretoriaId;
+                          const curTargetDirObj = (diretorias as Diretoria[]).find(d => String(d.id) === String(curTargetDirId));
+                          return (
+                            <>
+                              {curTargetDirObj && (
+                                <SelectItem value={curTargetDirObj.id}>
+                                  {curTargetDirObj.sigla} - Diretoria ({curTargetDirObj.nome || curTargetDirObj.sigla})
+                                </SelectItem>
+                              )}
+                              {gerenciasAlvo
+                                .filter((g: any) => String(g.id) !== String(curTargetDirObj?.id))
+                                .map((g: any) => (
+                                  <SelectItem key={g.id} value={g.id}>
+                                    {g.sigla} - {g.nome}
+                                  </SelectItem>
+                                ))}
+                            </>
+                          );
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="flex justify-end gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setTransferDialog(prev => ({ ...prev, open: false }))}
+              disabled={transferDialog.loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmTransferAdmin}
+              disabled={
+                transferDialog.loading ||
+                (transferDialog.modo === "contrato" &&
+                  (((transferDialog.selectedContratos?.length || (transferDialog.selectedContrato ? 1 : 0)) === 0) ||
+                    ((transferDialog.targetDiretoriaIds?.length || 0) === 0 && !transferDialog.targetDiretoriaId))) ||
+                (transferDialog.modo !== "contrato" && (!transferDialog.targetGerenciaId || !transferDialog.targetDiretoriaId))
+              }
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {transferDialog.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+              Confirmar transferência
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DesfazerTransferenciaDialog
+        open={desfazerTransferOpen}
+        onOpenChange={setDesfazerTransferOpen}
+        tipo="servicos"
+        onSuccess={() => {
+          refetchServicos();
+          queryClient.invalidateQueries({ queryKey: ["servicos"] });
+        }}
+      />
     </div>
   );
 }

@@ -336,9 +336,18 @@ export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEsti
                         </p>
                       )}
                       {item.observacao && (
-                        <p className="text-xs text-success mt-1 flex items-center gap-1">
-                          💬 {item.observacao}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {/\[Transferido [^\]]+\]/.test(item.observacao) && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 gap-1 text-[11px] font-semibold py-0">
+                              🔄 {item.observacao.match(/\[Transferido ([^\]]+)\]/)?.[1] || "Transferido"}
+                            </Badge>
+                          )}
+                          {item.observacao.replace(/\[Transferido [^\]]+\]\s*/g, "").trim() && (
+                            <p className="text-xs text-success flex items-center gap-1">
+                              💬 {item.observacao.replace(/\[Transferido [^\]]+\]\s*/g, "").trim()}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </TableCell>

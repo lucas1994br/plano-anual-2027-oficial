@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2, Undo2 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { DesfazerTransferenciaDialog } from "@/components/common/DesfazerTransferenciaDialog.tsx";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -40,7 +41,12 @@ import {
   createItemCatalogoAndDistribuir,
   updateItemCatalogoAdmin,
   deleteItemCatalogoAdmin,
-  deleteItensCatalogoBulkAdmin
+  deleteItensCatalogoBulkAdmin,
+  getDiretorias,
+  getTodasGerencias,
+  transferirCategoriaAquisicao,
+  transferirSolicitacoesParaGerenciaBulk,
+  supabase
 } from "@/lib/services.ts";
 import getItensCatalogo from "@/lib/services.ts";
 
@@ -119,6 +125,50 @@ export function AdminCatalogItemControl() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Buscar diretorias
+  const { data: diretorias = [] } = useQuery<any[]>({
+    queryKey: ["diretorias"],
+    queryFn: getDiretorias,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Buscar todas as gerências
+  const { data: todasGerencias = [] } = useQuery<any[]>({
+    queryKey: ["todas-gerencias"],
+    queryFn: getTodasGerencias,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Estado do diálogo de transferência
+  const [transferDialog, setTransferDialog] = useState<{
+    open: boolean;
+    modo: "categoria" | "bulk" | "item";
+    selectedCategoria: string;
+    selectedCategorias?: string[];
+    item: ItemCatalogo | null;
+    sourceDiretoriaId?: string;
+    targetDiretoriaId: string;
+    targetDiretoriaIds?: string[];
+    targetGerenciaId: string;
+    incluirCustoFinanceiro?: boolean;
+    loading: boolean;
+  }>({
+    open: false,
+    modo: "categoria",
+    selectedCategoria: "",
+    selectedCategorias: [],
+    item: null,
+    sourceDiretoriaId: "",
+    targetDiretoriaId: "",
+    targetDiretoriaIds: [],
+    targetGerenciaId: "",
+    incluirCustoFinanceiro: true,
+    loading: false,
+  });
+
+  const [filtroCategoriaAdminTransfer, setFiltroCategoriaAdminTransfer] = useState("");
+  const [desfazerTransferOpen, setDesfazerTransferOpen] = useState(false);
+
   // Deduplica itens por código único para proteger contra duplicações na planilha/banco
   const uniqueItens = useMemo(() => {
     const seen = new Set<number>();
@@ -131,6 +181,205 @@ export function AdminCatalogItemControl() {
       return true;
     });
   }, [itens]);
+
+  const categoriasCatalogo = useMemo(() => {
+    const set = new Set<string>();
+    uniqueItens.forEach((i) => {
+      if (i.categoria && i.categoria.trim()) set.add(i.categoria.trim());
+    });
+    CATEGORIAS_ITEM_PREDEFINIDAS.forEach(c => {
+      if (c && c.trim()) set.add(c.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [uniqueItens]);
+
+  const todasCategoriasDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    categoriasCatalogo.forEach(c => set.add(c));
+    CATEGORIAS_ITEM_PREDEFINIDAS.forEach(c => {
+      if (c && c.trim()) set.add(c.trim());
+    });
+    if (editFormData?.categoria && editFormData.categoria.trim()) {
+      set.add(editFormData.categoria.trim());
+    }
+    if (novoItem?.categoria && novoItem.categoria.trim()) {
+      set.add(novoItem.categoria.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [categoriasCatalogo, editFormData?.categoria, novoItem?.categoria]);
+
+  const todasUnidadesDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    UNIDADES_ITEM_PREDEFINIDAS.forEach(u => set.add(u));
+    uniqueItens.forEach((i) => {
+      if (i.unidade && i.unidade.trim()) set.add(i.unidade.trim().toUpperCase());
+    });
+    if (editFormData?.unidade && editFormData.unidade.trim()) {
+      set.add(editFormData.unidade.trim().toUpperCase());
+    }
+    if (novoItem?.unidade && novoItem.unidade.trim()) {
+      set.add(novoItem.unidade.trim().toUpperCase());
+    }
+    return Array.from(set).sort();
+  }, [uniqueItens, editFormData?.unidade, novoItem?.unidade]);
+
+  const gerenciasAlvo = useMemo(() => {
+    if (!transferDialog.targetDiretoriaId) return todasGerencias;
+    const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === transferDialog.targetDiretoriaId);
+    return gers.length > 0 ? gers : (todasGerencias as any[]);
+  }, [transferDialog.targetDiretoriaId, todasGerencias]);
+
+  const handleOpenCategoriaTransfer = () => {
+    const firstDir = (diretorias as any[])[0]?.id || "";
+    const secondDir = (diretorias as any[])[1]?.id || firstDir;
+    const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === secondDir);
+    setFiltroCategoriaAdminTransfer("");
+    setTransferDialog({
+      open: true,
+      modo: "categoria",
+      selectedCategoria: categoriasCatalogo[0] || "",
+      selectedCategorias: categoriasCatalogo[0] ? [categoriasCatalogo[0]] : [],
+      item: null,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: secondDir ? [secondDir] : [],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleOpenBulkTransfer = () => {
+    const firstDir = (diretorias as any[])[0]?.id || "";
+    const secondDir = (diretorias as any[])[1]?.id || firstDir;
+    const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === secondDir);
+    setTransferDialog({
+      open: true,
+      modo: "bulk",
+      selectedCategoria: "",
+      item: null,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: [secondDir],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleOpenItemTransfer = (item: ItemCatalogo) => {
+    const firstDir = (diretorias as any[])[0]?.id || "";
+    const secondDir = (diretorias as any[])[1]?.id || firstDir;
+    const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === secondDir);
+    setTransferDialog({
+      open: true,
+      modo: "item",
+      selectedCategoria: "",
+      item,
+      sourceDiretoriaId: firstDir,
+      targetDiretoriaId: secondDir,
+      targetDiretoriaIds: [secondDir],
+      targetGerenciaId: gers[0]?.id || "",
+      incluirCustoFinanceiro: true,
+      loading: false,
+    });
+  };
+
+  const handleConfirmTransferAdmin = async () => {
+    const { modo, selectedCategoria, selectedCategorias, item, sourceDiretoriaId, targetDiretoriaId, targetDiretoriaIds, targetGerenciaId, incluirCustoFinanceiro } = transferDialog;
+    
+    const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+      ? targetDiretoriaIds
+      : targetDiretoriaId ? [targetDiretoriaId] : [];
+
+    const finalCats = (selectedCategorias && selectedCategorias.length > 0)
+      ? selectedCategorias
+      : (selectedCategoria ? [selectedCategoria] : []);
+
+    if (targetDirIds.length === 0) {
+      toast.error("Selecione ao menos uma diretoria de destino.");
+      return;
+    }
+
+    let finalTargetGerId = targetGerenciaId;
+    if (!finalTargetGerId && targetDirIds.length > 0) {
+      const gersDaDir = (todasGerencias as any[]).filter(g => g.diretoria_id === targetDirIds[0]);
+      finalTargetGerId = gersDaDir[0]?.id || "";
+    }
+
+    if (modo !== "categoria" && !finalTargetGerId) {
+      toast.error("Selecione a diretoria e gerência de destino.");
+      return;
+    }
+
+    setTransferDialog(prev => ({ ...prev, loading: true }));
+    const dirOrigemSigla = (diretorias as any[]).find(d => d.id === sourceDiretoriaId)?.sigla;
+    const dirDestinoSigla = (diretorias as any[]).find(d => d.id === targetDirIds[0])?.sigla || "Diretoria";
+    const gerDestinoSigla = (todasGerencias as any[]).find(g => g.id === finalTargetGerId)?.sigla || "Gerência";
+    const tagOrigem = dirOrigemSigla || "ADMIN";
+
+    const siglasDestino = targetDirIds
+      .map(id => (diretorias as any[]).find(d => d.id === id)?.sigla)
+      .filter(Boolean)
+      .join(", ");
+
+    try {
+      if (modo === "categoria") {
+        const comCusto = incluirCustoFinanceiro !== false;
+        const res = await transferirCategoriaAquisicao({
+          categoria: finalCats[0] || selectedCategoria,
+          categorias: finalCats,
+          sourceDiretoriaId: sourceDiretoriaId || undefined,
+          targetDiretoriaId: targetDirIds[0],
+          targetDiretoriaIds: targetDirIds,
+          targetGerenciaId: finalTargetGerId,
+          origemSigla: tagOrigem,
+          incluirCustoFinanceiro: comCusto,
+        });
+
+        await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+        for (const dirId of targetDirIds) {
+          await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] });
+        }
+
+        const catsLabel = finalCats.length === 1 ? `"${finalCats[0]}"` : `${finalCats.length} categorias (${finalCats.join(", ")})`;
+        if (comCusto) {
+          toast.success(`Categoria(s) ${catsLabel} (${res.count} itens, ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(res.totalValor)}) transferida(s) com custo financeiro para a(s) Diretoria(s) ${siglasDestino || dirDestinoSigla}.`);
+        } else {
+          toast.success(`Categoria(s) ${catsLabel} (${res.count} itens) disponibilizada(s) para a(s) Diretoria(s) ${siglasDestino || dirDestinoSigla} SEM custo financeiro.`);
+        }
+      } else {
+        const itemsToTransfer: ItemCatalogo[] = modo === "item" && item
+          ? [item]
+          : uniqueItens.filter(i => selectedIds.includes(i.id));
+
+        const codigos = itemsToTransfer.map(i => i.codigo);
+
+        let query = supabase.from("solicitacoes").select("id, codigo");
+        if (sourceDiretoriaId) {
+          query = query.eq("diretoria_id", sourceDiretoriaId);
+        }
+        query = query.in("codigo", codigos);
+
+        const { data: existingSols } = await query;
+
+        const solIds = (existingSols || []).map((s: any) => s.id);
+        if (solIds.length > 0) {
+          await transferirSolicitacoesParaGerenciaBulk(solIds, targetGerenciaId, targetDiretoriaId, tagOrigem);
+        }
+
+        setSelectedIds([]);
+        await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+        toast.success(`${itemsToTransfer.length} item(ns) transferido(s)${dirOrigemSigla ? ` de ${dirOrigemSigla}` : ""} para a Diretoria ${dirDestinoSigla} (${gerDestinoSigla}) com sucesso.`);
+      }
+
+      setTransferDialog(prev => ({ ...prev, open: false, loading: false }));
+    } catch (err: any) {
+      console.error("Erro na transferência (Admin):", err);
+      toast.error(err?.message || "Erro ao transferir item/categoria.");
+      setTransferDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
 
   // Filtrar itens
   const filteredItens = useMemo(() => {
@@ -481,9 +730,35 @@ export function AdminCatalogItemControl() {
               >
                 <FileDown className="h-4 w-4" />PDF
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
+                onClick={handleOpenCategoriaTransfer}
+                title="Transferir uma Categoria inteira para uma Diretoria"
+              >
+                <ArrowRightLeft className="h-4 w-4" />Transferir Categoria
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                onClick={() => setDesfazerTransferOpen(true)}
+                title="Desfazer envio/transferência de categorias ou itens"
+              >
+                <Undo2 className="h-4 w-4" />Desfazer Transferência
+              </Button>
             </div>
             {selectedIds.length > 0 && (
               <>
+                <Button 
+                  variant="outline"
+                  className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50 whitespace-nowrap w-full sm:w-auto"
+                  onClick={handleOpenBulkTransfer}
+                >
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Transferir ({selectedIds.length})
+                </Button>
                 <Button 
                   variant="outline"
                   className="gap-2 text-primary border-primary hover:bg-primary/10 whitespace-nowrap w-full sm:w-auto"
@@ -553,6 +828,15 @@ export function AdminCatalogItemControl() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Transferir para Diretoria"
+                          onClick={() => handleOpenItemTransfer(item)}
+                        >
+                          <ArrowRightLeft className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -672,10 +956,10 @@ export function AdminCatalogItemControl() {
                 onValueChange={(value) => setNovoItem(prev => ({ ...prev, categoria: value }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
+                  <SelectValue placeholder="Selecione a categoria" />
                 </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIAS_ITEM_PREDEFINIDAS.map((cat) => (
+                <SelectContent className="max-h-72">
+                  {todasCategoriasDisponiveis.map((cat) => (
                     <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                   ))}
                 </SelectContent>
@@ -689,10 +973,10 @@ export function AdminCatalogItemControl() {
                 onValueChange={(value) => setNovoItem(prev => ({ ...prev, unidade: value }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
+                  <SelectValue placeholder="Selecione a unidade" />
                 </SelectTrigger>
-                <SelectContent>
-                  {UNIDADES_ITEM_PREDEFINIDAS.map((uni) => (
+                <SelectContent className="max-h-72">
+                  {todasUnidadesDisponiveis.map((uni) => (
                     <SelectItem key={uni} value={uni}>{uni}</SelectItem>
                   ))}
                 </SelectContent>
@@ -761,10 +1045,10 @@ export function AdminCatalogItemControl() {
                 onValueChange={(value) => setEditFormData(prev => ({ ...prev, categoria: value }))}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Selecione a categoria" />
                 </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIAS_ITEM_PREDEFINIDAS.map((cat) => (
+                <SelectContent className="max-h-72">
+                  {todasCategoriasDisponiveis.map((cat) => (
                     <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                   ))}
                 </SelectContent>
@@ -778,10 +1062,10 @@ export function AdminCatalogItemControl() {
                 onValueChange={(value) => setEditFormData(prev => ({ ...prev, unidade: value }))}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Selecione a unidade" />
                 </SelectTrigger>
-                <SelectContent>
-                  {UNIDADES_ITEM_PREDEFINIDAS.map((uni) => (
+                <SelectContent className="max-h-72">
+                  {todasUnidadesDisponiveis.map((uni) => (
                     <SelectItem key={uni} value={uni}>{uni}</SelectItem>
                   ))}
                 </SelectContent>
@@ -888,6 +1172,492 @@ export function AdminCatalogItemControl() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ==================== DIALOG TRANSFERÊNCIA (ADMIN) ==================== */}
+      <Dialog
+        open={transferDialog.open}
+        onOpenChange={(open) => !transferDialog.loading && setTransferDialog(prev => ({ ...prev, open }))}
+      >
+        <DialogContent className="w-[95vw] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-blue-600" />
+              {transferDialog.modo === "categoria"
+                ? "Transferir Categoria para uma Diretoria"
+                : transferDialog.modo === "bulk"
+                ? `Transferir ${selectedIds.length} Itens para uma Diretoria`
+                : "Transferir Item para uma Diretoria"}
+            </DialogTitle>
+            <DialogDescription>
+              {transferDialog.modo === "categoria"
+                ? "Transfere todos os itens e custo financeiro da categoria selecionada para a Diretoria e Gerência de destino."
+                : "Transfere os itens selecionados e seus respectivos custos para a Diretoria e Gerência de destino."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-4">
+            {transferDialog.modo === "categoria" ? (
+              <div className="space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">
+                      Categoria(s) a Transferir (escolha uma ou mais):
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({
+                            ...prev,
+                            selectedCategorias: [...categoriasCatalogo],
+                            selectedCategoria: categoriasCatalogo[0] || "",
+                          }));
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:underline"
+                      >
+                        Todas ({categoriasCatalogo.length})
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({
+                            ...prev,
+                            selectedCategorias: [],
+                            selectedCategoria: "",
+                          }));
+                        }}
+                        className="text-[11px] text-muted-foreground hover:underline"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Input de filtro para categorias */}
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Pesquisar categoria..."
+                      value={filtroCategoriaAdminTransfer}
+                      onChange={(e) => setFiltroCategoriaAdminTransfer(e.target.value)}
+                      className="pl-8 h-8 text-xs bg-background"
+                      disabled={transferDialog.loading}
+                    />
+                  </div>
+
+                  {/* Lista com scroll e checkboxes */}
+                  <div className="space-y-1 p-2 rounded-lg border bg-background max-h-40 overflow-y-auto">
+                    {(() => {
+                      const termo = filtroCategoriaAdminTransfer.trim().toLowerCase();
+                      const categoriasFiltradas = categoriasCatalogo.filter(cat =>
+                        !termo || cat.toLowerCase().includes(termo)
+                      );
+
+                      if (categoriasFiltradas.length === 0) {
+                        return (
+                          <p className="text-xs text-muted-foreground text-center py-2">
+                            Nenhuma categoria encontrada
+                          </p>
+                        );
+                      }
+
+                      const selectedList = transferDialog.selectedCategorias || (transferDialog.selectedCategoria ? [transferDialog.selectedCategoria] : []);
+
+                      return categoriasFiltradas.map((cat: string) => {
+                        const isSelected = selectedList.includes(cat);
+                        return (
+                          <label
+                            key={cat}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer text-xs border transition-colors ${
+                              isSelected
+                                ? "bg-blue-50/80 border-blue-400 text-blue-900 font-semibold"
+                                : "border-transparent hover:bg-muted text-foreground"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setTransferDialog(prev => {
+                                  const current = prev.selectedCategorias || (prev.selectedCategoria ? [prev.selectedCategoria] : []);
+                                  const updated = checked
+                                    ? [...new Set([...current, cat])]
+                                    : current.filter(c => c !== cat);
+                                  return {
+                                    ...prev,
+                                    selectedCategorias: updated,
+                                    selectedCategoria: updated[0] || "",
+                                  };
+                                });
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span className="truncate" title={cat}>
+                              {cat}
+                            </span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {(() => {
+                  const selectedList = transferDialog.selectedCategorias || (transferDialog.selectedCategoria ? [transferDialog.selectedCategoria] : []);
+                  const selectedSet = new Set(selectedList.map(c => (c || "").trim().toLowerCase()));
+
+                  const itensDasCats = uniqueItens.filter(
+                    (i) => selectedSet.has((i.categoria || "").trim().toLowerCase())
+                  );
+                  const valorTotalCat = itensDasCats.reduce((acc, i) => acc + (i.valor_unitario || 0), 0);
+
+                  return (
+                    <div className="rounded border bg-blue-50/60 border-blue-200 p-2.5 text-xs text-blue-900 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1.5">
+                      <span>
+                        Selecionadas: <strong>{selectedList.length}</strong> | Total de itens: <strong>{itensDasCats.length}</strong>
+                      </span>
+                      <span>
+                        Total referencial: <strong>{new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valorTotalCat)}</strong>
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : transferDialog.modo === "item" && transferDialog.item ? (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Item Selecionado</p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {transferDialog.item.codigo} - {transferDialog.item.descricao}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Categoria: {transferDialog.item.categoria} • Valor Unit.: {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(transferDialog.item.valor_unitario)}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Itens Selecionados</p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {selectedIds.length} item(ns) de aquisição selecionado(s)
+                </p>
+              </div>
+            )}
+
+            {/* De: Diretoria de Origem */}
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                De: Diretoria de Origem
+              </label>
+              <Select
+                value={transferDialog.sourceDiretoriaId || "todas"}
+                onValueChange={(val) => setTransferDialog(prev => ({ ...prev, sourceDiretoriaId: val === "todas" ? "" : val }))}
+                disabled={transferDialog.loading}
+              >
+                <SelectTrigger className="w-full bg-background font-medium">
+                  <SelectValue placeholder="Selecione a diretoria de origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as Diretorias (Geral)</SelectItem>
+                  {(diretorias as any[]).map(d => (
+                    <SelectItem key={d.id} value={d.id}>
+                      Diretoria {d.sigla} - {d.nome || d.sigla}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Condições de Transferência (apenas para Categoria) */}
+            {transferDialog.modo === "categoria" && (
+              <div className="border-t border-border/50 pt-3">
+                <label className="text-xs font-semibold text-muted-foreground block mb-2">
+                  Escolha a condição de transferência:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div
+                    onClick={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: true }))}
+                    className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                      transferDialog.incluirCustoFinanceiro !== false
+                        ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-950 dark:text-blue-100 ring-1 ring-blue-600"
+                        : "border-border hover:border-muted-foreground/40 bg-card text-muted-foreground"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-medium text-xs sm:text-sm">
+                      <input
+                        type="radio"
+                        name="condicaoFinanceiraAdmin"
+                        checked={transferDialog.incluirCustoFinanceiro !== false}
+                        onChange={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: true }))}
+                        className="text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      />
+                      <span>1. Com Custo Financeiro</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 pl-6 leading-relaxed">
+                      Transfere os itens e o custo financeiro para a(s) diretoria(s) selecionada(s).
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: false }))}
+                    className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                      transferDialog.incluirCustoFinanceiro === false
+                        ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-950 dark:text-blue-100 ring-1 ring-blue-600"
+                        : "border-border hover:border-muted-foreground/40 bg-card text-muted-foreground"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-medium text-xs sm:text-sm">
+                      <input
+                        type="radio"
+                        name="condicaoFinanceiraAdmin"
+                        checked={transferDialog.incluirCustoFinanceiro === false}
+                        onChange={() => setTransferDialog(prev => ({ ...prev, incluirCustoFinanceiro: false }))}
+                        className="text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      />
+                      <span>2. Sem Custo Financeiro</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 pl-6 leading-relaxed">
+                      Disponibiliza a categoria e os itens nas diretorias de destino sem enviar o custo (zerado).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="border-t border-border/50 pt-3 space-y-4">
+              {/* Para: Diretoria(s) de Destino */}
+              {transferDialog.modo === "categoria" ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">
+                      Para: Diretoria(s) de Destino (escolha uma ou mais):
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = (diretorias as any[]).map(d => d.id);
+                          setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: allIds, targetDiretoriaId: allIds[0] || "" }));
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:underline"
+                      >
+                        Todas
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: [], targetDiretoriaId: "" }));
+                        }}
+                        className="text-[11px] text-muted-foreground hover:underline"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2 rounded-lg border bg-background max-h-36 overflow-y-auto">
+                    {(diretorias as any[]).map((d: any) => {
+                      const selectedList = transferDialog.targetDiretoriaIds || (transferDialog.targetDiretoriaId ? [transferDialog.targetDiretoriaId] : []);
+                      const isSelected = selectedList.includes(d.id);
+                      return (
+                        <label
+                          key={d.id}
+                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer text-xs border transition-colors ${
+                            isSelected
+                              ? "bg-blue-50/80 border-blue-400 text-blue-900 font-semibold"
+                              : "border-transparent hover:bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setTransferDialog(prev => {
+                                const current = prev.targetDiretoriaIds || (prev.targetDiretoriaId ? [prev.targetDiretoriaId] : []);
+                                const updated = checked
+                                  ? [...new Set([...current, d.id])]
+                                  : current.filter(id => id !== d.id);
+                                const firstDir = updated[0] || "";
+                                const targetDir = (diretorias as any[]).find(dir => String(dir.id) === String(firstDir));
+                                const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === firstDir);
+                                const nextGerId = (updated.length === 1 && targetDir?.id)
+                                  ? targetDir.id
+                                  : (gers[0]?.id || prev.targetGerenciaId || "");
+                                return {
+                                  ...prev,
+                                  targetDiretoriaIds: updated,
+                                  targetDiretoriaId: firstDir,
+                                  targetGerenciaId: nextGerId,
+                                };
+                              });
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                          />
+                          <span className="truncate" title={`Diretoria ${d.sigla} - ${d.nome || d.sigla}`}>
+                            {d.sigla}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {((transferDialog.targetDiretoriaIds || []).length === 1 || (!transferDialog.targetDiretoriaIds?.length && transferDialog.targetDiretoriaId)) && (
+                    <div className="mt-3">
+                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                        Para: Gerência de Destino
+                      </label>
+                      <Select
+                        value={transferDialog.targetGerenciaId}
+                        onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
+                        disabled={transferDialog.loading}
+                      >
+                        <SelectTrigger className="w-full bg-background font-medium">
+                          <SelectValue placeholder="Selecione a gerência de destino" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(() => {
+                            const curTargetDirId = (transferDialog.targetDiretoriaIds && transferDialog.targetDiretoriaIds[0]) || transferDialog.targetDiretoriaId;
+                            const curTargetDirObj = (diretorias as any[]).find(d => String(d.id) === String(curTargetDirId));
+                            return (
+                              <>
+                                {curTargetDirObj && (
+                                  <SelectItem value={curTargetDirObj.id}>
+                                    {curTargetDirObj.sigla} - Diretoria ({curTargetDirObj.nome || curTargetDirObj.sigla})
+                                  </SelectItem>
+                                )}
+                                {gerenciasAlvo
+                                  .filter((g: any) => String(g.id) !== String(curTargetDirObj?.id))
+                                  .map((g: any) => (
+                                    <SelectItem key={g.id} value={g.id}>
+                                      {g.sigla} - {g.nome}
+                                    </SelectItem>
+                                  ))}
+                              </>
+                            );
+                          })()}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {((transferDialog.targetDiretoriaIds || []).length > 1) && (
+                    <p className="text-[11px] text-muted-foreground mt-2 bg-blue-50/50 p-2 rounded border border-blue-200/60">
+                      ℹ️ O envio será direcionado às gerências principais de cada uma das {(transferDialog.targetDiretoriaIds || []).length} diretorias selecionadas.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Para: Diretoria de Destino (Modo Item / Bulk) */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                      Para: Diretoria de Destino
+                    </label>
+                    <Select
+                      value={transferDialog.targetDiretoriaId}
+                      onValueChange={(val) => {
+                        const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === val);
+                        setTransferDialog(prev => ({
+                          ...prev,
+                          targetDiretoriaId: val,
+                          targetGerenciaId: gers[0]?.id || "",
+                        }));
+                      }}
+                      disabled={transferDialog.loading}
+                    >
+                      <SelectTrigger className="w-full bg-background font-medium">
+                        <SelectValue placeholder="Selecione a diretoria de destino" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(diretorias as any[]).map(d => (
+                          <SelectItem key={d.id} value={d.id}>
+                            Diretoria {d.sigla} - {d.nome || d.sigla}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Para: Gerência de Destino (Modo Item / Bulk) */}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                      Para: Gerência de Destino
+                    </label>
+                    <Select
+                      value={transferDialog.targetGerenciaId}
+                      onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
+                      disabled={transferDialog.loading}
+                    >
+                      <SelectTrigger className="w-full bg-background font-medium">
+                        <SelectValue placeholder="Selecione a gerência de destino" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const curTargetDirId = transferDialog.targetDiretoriaId;
+                          const curTargetDirObj = (diretorias as any[]).find(d => String(d.id) === String(curTargetDirId));
+                          return (
+                            <>
+                              {curTargetDirObj && (
+                                <SelectItem value={curTargetDirObj.id}>
+                                  {curTargetDirObj.sigla} - Diretoria ({curTargetDirObj.nome || curTargetDirObj.sigla})
+                                </SelectItem>
+                              )}
+                              {gerenciasAlvo
+                                .filter((g: any) => String(g.id) !== String(curTargetDirObj?.id))
+                                .map((g: any) => (
+                                  <SelectItem key={g.id} value={g.id}>
+                                    {g.sigla} - {g.nome}
+                                  </SelectItem>
+                                ))}
+                            </>
+                          );
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="flex justify-end gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setTransferDialog(prev => ({ ...prev, open: false }))}
+              disabled={transferDialog.loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmTransferAdmin}
+              disabled={
+                transferDialog.loading ||
+                (transferDialog.modo === "categoria" &&
+                  (((transferDialog.selectedCategorias?.length || (transferDialog.selectedCategoria ? 1 : 0)) === 0) ||
+                    ((transferDialog.targetDiretoriaIds?.length || 0) === 0 && !transferDialog.targetDiretoriaId))) ||
+                (transferDialog.modo !== "categoria" && (!transferDialog.targetGerenciaId || !transferDialog.targetDiretoriaId))
+              }
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {transferDialog.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+              Confirmar transferência
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <DesfazerTransferenciaDialog
+        open={desfazerTransferOpen}
+        onOpenChange={setDesfazerTransferOpen}
+        tipo="aquisicao"
+        onSuccess={() => {
+          refetchItens();
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+          queryClient.invalidateQueries({ queryKey: ["itens_catalogo"] });
+        }}
+      />
     </div>
   );
 }
