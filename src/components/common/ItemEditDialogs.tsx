@@ -290,7 +290,16 @@ export const AquisicaoEditDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Editar Solicitação de Aquisição</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <span>Editar Solicitação de Aquisição</span>
+            {aquisicao.codigo && Number(aquisicao.codigo) > 0 ? (
+              <span className="text-sm font-normal text-muted-foreground">(Cód. {aquisicao.codigo})</span>
+            ) : (
+              <span className="text-xs font-normal text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+                Cód. Não identificado
+              </span>
+            )}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
           <div>

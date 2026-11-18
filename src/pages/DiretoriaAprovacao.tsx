@@ -40,12 +40,12 @@ import { useDebounce } from "@/hooks/useDebounce";
 
 /** Itens aguardando decisão da diretoria (podem ser aprovados ou rejeitados em massa). */
 function isPendenteDiretoriaAprovacao(item: PlanItem) {
-  return item.status === "enviado" || item.status === "em_analise";
+  return item.status === "enviado" || item.status === "em_analise" || (item.status === "rascunho" && Boolean(item.observacao && item.observacao.includes("[Transferido")));
 }
 
 /** Serviços aguardando decisão da diretoria */
 function isPendenteServicoAprovacao(servico: ServicoItem) {
-  return servico.status === "enviado" || servico.status === "em_analise";
+  return servico.status === "enviado" || servico.status === "em_analise" || (servico.status === "rascunho" && Boolean(servico.observacao && servico.observacao.includes("[Transferido")));
 }
 // Mapeamento de ícones por sigla
 const getIconPath = (sigla: string) => {
@@ -92,6 +92,8 @@ const DiretoriaAprovacao = () => {
   const debouncedServicosRecebidosSearchTerm = useDebounce(servicosRecebidosSearchTerm, 300);
   const [showOnlyComQuantidade, setShowOnlyComQuantidade] = useState(false);
   const [showOnlyZerados, setShowOnlyZerados] = useState(false);
+  const [showOnlyTransferidos, setShowOnlyTransferidos] = useState(false);
+  const [showOnlyTransferidosServicos, setShowOnlyTransferidosServicos] = useState(false);
   const [selectedGerencia, setSelectedGerencia] = useState<string>("todas");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("todas");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -164,6 +166,7 @@ const DiretoriaAprovacao = () => {
     targetDiretoriaId?: string;
     targetDiretoriaIds?: string[];
     targetGerenciaId: string;
+    targetGerenciaIds?: string[];
     incluirCustoFinanceiro?: boolean;
     loading: boolean;
   }>({
@@ -178,6 +181,7 @@ const DiretoriaAprovacao = () => {
     targetDiretoriaId: "",
     targetDiretoriaIds: [],
     targetGerenciaId: "",
+    targetGerenciaIds: [],
     incluirCustoFinanceiro: true,
     loading: false,
   });
@@ -249,9 +253,24 @@ const DiretoriaAprovacao = () => {
         map[g.id] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
         map[String(g.id).toLowerCase()] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
       }
+      if (g.sigla) {
+        map[g.sigla] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+        map[String(g.sigla).toLowerCase()] = { sigla: g.sigla, diretoria_id: g.diretoria_id };
+      }
+    });
+    // Mapeamento defensivo para diretorias (quando o item aponta diretamente para a diretoria)
+    (diretorias as any[]).forEach((d: any) => {
+      if (d.id && !map[d.id]) {
+        map[d.id] = { sigla: d.sigla, diretoria_id: d.id };
+        map[String(d.id).toLowerCase()] = { sigla: d.sigla, diretoria_id: d.id };
+      }
+      if (d.sigla && !map[d.sigla]) {
+        map[d.sigla] = { sigla: d.sigla, diretoria_id: d.id };
+        map[String(d.sigla).toLowerCase()] = { sigla: d.sigla, diretoria_id: d.id };
+      }
     });
     return map;
-  }, [todasGerenciasData]);
+  }, [todasGerenciasData, diretorias]);
 
   // Buscar gerências desta diretoria
   const { data: gerenciasData = [] } = useQuery<any[]>({
@@ -339,8 +358,19 @@ const DiretoriaAprovacao = () => {
         map[g.sigla] = g.sigla;
       }
     });
+    // Mapeamento defensivo para todas as diretorias
+    (diretorias as any[]).forEach((d: any) => {
+      if (d.id && !map[d.id]) {
+        map[d.id] = d.sigla;
+        map[String(d.id).toLowerCase()] = d.sigla;
+      }
+      if (d.sigla && !map[d.sigla]) {
+        map[d.sigla] = d.sigla;
+        map[String(d.sigla).toLowerCase()] = d.sigla;
+      }
+    });
     return map;
-  }, [todasGerenciasData, todasGerenciasDaDiretoria]);
+  }, [todasGerenciasData, todasGerenciasDaDiretoria, diretorias]);
 
   useEffect(() => {
     if (ownGerenciaId === "diretoria" && todasGerenciasDaDiretoria.length > 0) {
@@ -528,6 +558,12 @@ const DiretoriaAprovacao = () => {
     const map: Record<string, Diretoria> = {};
     (diretorias as any[]).forEach((dir: any) => {
       map[dir.id] = dir;
+      map[String(dir.id).toLowerCase()] = dir;
+      if (dir.sigla) {
+        map[dir.sigla] = dir;
+        map[dir.sigla.toUpperCase()] = dir;
+        map[dir.sigla.toLowerCase()] = dir;
+      }
     });
     return map;
   }, [diretorias]);
@@ -547,7 +583,10 @@ const DiretoriaAprovacao = () => {
     return solicitacoes
       .filter((s: any) =>
         s.qtd_estimada >= 0 &&
-        ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status)
+        (
+          ["enviado", "em_analise", "aprovado", "rejeitado", "em_compra", "concluido"].includes(s.status) ||
+          Boolean(s.observacao && s.observacao.includes("[Transferido"))
+        )
       )
       .map((s: any) => {
         const rawCode = s.codigo ?? s.item?.codigo ?? 0;
@@ -555,9 +594,10 @@ const DiretoriaAprovacao = () => {
         const catItem = (codigo > 0 ? catalogoByCodigoMap.get(codigo) : undefined) || (s.item_id ? catalogoByIdMap.get(String(s.item_id).toLowerCase()) : undefined) || s.item;
         const descFromMap = codigo > 0 ? (materialDescriptions[String(codigo)] || "") : "";
         const rawDesc = catItem?.descricao || s.descricao || s.item?.descricao || "";
-        const descricao = (rawDesc && rawDesc.trim().toLowerCase() !== "diversos")
+        const isDescUnspecified = !rawDesc || rawDesc.trim().toLowerCase() === "diversos" || rawDesc.trim().toLowerCase() === "material não especificado";
+        const descricao = !isDescUnspecified
           ? rawDesc
-          : (descFromMap || rawDesc || "Material não especificado");
+          : (descFromMap || "Não identificado");
         const categoriaItem = catItem?.categoria || ((typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos")
           ? s.categoria
           : (s.item?.categoria || "MATERIAIS DE CUSTEIO"));
@@ -577,12 +617,24 @@ const DiretoriaAprovacao = () => {
         const diretoriaOrcamentaria = diretoriaMap[diretoriaOrcamentariaId];
         const valUnit = parseSafeNumber(catItem?.valor_unitario !== undefined && Number(catItem?.valor_unitario) > 0 ? catItem.valor_unitario : (s.valor_unitario !== undefined ? s.valor_unitario : (s.item?.valor_unitario || 0)), 0);
 
+        const resolvedGerencia = 
+          (globalGerenciaMap[s.gerencia_id]?.sigla && globalGerenciaMap[s.gerencia_id]?.sigla !== "N/A" ? globalGerenciaMap[s.gerencia_id]?.sigla : undefined) ||
+          (gerenciaMap[s.gerencia_id] && gerenciaMap[s.gerencia_id] !== "N/A" ? gerenciaMap[s.gerencia_id] : undefined) ||
+          (gerenciaMap[s.gerencia] && gerenciaMap[s.gerencia] !== "N/A" ? gerenciaMap[s.gerencia] : undefined) ||
+          diretoriaMap[s.gerencia_id]?.sigla ||
+          (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
+          (s.unidade_demandante && !String(s.unidade_demandante).includes("-") && s.unidade_demandante !== "N/A" ? s.unidade_demandante : undefined) ||
+          diretoriaSolicitante?.sigla ||
+          diretoriaMap[s.diretoria_id]?.sigla ||
+          s.diretoriaSigla ||
+          siglaUpper;
+
         return {
           id: s.id,
           codigo,
           descricao,
           categoria: categoriaItem,
-          gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || gerenciaMap[s.gerencia_id] || gerenciaMap[s.gerencia] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || "N/A",
+          gerencia: resolvedGerencia,
           prioridade: s.prioridade || "Média",
           qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
           unidade: catItem?.unidade || s.unidade || s.item?.unidade || "un",
@@ -595,9 +647,10 @@ const DiretoriaAprovacao = () => {
           diretoriaOrcamentariaSigla: diretoriaOrcamentaria?.sigla || diretoriaSolicitante?.sigla,
           isOrcamentoCompartilhado: diretoriaSolicitante?.id !== diretoriaOrcamentariaId,
           gerencia_id: s.gerencia_id,
+          diretoria_id: s.diretoria_id,
         };
       });
-  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, gerenciaMap, catalogoData]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, orcamentoConfig, diretoriaMap, categoryBudgetOwnersFromDb, materialDescriptions, gerenciaMap, catalogoData, siglaUpper]);
 
   // Itens adicionados diretamente pela diretoria (rascunho, editáveis)
   const itensProprios: PlanItem[] = useMemo(() => {
@@ -618,15 +671,25 @@ const DiretoriaAprovacao = () => {
       const codigo = Number(rawCode) || 0;
       const descFromMap = codigo > 0 ? (materialDescriptions[String(codigo)] || "") : "";
       const rawDesc = s.descricao || s.item?.descricao || "";
-      const descricao = (rawDesc && rawDesc.trim().toLowerCase() !== "diversos")
+      const isDescUnspecified = !rawDesc || rawDesc.trim().toLowerCase() === "diversos" || rawDesc.trim().toLowerCase() === "material não especificado";
+      const descricao = !isDescUnspecified
         ? rawDesc
-        : (descFromMap || rawDesc || "Material não especificado");
+        : (descFromMap || "Não identificado");
+      const resolvedGerProprio = 
+        (globalGerenciaMap[s.gerencia_id]?.sigla && globalGerenciaMap[s.gerencia_id]?.sigla !== "N/A" ? globalGerenciaMap[s.gerencia_id]?.sigla : undefined) ||
+        (gerenciaMap[s.gerencia_id] && gerenciaMap[s.gerencia_id] !== "N/A" ? gerenciaMap[s.gerencia_id] : undefined) ||
+        (gerenciaMap[s.gerencia] && gerenciaMap[s.gerencia] !== "N/A" ? gerenciaMap[s.gerencia] : undefined) ||
+        diretoriaMap[s.gerencia_id]?.sigla ||
+        (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
+        diretoriaMap[s.diretoria_id]?.sigla ||
+        siglaUpper;
+
       latestByCodigo.set(codigo, {
         id: s.id,
         codigo,
         descricao,
         categoria: (typeof s.categoria === "string" && s.categoria.trim().length > 0 && s.categoria !== "diversos") ? s.categoria : (s.item?.categoria || "MATERIAIS DE CUSTEIO"),
-        gerencia: globalGerenciaMap[s.gerencia_id]?.sigla || gerenciaMap[s.gerencia_id] || gerenciaMap[s.gerencia] || (s.gerencia && !String(s.gerencia).includes("-") ? s.gerencia : undefined) || "N/A",
+        gerencia: resolvedGerProprio,
         prioridade: s.prioridade || "Média",
         qtdEstimada: parseSafeNumber(s.qtd_estimada !== undefined ? s.qtd_estimada : (s.qtdEstimada || 0), 0),
         unidade: s.unidade || s.item?.unidade || "un",
@@ -639,7 +702,7 @@ const DiretoriaAprovacao = () => {
     });
 
     return Array.from(latestByCodigo.values());
-  }, [solicitacoes, diretoria, globalGerenciaMap, materialDescriptions]);
+  }, [solicitacoes, diretoria, globalGerenciaMap, gerenciaMap, diretoriaMap, materialDescriptions, siglaUpper]);
 
   const formatCurrency = (value: any) => {
     const num = parseSafeNumber(value, 0);
@@ -691,10 +754,10 @@ const DiretoriaAprovacao = () => {
 
   const filteredItems = useMemo(() => {
     let filtered = items;
-    if (selectedGerencia !== "todas") {
+    if (selectedGerencia && selectedGerencia !== "todas") {
       filtered = filtered.filter((i) => i.gerencia === selectedGerencia);
     }
-    if (selectedCategoria !== "todas") {
+    if (selectedCategoria && selectedCategoria !== "todas") {
       filtered = filtered.filter((i) => i.categoria === selectedCategoria);
     }
     if (showOnlyZerados) {
@@ -703,19 +766,24 @@ const DiretoriaAprovacao = () => {
     if (showOnlyComQuantidade) {
       filtered = filtered.filter((i) => i.qtdEstimada > 0);
     }
+    if (showOnlyTransferidos) {
+      filtered = filtered.filter((i) => Boolean(i.observacao && i.observacao.includes("[Transferido")));
+    }
     const term = debouncedRecebidosSearchTerm.trim().toLowerCase();
     if (term) {
       filtered = filtered.filter((i) => {
+        const isUnidentifiedCode = !i.codigo || Number(i.codigo) <= 0;
+        const matchesCodeText = isUnidentifiedCode && "não identificado".includes(term);
         const matchesDesc = i.descricao ? i.descricao.toLowerCase().includes(term) : false;
-        const matchesCode = i.codigo ? i.codigo.toString().includes(term) : false;
+        const matchesCode = i.codigo && Number(i.codigo) > 0 ? i.codigo.toString().includes(term) : false;
         const matchesGerencia = i.gerencia ? i.gerencia.toLowerCase().includes(term) : false;
         const matchesCategoria = i.categoria ? i.categoria.toLowerCase().includes(term) : false;
         const matchesObs = i.observacao ? i.observacao.toLowerCase().includes(term) : false;
-        return matchesDesc || matchesCode || matchesGerencia || matchesCategoria || matchesObs;
+        return matchesDesc || matchesCode || matchesCodeText || matchesGerencia || matchesCategoria || matchesObs;
       });
     }
     return filtered;
-  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados, debouncedRecebidosSearchTerm]);
+  }, [items, selectedGerencia, selectedCategoria, showOnlyComQuantidade, showOnlyZerados, showOnlyTransferidos, debouncedRecebidosSearchTerm]);
 
   const recebidosTabCounts = useMemo(() => {
     const base = filteredItems;
@@ -774,7 +842,7 @@ const DiretoriaAprovacao = () => {
 
     const gerenciaSelecionada = ownGerenciaId === "diretoria"
       ? `DIRETORIA ${siglaUpper}`
-      : (gerenciaMap[ownGerenciaId] || "N/A");
+      : ((gerenciaMap[ownGerenciaId] && gerenciaMap[ownGerenciaId] !== "N/A" ? gerenciaMap[ownGerenciaId] : undefined) || siglaUpper);
 
     const results: PlanItem[] = [];
     
@@ -1068,9 +1136,11 @@ const DiretoriaAprovacao = () => {
       .map((s: ServicoItem) => {
         const rawG = s.gerencia || (s as any).gerencia_id;
         const resolvedGer = (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
-          gerenciaMap[rawG] ||
-          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) ||
-          s.unidadeDemandante ||
+          (gerenciaMap[rawG] && gerenciaMap[rawG] !== "N/A" ? gerenciaMap[rawG] : undefined) ||
+          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id] && gerenciaMap[(s as any).gerencia_id] !== "N/A" ? gerenciaMap[(s as any).gerencia_id] : undefined) ||
+          diretoriaMap[(s as any).gerencia_id]?.sigla ||
+          diretoriaMap[(s as any).diretoria_id]?.sigla ||
+          (s.unidadeDemandante && s.unidadeDemandante !== "N/A" ? s.unidadeDemandante : undefined) ||
           siglaUpper;
         return {
           ...s,
@@ -1466,14 +1536,17 @@ const DiretoriaAprovacao = () => {
     });
 
     return servicosData
-      .filter((s: ServicoItem) => s.status !== "rascunho")
+      .filter((s: ServicoItem) => s.status !== "rascunho" || Boolean(s.observacao && s.observacao.includes("[Transferido")))
       .map((s: ServicoItem) => {
         const rawG = s.gerencia || (s as any).gerencia_id;
         const resolvedGer = (s.gerencia && !String(s.gerencia).includes("-") && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
-          gerenciaMap[rawG] ||
-          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id]) ||
-          s.unidadeDemandante ||
-          s.gerencia;
+          (gerenciaMap[rawG] && gerenciaMap[rawG] !== "N/A" ? gerenciaMap[rawG] : undefined) ||
+          ((s as any).gerencia_id && gerenciaMap[(s as any).gerencia_id] && gerenciaMap[(s as any).gerencia_id] !== "N/A" ? gerenciaMap[(s as any).gerencia_id] : undefined) ||
+          diretoriaMap[(s as any).gerencia_id]?.sigla ||
+          diretoriaMap[(s as any).diretoria_id]?.sigla ||
+          (s.unidadeDemandante && s.unidadeDemandante !== "N/A" ? s.unidadeDemandante : undefined) ||
+          (s.gerencia && s.gerencia !== "N/A" ? s.gerencia : undefined) ||
+          siglaUpper;
         
         const itemKey = s.item !== undefined && s.item !== null ? String(s.item).trim() : "";
         const catItem = (s.id && catalogoMapById.get(String(s.id).toLowerCase())) || (itemKey ? catalogoMapByItem.get(itemKey) : null);
@@ -1563,6 +1636,10 @@ const DiretoriaAprovacao = () => {
       }
     }
 
+    if (showOnlyTransferidosServicos) {
+      list = list.filter((s: ServicoItem) => Boolean(s.observacao && s.observacao.includes("[Transferido")));
+    }
+
     const term = debouncedServicosRecebidosSearchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((s: ServicoItem) => {
@@ -1577,7 +1654,7 @@ const DiretoriaAprovacao = () => {
     }
 
     return list;
-  }, [servicosRecebidosPorTipo, selectedGerencia, gerenciasData, siglaUpper, diretoria, gerenciaMap, debouncedServicosRecebidosSearchTerm]);
+  }, [servicosRecebidosPorTipo, selectedGerencia, showOnlyTransferidosServicos, gerenciasData, siglaUpper, diretoria, gerenciaMap, debouncedServicosRecebidosSearchTerm]);
 
   useEffect(() => {
     setServicosCurrentPage(1);
@@ -1625,11 +1702,46 @@ const DiretoriaAprovacao = () => {
 
   // Listas únicas de categorias
   const categorias = useMemo(() => [...new Set(items.map(i => i.categoria))].sort(), [items]);
+  const categoriasRecebidosDisponiveis = useMemo(() => {
+    const baseItems = (selectedGerencia && selectedGerencia !== "todas") 
+      ? items.filter(i => i.gerencia === selectedGerencia)
+      : items;
+    const catMap = new Map<string, number>();
+    baseItems.forEach(i => {
+      const c = (i.categoria || "Outros").trim();
+      catMap.set(c, (catMap.get(c) || 0) + 1);
+    });
+    return {
+      total: baseItems.length,
+      lista: Array.from(catMap.entries())
+        .map(([nome, count]) => ({ nome, count }))
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
+    };
+  }, [items, selectedGerencia]);
+
+  useEffect(() => {
+    if (selectedCategoria && selectedCategoria !== "todas") {
+      const exists = categoriasRecebidosDisponiveis.lista.some(c => c.nome === selectedCategoria);
+      if (!exists) {
+        setSelectedCategoria("todas");
+      }
+    }
+  }, [selectedGerencia, categoriasRecebidosDisponiveis, selectedCategoria]);
+
+  const countTransferidos = useMemo(() => {
+    return items.filter(i => Boolean(i.observacao && i.observacao.includes("[Transferido"))).length;
+  }, [items]);
+
+  const countTransferidosServicos = useMemo(() => {
+    return servicosRecebidosPorTipo.filter((s: any) => Boolean(s.observacao && s.observacao.includes("[Transferido"))).length;
+  }, [servicosRecebidosPorTipo]);
+
   const resumoDiretoriasSolicitantes = useMemo(() => {
     const grupos = new Map<string, { sigla: string; total: number; itens: number; itensZerados: number }>();
 
     items.forEach((item) => {
-      const siglaOrigem = item.diretoriaSigla || siglaUpper;
+      const matchTransfer = item.observacao ? item.observacao.match(/\[Transferido da Diretoria ([^\]]+)\]/) : null;
+      const siglaOrigem = matchTransfer ? matchTransfer[1].trim() : (item.diretoriaSigla || siglaUpper);
       const atual = grupos.get(siglaOrigem) || { sigla: siglaOrigem, total: 0, itens: 0, itensZerados: 0 };
       const qtd = Number(item.qtdEstimada) || 0;
       const val = Number(item.valorUnitario) || 0;
@@ -2038,8 +2150,8 @@ const DiretoriaAprovacao = () => {
         };
 
         const tableData = recebidosTableItems.map((item) => [
-          item.codigo,
-          item.descricao.substring(0, 40),
+          item.codigo && Number(item.codigo) > 0 ? item.codigo : "Não identificado",
+          (item.descricao || "Não identificado").substring(0, 40),
           item.gerencia,
           item.prioridade,
           item.qtdEstimada,
@@ -2070,8 +2182,8 @@ const DiretoriaAprovacao = () => {
       const worksheetData = [
         ["Código", "Descrição", "Gerência", "Prioridade", "Quantidade", "Valor Unitário", "Total"],
         ...recebidosTableItems.map((item) => [
-          item.codigo,
-          item.descricao,
+          item.codigo && Number(item.codigo) > 0 ? item.codigo : "Não identificado",
+          item.descricao || "Não identificado",
           item.gerencia,
           item.prioridade,
           item.qtdEstimada,
@@ -2853,6 +2965,41 @@ const DiretoriaAprovacao = () => {
     return filtradas.length > 0 ? filtradas : gerenciasData;
   }, [transferDialog.targetDiretoriaId, diretoria, gerenciasData, todasGerenciasData]);
 
+  const opcoesGerenciasDisponiveis = useMemo(() => {
+    const targetDirs = (transferDialog.targetDiretoriaIds && transferDialog.targetDiretoriaIds.length > 0)
+      ? transferDialog.targetDiretoriaIds
+      : (transferDialog.targetDiretoriaId ? [transferDialog.targetDiretoriaId] : (diretoria?.id ? [diretoria.id] : []));
+
+    const options: Array<{ id: string; label: string; sigla: string; diretoriaId: string; isDiretoria?: boolean }> = [];
+
+    targetDirs.forEach((dirId) => {
+      const dirObj = (diretorias as any[]).find((d: any) => String(d.id) === String(dirId));
+      if (dirObj) {
+        options.push({
+          id: dirObj.id,
+          label: `${dirObj.sigla} - Diretoria (${dirObj.nome || dirObj.sigla})`,
+          sigla: dirObj.sigla,
+          diretoriaId: String(dirObj.id),
+          isDiretoria: true,
+        });
+      }
+      const gers = (todasGerenciasData as any[]).filter((g: any) => String(g.diretoria_id) === String(dirId));
+      gers.forEach((g: any) => {
+        if (g.id && (!dirObj || String(g.id) !== String(dirObj.id))) {
+          options.push({
+            id: g.id,
+            label: `${g.sigla} - ${g.nome}`,
+            sigla: g.sigla,
+            diretoriaId: String(dirId),
+            isDiretoria: false,
+          });
+        }
+      });
+    });
+
+    return options;
+  }, [transferDialog.targetDiretoriaIds, transferDialog.targetDiretoriaId, diretoria, diretorias, todasGerenciasData]);
+
   const handleOpenTransferDialog = (
     item: PlanItem | ServicoItem,
     tipo: "aquisicao" | "servicos_existentes" | "servicos_novos"
@@ -2870,7 +3017,9 @@ const DiretoriaAprovacao = () => {
       modo: "item",
       sourceDiretoriaId: diretoria?.id || "",
       targetDiretoriaId: diretoria?.id || "",
+      targetDiretoriaIds: diretoria?.id ? [diretoria.id] : [],
       targetGerenciaId: defaultGerenciaId,
+      targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
       loading: false,
     });
   };
@@ -2920,6 +3069,7 @@ const DiretoriaAprovacao = () => {
         targetDiretoriaId: firstDest,
         targetDiretoriaIds: firstDest ? [firstDest] : [],
         targetGerenciaId: defaultGerenciaId,
+        targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
         incluirCustoFinanceiro: true,
         loading: false,
       });
@@ -2947,6 +3097,7 @@ const DiretoriaAprovacao = () => {
         targetDiretoriaId: firstDest,
         targetDiretoriaIds: firstDest ? [firstDest] : [],
         targetGerenciaId: defaultGerenciaId,
+        targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
         incluirCustoFinanceiro: true,
         loading: false,
       });
@@ -2975,6 +3126,7 @@ const DiretoriaAprovacao = () => {
         targetDiretoriaId: firstDest,
         targetDiretoriaIds: firstDest ? [firstDest] : [],
         targetGerenciaId: defaultGerenciaId,
+        targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
         incluirCustoFinanceiro: true,
         loading: false,
       });
@@ -2993,6 +3145,7 @@ const DiretoriaAprovacao = () => {
       targetDiretoriaId: firstDest,
       targetDiretoriaIds: firstDest ? [firstDest] : [],
       targetGerenciaId: defaultGerenciaId,
+      targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
       loading: false,
     });
   };
@@ -3018,6 +3171,7 @@ const DiretoriaAprovacao = () => {
       targetDiretoriaId: firstDest,
       targetDiretoriaIds: firstDest ? [firstDest] : [],
       targetGerenciaId: defaultGerenciaId,
+      targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
       incluirCustoFinanceiro: true,
       loading: false,
     });
@@ -3046,6 +3200,7 @@ const DiretoriaAprovacao = () => {
       targetDiretoriaId: firstDest,
       targetDiretoriaIds: firstDest ? [firstDest] : [],
       targetGerenciaId: defaultGerenciaId,
+      targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
       incluirCustoFinanceiro: true,
       loading: false,
     });
@@ -3071,19 +3226,42 @@ const DiretoriaAprovacao = () => {
       targetDiretoriaId: firstDest,
       targetDiretoriaIds: firstDest ? [firstDest] : [],
       targetGerenciaId: defaultGerenciaId,
+      targetGerenciaIds: defaultGerenciaId ? [defaultGerenciaId] : [],
       incluirCustoFinanceiro: true,
       loading: false,
     });
   };
 
   const handleConfirmTransfer = async () => {
-    const { item, tipo, targetGerenciaId, targetDiretoriaId, targetDiretoriaIds, sourceDiretoriaId, isBulk, bulkSource, modo, selectedCategoria, selectedCategorias, selectedContrato, selectedContratos, incluirCustoFinanceiro } = transferDialog;
+    const { item, tipo, targetGerenciaId, targetGerenciaIds, targetDiretoriaId, targetDiretoriaIds, sourceDiretoriaId, isBulk, bulkSource, modo, selectedCategoria, selectedCategorias, selectedContrato, selectedContratos, incluirCustoFinanceiro } = transferDialog;
 
     const sourceDirId = sourceDiretoriaId || diretoria?.id || "";
-    const finalTargetDirId = targetDiretoriaId || diretoria?.id || "";
     const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
       ? targetDiretoriaIds
-      : finalTargetDirId ? [finalTargetDirId] : [];
+      : (targetDiretoriaId ? [targetDiretoriaId] : (diretoria?.id ? [diretoria.id] : []));
+    const finalTargetDirId = targetDirIds[0] || targetDiretoriaId || diretoria?.id || "";
+
+    const destGers = (todasGerenciasData as any[]).filter(g => String(g.diretoria_id) === String(finalTargetDirId));
+    const requestedGerId = (targetGerenciaIds && targetGerenciaIds.length > 0)
+      ? targetGerenciaIds[0]
+      : (targetGerenciaId || "");
+
+    const dirDestinoObj = (diretorias as any[]).find((d: any) => String(d.id) === String(finalTargetDirId));
+    const dirDestinoSigla = dirDestinoObj?.sigla || siglaUpper;
+
+    const defaultGer = destGers.find((g: any) =>
+      String(g.sigla).toUpperCase() === String(dirDestinoSigla).toUpperCase() ||
+      String(g.nome).toLowerCase().includes("diretoria") ||
+      String(g.nome).toLowerCase().includes("presidência") ||
+      String(g.sigla).toUpperCase().includes("PRG")
+    ) || destGers[0];
+
+    const isGerValid = destGers.some(g => String(g.id) === String(requestedGerId));
+    const effectiveTargetGerId = isGerValid
+      ? requestedGerId
+      : (defaultGer?.id || finalTargetDirId);
+
+    const finalTargetGerIds = [effectiveTargetGerId];
 
     const finalCats = (selectedCategorias && selectedCategorias.length > 0)
       ? selectedCategorias
@@ -3120,16 +3298,18 @@ const DiretoriaAprovacao = () => {
       return;
     }
 
-    if (modo !== "categoria" && modo !== "contrato" && !targetGerenciaId) {
+    if (modo !== "categoria" && modo !== "contrato" && !effectiveTargetGerId) {
       return;
     }
 
     setTransferDialog((prev) => ({ ...prev, loading: true }));
 
-    const gerenciaDestinoObj = (todasGerenciasData as any[]).find((g: any) => g.id === targetGerenciaId);
-    const gerenciaDestinoSigla = gerenciaDestinoObj?.sigla || gerenciaMap[targetGerenciaId] || "Gerência";
-    const dirDestinoObj = (diretorias as any[]).find((d: any) => d.id === finalTargetDirId);
-    const dirDestinoSigla = dirDestinoObj?.sigla || siglaUpper;
+    const gerenciaDestinoObj = (todasGerenciasData as any[]).find((g: any) => g.id === effectiveTargetGerId);
+    const gerenciaDestinoSigla = gerenciaDestinoObj?.sigla 
+      || (gerenciaMap[effectiveTargetGerId] && gerenciaMap[effectiveTargetGerId] !== "N/A" ? gerenciaMap[effectiveTargetGerId] : undefined)
+      || (effectiveTargetGerId === finalTargetDirId ? dirDestinoSigla : undefined)
+      || dirDestinoSigla 
+      || "Gerência";
     const dirOrigemObj = (diretorias as any[]).find((d: any) => d.id === sourceDirId);
     const origemSiglaCalculada = dirOrigemObj?.sigla || siglaUpper;
 
@@ -3157,44 +3337,65 @@ const DiretoriaAprovacao = () => {
           const totalValor = itensFiltrados.reduce((acc, i) => acc + (Number(i.qtdEstimada || 0) * Number(i.valorUnitario || 0)), 0);
 
           if (idsParaTransferir.length > 0) {
-            await transferirSolicitacoesParaGerenciaBulk(idsParaTransferir, targetGerenciaId, finalTargetDirId, siglaUpper);
-            if (comCusto) {
-              await updateSolicitacaoStatusBulk(idsParaTransferir, "aprovado");
-            } else {
-              for (const id of idsParaTransferir) {
-                await updateSolicitacao(id, { qtdEstimada: 0, observacao: `[Transferido sem custo da Diretoria ${siglaUpper}]` });
+            const transferTask = (async () => {
+              await transferirSolicitacoesParaGerenciaBulk(
+                idsParaTransferir,
+                effectiveTargetGerId,
+                finalTargetDirId,
+                siglaUpper,
+                comCusto ? "aprovado" : "rascunho",
+                true
+              );
+              if (!comCusto) {
+                await updateSolicitacoesBulkData(idsParaTransferir, {
+                  qtd_estimada: 0,
+                  observacao: `[Transferido sem custo da Diretoria ${siglaUpper}]`,
+                });
               }
-            }
+            })();
 
-            try {
-              await registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCats.join(", "), {
-                acao: "transferir_categoria_aquisicao",
-                categorias: finalCats,
-                solicitacao_ids: idsParaTransferir,
-                count: idsParaTransferir.length,
-                totalValor: comCusto ? totalValor : 0,
-                sourceDiretoriaId: sourceDirId,
-                targetDiretoriaIds: targetDirIds,
-                targetGerenciaId,
-                incluirCustoFinanceiro: comCusto,
-              });
-            } catch (e) {
+            const logTask = registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCats.join(", "), {
+              acao: "transferir_categoria_aquisicao",
+              categorias: finalCats,
+              solicitacao_ids: idsParaTransferir,
+              itens_origem_info: itensFiltrados.map(i => ({
+                id: String(i.id),
+                gerencia_id: String(i.gerencia_id || ""),
+                diretoria_id: String(i.diretoria_id || sourceDirId || ""),
+                status: String(i.status || "aprovado"),
+              })),
+              count: idsParaTransferir.length,
+              totalValor: comCusto ? totalValor : 0,
+              sourceDiretoriaId: sourceDirId,
+              targetDiretoriaIds: targetDirIds,
+              targetGerenciaId: effectiveTargetGerId,
+              incluirCustoFinanceiro: comCusto,
+            }).catch((e) => {
               console.warn("Erro ao registrar log de atividade:", e);
-            }
+            });
+
+            await Promise.all([transferTask, logTask]);
+
+            const removeSet = new Set(idsParaTransferir);
+            queryClient.setQueryData(solicitacoesQueryKey, (old: any) =>
+              Array.isArray(old) ? old.filter((i: any) => !removeSet.has(i.id)) : old
+            );
           }
 
           setSelectedItems(new Set());
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-          await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
-          if (sourceDirId) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] });
-          }
-          for (const dirId of targetDirIds) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] });
-          }
-          if (periodAtivo && targetGerenciaId) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
-          }
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+            queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey }),
+            sourceDirId
+              ? queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] })
+              : Promise.resolve(),
+            ...targetDirIds.map((dirId) =>
+              queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] })
+            ),
+            periodAtivo && effectiveTargetGerId
+              ? queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] })
+              : Promise.resolve(),
+          ]);
 
           const catsText = finalCats.length === 1 ? `"${finalCats[0]}"` : `${finalCats.length} categorias (${finalCats.join(", ")})`;
           const msgSucesso = comCusto
@@ -3239,53 +3440,80 @@ const DiretoriaAprovacao = () => {
           });
           const totalValor = itensFiltrados.reduce((acc, i) => acc + (Number(i.qtdEstimada || 0) * Number(i.valorUnitario || 0)), 0);
 
-          if (uuidIds.length > 0) {
-            await transferirSolicitacoesParaGerenciaBulk(uuidIds, targetGerenciaId, finalTargetDirId, siglaUpper);
-            if (comCusto) {
-              await updateSolicitacaoStatusBulk(uuidIds, "aprovado");
-            } else {
-              for (const id of uuidIds) {
-                await updateSolicitacao(id, { qtdEstimada: 0, observacao: `[Transferido sem custo da Diretoria ${siglaUpper}]` });
+          const transferTask = (async () => {
+            if (uuidIds.length > 0) {
+              await transferirSolicitacoesParaGerenciaBulk(
+                uuidIds,
+                effectiveTargetGerId,
+                finalTargetDirId,
+                siglaUpper,
+                comCusto ? "aprovado" : "rascunho",
+                true
+              );
+              if (!comCusto) {
+                await updateSolicitacoesBulkData(uuidIds, {
+                  qtd_estimada: 0,
+                  observacao: `[Transferido sem custo da Diretoria ${siglaUpper}]`,
+                });
               }
             }
-          }
 
-          for (const codigo of codeItems) {
-            await ensureSolicitacaoDiretoria(codigo, {
-              status: comCusto ? "aprovado" : "rascunho",
-              qtdEstimada: comCusto ? undefined : 0,
-              observacao: `[Transferido da Diretoria ${siglaUpper}]`,
-            });
-          }
+            if (codeItems.length > 0) {
+              await Promise.all(
+                codeItems.map((codigo) =>
+                  ensureSolicitacaoDiretoria(codigo, {
+                    status: comCusto ? "aprovado" : "rascunho",
+                    qtdEstimada: comCusto ? undefined : 0,
+                    observacao: `[Transferido da Diretoria ${siglaUpper}]`,
+                  })
+                )
+              );
+            }
+          })();
 
-          try {
-            await registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCats.join(", "), {
-              acao: "transferir_categoria_aquisicao",
-              categorias: finalCats,
-              solicitacao_ids: uuidIds,
-              count: itensFiltrados.length,
-              totalValor: comCusto ? totalValor : 0,
-              sourceDiretoriaId: sourceDirId,
-              targetDiretoriaIds: targetDirIds,
-              targetGerenciaId,
-              incluirCustoFinanceiro: comCusto,
-            });
-          } catch (e) {
+          const logTask = registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCats.join(", "), {
+            acao: "transferir_categoria_aquisicao",
+            categorias: finalCats,
+            solicitacao_ids: uuidIds,
+            itens_origem_info: itensFiltrados.map(i => ({
+              id: String(i.id),
+              gerencia_id: String(i.gerencia_id || ""),
+              diretoria_id: String(i.diretoria_id || sourceDirId || ""),
+              status: String(i.status || "aprovado"),
+            })),
+            count: itensFiltrados.length,
+            totalValor: comCusto ? totalValor : 0,
+            sourceDiretoriaId: sourceDirId,
+            targetDiretoriaIds: targetDirIds,
+            targetGerenciaId: effectiveTargetGerId,
+            incluirCustoFinanceiro: comCusto,
+          }).catch((e) => {
             console.warn("Erro ao registrar log de atividade:", e);
+          });
+
+          await Promise.all([transferTask, logTask]);
+
+          if (uuidIds.length > 0) {
+            const removeSet = new Set(uuidIds);
+            queryClient.setQueryData(solicitacoesQueryKey, (old: any) =>
+              Array.isArray(old) ? old.filter((i: any) => !removeSet.has(i.id)) : old
+            );
           }
 
           setSelectedOwnItems(new Set());
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-          await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
-          if (sourceDirId) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] });
-          }
-          for (const dirId of targetDirIds) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] });
-          }
-          if (periodAtivo && targetGerenciaId) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
-          }
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+            queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey }),
+            sourceDirId
+              ? queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] })
+              : Promise.resolve(),
+            ...targetDirIds.map((dirId) =>
+              queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] })
+            ),
+            periodAtivo && effectiveTargetGerId
+              ? queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] })
+              : Promise.resolve(),
+          ]);
 
           const catsText = finalCats.length === 1 ? `"${finalCats[0]}"` : `${finalCats.length} categorias (${finalCats.join(", ")})`;
           const msgSucesso = comCusto
@@ -3317,25 +3545,36 @@ const DiretoriaAprovacao = () => {
           sourceDiretoriaId: sourceDirId,
           targetDiretoriaId: finalTargetDirId,
           targetDiretoriaIds: targetDirIds,
-          targetGerenciaId,
+          targetGerenciaId: effectiveTargetGerId,
+          targetGerenciaIds: finalTargetGerIds,
           periodoId: periodAtivo?.id,
           origemSigla: origemSiglaCalculada,
           incluirCustoFinanceiro: comCusto,
+          knownSolicitacoes: solicitacoes,
         });
+
+        if (comCusto && res.transferredIds && res.transferredIds.length > 0) {
+          const removeSet = new Set(res.transferredIds);
+          queryClient.setQueryData(solicitacoesQueryKey, (old: any) =>
+            Array.isArray(old) ? old.filter((i: any) => !removeSet.has(i.id)) : old
+          );
+        }
 
         setSelectedOwnItems(new Set());
         setSelectedItems(new Set());
-        await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-        await queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey });
-        if (sourceDirId) {
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] });
-        }
-        for (const dirId of targetDirIds) {
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] });
-        }
-        if (periodAtivo && targetGerenciaId) {
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
-        }
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+          queryClient.invalidateQueries({ queryKey: solicitacoesQueryKey }),
+          sourceDirId
+            ? queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", sourceDirId] })
+            : Promise.resolve(),
+          ...targetDirIds.map((dirId) =>
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dirId] })
+          ),
+          periodAtivo && effectiveTargetGerId
+            ? queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] })
+            : Promise.resolve(),
+        ]);
 
         const catsText = finalCats.length === 1 ? `"${finalCats[0]}"` : `${finalCats.length} categorias (${finalCats.join(", ")})`;
         const msgSucesso = comCusto
@@ -3378,44 +3617,65 @@ const DiretoriaAprovacao = () => {
           const totalValor = servicosFiltrados.reduce((acc: number, s: any) => acc + (s.dotacaoOrcamentaria || s.estimativaValor || s.estimativa_valor || 0), 0);
 
           if (idsParaTransferir.length > 0) {
-            await transferirServicosParaGerenciaBulk(idsParaTransferir, targetGerenciaId, finalTargetDirId, siglaUpper);
-            if (comCusto) {
-              await updateServicoStatusBulk(idsParaTransferir, "aprovado");
-            } else {
-              for (const id of idsParaTransferir) {
-                await updateServico(id, { dotacao_orcamentaria: 0, estimativa_valor: 0 });
-              }
-            }
-
-            try {
-              await registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
-                acao: "transferir_contrato_servicos",
-                contratos: finalContratos,
-                servico_ids: idsParaTransferir,
-                count: idsParaTransferir.length,
-                totalValor: comCusto ? totalValor : 0,
-                sourceDiretoriaId: sourceDirId,
-                targetDiretoriaIds: targetDirIds,
+            const transferTask = (async () => {
+              await transferirServicosParaGerenciaBulk(
+                idsParaTransferir,
                 targetGerenciaId,
-                incluirCustoFinanceiro: comCusto,
-              });
-            } catch (e) {
+                finalTargetDirId,
+                siglaUpper,
+                comCusto ? "aprovado" : "rascunho",
+                true
+              );
+              if (!comCusto) {
+                await updateServicosBulkData(idsParaTransferir, {
+                  dotacao_orcamentaria: 0,
+                  estimativa_valor: 0,
+                });
+              }
+            })();
+
+            const logTask = registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
+              acao: "transferir_contrato_servicos",
+              contratos: finalContratos,
+              servico_ids: idsParaTransferir,
+              servicos_origem_info: servicosFiltrados.map((s: any) => ({
+                id: String(s.id),
+                gerencia_id: String(s.gerencia_id || ""),
+                diretoria_id: String(s.diretoria_id || sourceDirId || ""),
+                status: String(s.status || "aprovado"),
+              })),
+              count: idsParaTransferir.length,
+              totalValor: comCusto ? totalValor : 0,
+              sourceDiretoriaId: sourceDirId,
+              targetDiretoriaIds: targetDirIds,
+              targetGerenciaId: effectiveTargetGerId,
+              incluirCustoFinanceiro: comCusto,
+            }).catch((e) => {
               console.warn("Erro ao registrar log de atividade:", e);
-            }
+            });
+
+            await Promise.all([transferTask, logTask]);
+
+            const removeSet = new Set(idsParaTransferir);
+            queryClient.setQueryData(servicosQueryKey, (old: any) =>
+              Array.isArray(old) ? old.filter((s: any) => !removeSet.has(s.id)) : old
+            );
           }
 
           setSelectedServicos(new Set());
-          await queryClient.invalidateQueries({ queryKey: ["servicos"] });
-          await queryClient.invalidateQueries({ queryKey: servicosQueryKey });
-          if (sourceDirId) {
-            await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", sourceDirId] });
-          }
-          for (const dirId of targetDirIds) {
-            await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dirId] });
-          }
-          if (periodAtivo && targetGerenciaId) {
-            await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
-          }
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["servicos"] }),
+            queryClient.invalidateQueries({ queryKey: servicosQueryKey }),
+            sourceDirId
+              ? queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", sourceDirId] })
+              : Promise.resolve(),
+            ...targetDirIds.map((dirId) =>
+              queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dirId] })
+            ),
+            periodAtivo && effectiveTargetGerId
+              ? queryClient.invalidateQueries({ queryKey: ["servicos", effectiveTargetGerId, periodAtivo.id] })
+              : Promise.resolve(),
+          ]);
 
           const contratosText = finalContratos.length === 1 ? `"${finalContratos[0]}"` : `${finalContratos.length} contratos (${finalContratos.join(", ")})`;
           const msgSucesso = comCusto
@@ -3447,24 +3707,35 @@ const DiretoriaAprovacao = () => {
           sourceDiretoriaId: sourceDirId,
           targetDiretoriaId: finalTargetDirId,
           targetDiretoriaIds: targetDirIds,
-          targetGerenciaId,
+          targetGerenciaId: effectiveTargetGerId,
+          targetGerenciaIds: finalTargetGerIds,
           periodoId: periodAtivo?.id,
           origemSigla: origemSiglaCalculada,
           incluirCustoFinanceiro: comCusto,
+          knownServicos: servicosData,
         });
 
+        if (comCusto && res.transferredIds && res.transferredIds.length > 0) {
+          const removeSet = new Set(res.transferredIds);
+          queryClient.setQueryData(servicosQueryKey, (old: any) =>
+            Array.isArray(old) ? old.filter((s: any) => !removeSet.has(s.id)) : old
+          );
+        }
+
         setSelectedServicos(new Set());
-        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
-        await queryClient.invalidateQueries({ queryKey: servicosQueryKey });
-        if (sourceDirId) {
-          await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", sourceDirId] });
-        }
-        for (const dirId of targetDirIds) {
-          await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dirId] });
-        }
-        if (periodAtivo && targetGerenciaId) {
-          await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
-        }
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["servicos"] }),
+          queryClient.invalidateQueries({ queryKey: servicosQueryKey }),
+          sourceDirId
+            ? queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", sourceDirId] })
+            : Promise.resolve(),
+          ...targetDirIds.map((dirId) =>
+            queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dirId] })
+          ),
+          periodAtivo && effectiveTargetGerId
+            ? queryClient.invalidateQueries({ queryKey: ["servicos", effectiveTargetGerId, periodAtivo.id] })
+            : Promise.resolve(),
+        ]);
 
         const contratosText = finalContratos.length === 1 ? `"${finalContratos[0]}"` : `${finalContratos.length} contratos (${finalContratos.join(", ")})`;
         const msgSucesso = comCusto
@@ -3508,13 +3779,13 @@ const DiretoriaAprovacao = () => {
           }
 
           if (uuidIds.length > 0) {
-            await transferirSolicitacoesParaGerenciaBulk(uuidIds, targetGerenciaId, finalTargetDirId, siglaUpper);
+            await transferirSolicitacoesParaGerenciaBulk(uuidIds, effectiveTargetGerId, finalTargetDirId, siglaUpper);
           }
 
           for (const codigo of codeItems) {
             await ensureSolicitacaoDiretoria(codigo, {
               status: "rascunho",
-              gerencia_id: targetGerenciaId,
+              gerencia_id: effectiveTargetGerId,
               diretoria_id: finalTargetDirId,
               observacao: `[Transferido da Diretoria ${siglaUpper}]`,
             });
@@ -3527,7 +3798,7 @@ const DiretoriaAprovacao = () => {
             await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", finalTargetDirId] });
           }
           if (periodAtivo) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] });
           }
 
           toast({
@@ -3537,7 +3808,7 @@ const DiretoriaAprovacao = () => {
         } else if (bulkSource === "aquisicao_recebidos") {
           const ids = Array.from(selectedItems).filter((id): id is string => typeof id === "string");
           if (ids.length > 0) {
-            await transferirSolicitacoesParaGerenciaBulk(ids, targetGerenciaId, finalTargetDirId, siglaUpper);
+            await transferirSolicitacoesParaGerenciaBulk(ids, effectiveTargetGerId, finalTargetDirId, siglaUpper);
           }
 
           setSelectedItems(new Set());
@@ -3547,7 +3818,7 @@ const DiretoriaAprovacao = () => {
             await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", finalTargetDirId] });
           }
           if (periodAtivo) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+            await queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] });
           }
 
           toast({
@@ -3557,7 +3828,7 @@ const DiretoriaAprovacao = () => {
         } else if (bulkSource === "servicos_proprios" || bulkSource === "servicos_recebidos") {
           const ids = Array.from(selectedServicos).filter(Boolean);
           if (ids.length > 0) {
-            await transferirServicosParaGerenciaBulk(ids, targetGerenciaId, finalTargetDirId, siglaUpper);
+            await transferirServicosParaGerenciaBulk(ids, effectiveTargetGerId, finalTargetDirId, siglaUpper);
           }
 
           setSelectedServicos(new Set());
@@ -3567,7 +3838,7 @@ const DiretoriaAprovacao = () => {
             await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", finalTargetDirId] });
           }
           if (periodAtivo) {
-            await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
+            await queryClient.invalidateQueries({ queryKey: ["servicos", effectiveTargetGerId, periodAtivo.id] });
           }
 
           toast({
@@ -3602,14 +3873,14 @@ const DiretoriaAprovacao = () => {
         if (!itemId && planItem.codigo) {
           await ensureSolicitacaoDiretoria(planItem.codigo, {
             status: "rascunho",
-            gerencia_id: targetGerenciaId,
+            gerencia_id: effectiveTargetGerId,
             diretoria_id: finalTargetDirId,
             observacao: novaObs,
           });
         } else if (itemId) {
           await updateSolicitacao(itemId, {
             status: "rascunho",
-            gerencia_id: targetGerenciaId,
+            gerencia_id: effectiveTargetGerId,
             diretoria_id: finalTargetDirId,
             observacao: novaObs,
           });
@@ -3621,7 +3892,7 @@ const DiretoriaAprovacao = () => {
           descricao: planItem.descricao,
           diretoria_destino_id: finalTargetDirId,
           diretoria_destino_sigla: dirDestinoSigla,
-          gerencia_destino_id: targetGerenciaId,
+          gerencia_destino_id: effectiveTargetGerId,
           gerencia_destino_sigla: gerenciaDestinoSigla,
           status_anterior: planItem.status,
           status_novo: "rascunho",
@@ -3631,7 +3902,7 @@ const DiretoriaAprovacao = () => {
           if (!Array.isArray(old)) return old;
           return old.map((i: any) =>
             i.id === itemId || (planItem.codigo && i.codigo === planItem.codigo)
-              ? { ...i, status: "rascunho", diretoria_id: finalTargetDirId, gerencia_id: targetGerenciaId, gerencia: gerenciaDestinoSigla }
+              ? { ...i, status: "rascunho", diretoria_id: finalTargetDirId, gerencia_id: effectiveTargetGerId, gerencia: gerenciaDestinoSigla }
               : i
           );
         });
@@ -3642,7 +3913,7 @@ const DiretoriaAprovacao = () => {
           await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", finalTargetDirId] });
         }
         if (periodAtivo) {
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes", targetGerenciaId, periodAtivo.id] });
+          await queryClient.invalidateQueries({ queryKey: ["solicitacoes", effectiveTargetGerId, periodAtivo.id] });
         }
 
         toast({
@@ -3658,14 +3929,14 @@ const DiretoriaAprovacao = () => {
         if (!servicoId && servicoItem.item) {
           await ensureServicoDiretoria(servicoItem.item, {
             status: "rascunho",
-            gerencia_id: targetGerenciaId,
+            gerencia_id: effectiveTargetGerId,
             diretoria_id: finalTargetDirId,
             observacao: novaObs,
           });
         } else if (servicoId) {
           await updateServico(servicoId, {
             status: "rascunho",
-            gerencia_id: targetGerenciaId,
+            gerencia_id: effectiveTargetGerId,
             diretoria_id: finalTargetDirId,
             observacao: novaObs,
           });
@@ -3677,7 +3948,7 @@ const DiretoriaAprovacao = () => {
           objeto: servicoItem.objeto,
           diretoria_destino_id: finalTargetDirId,
           diretoria_destino_sigla: dirDestinoSigla,
-          gerencia_destino_id: targetGerenciaId,
+          gerencia_destino_id: effectiveTargetGerId,
           gerencia_destino_sigla: gerenciaDestinoSigla,
           status_anterior: servicoItem.status,
           status_novo: "rascunho",
@@ -3687,7 +3958,7 @@ const DiretoriaAprovacao = () => {
           if (!Array.isArray(old)) return old;
           return old.map((s: any) =>
             s.id === servicoId || (servicoItem.item && s.item === servicoItem.item)
-              ? { ...s, status: "rascunho", diretoria_id: finalTargetDirId, gerencia_id: targetGerenciaId, gerencia: gerenciaDestinoSigla }
+              ? { ...s, status: "rascunho", diretoria_id: finalTargetDirId, gerencia_id: effectiveTargetGerId, gerencia: gerenciaDestinoSigla }
               : s
           );
         });
@@ -3698,7 +3969,7 @@ const DiretoriaAprovacao = () => {
           await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", finalTargetDirId] });
         }
         if (periodAtivo) {
-          await queryClient.invalidateQueries({ queryKey: ["servicos", targetGerenciaId, periodAtivo.id] });
+          await queryClient.invalidateQueries({ queryKey: ["servicos", effectiveTargetGerId, periodAtivo.id] });
         }
 
         toast({
@@ -4160,11 +4431,16 @@ const DiretoriaAprovacao = () => {
                             const allIds = (diretorias as any[]).map(d => d.id);
                             const firstDir = allIds[0] || "";
                             const firstDirObj = (diretorias as any[]).find(d => d.id === firstDir);
+                            const defaultGerIds = allIds.map(dirId => {
+                              const dirObj = (diretorias as any[]).find(d => d.id === dirId);
+                              return dirObj?.id;
+                            }).filter(Boolean);
                             setTransferDialog(prev => ({
                               ...prev,
                               targetDiretoriaIds: allIds,
                               targetDiretoriaId: firstDir,
                               targetGerenciaId: firstDirObj?.id || prev.targetGerenciaId,
+                              targetGerenciaIds: defaultGerIds as string[],
                             }));
                           }}
                           className="text-[11px] font-semibold text-blue-600 hover:underline"
@@ -4175,7 +4451,7 @@ const DiretoriaAprovacao = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: [], targetDiretoriaId: "", targetGerenciaId: "" }));
+                            setTransferDialog(prev => ({ ...prev, targetDiretoriaIds: [], targetDiretoriaId: "", targetGerenciaId: "", targetGerenciaIds: [] }));
                           }}
                           className="text-[11px] text-muted-foreground hover:underline"
                         >
@@ -4183,7 +4459,7 @@ const DiretoriaAprovacao = () => {
                         </button>
                       </div>
                     </div>
-  
+
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2 rounded-lg border bg-background max-h-36 overflow-y-auto">
                       {(diretorias as any[]).map((d: any) => {
                         const selectedList = transferDialog.targetDiretoriaIds || (transferDialog.targetDiretoriaId ? [transferDialog.targetDiretoriaId] : []);
@@ -4210,14 +4486,29 @@ const DiretoriaAprovacao = () => {
                                   const firstDir = updated[0] || "";
                                   const targetDir = (diretorias as any[]).find(dir => String(dir.id) === String(firstDir));
                                   const gers = (todasGerenciasData as any[]).filter(g => String(g.diretoria_id) === String(firstDir));
-                                  const nextGerId = (updated.length === 1 && targetDir?.id)
-                                    ? targetDir.id
-                                    : (gers[0]?.id || prev.targetGerenciaId || "");
+                                  const defaultGer = gers.find((g: any) =>
+                                    String(g.sigla).toUpperCase() === String(targetDir?.sigla).toUpperCase() ||
+                                    String(g.nome).toLowerCase().includes("diretoria") ||
+                                    String(g.nome).toLowerCase().includes("presidência") ||
+                                    String(g.sigla).toUpperCase().includes("PRG")
+                                  ) || gers[0];
+                                  const nextGerId = defaultGer?.id || targetDir?.id || "";
+
+                                  const currentGerList = prev.targetGerenciaIds || (prev.targetGerenciaId ? [prev.targetGerenciaId] : []);
+                                  const validGerList = currentGerList.filter(gid => {
+                                    const isFromValidDir = (todasGerenciasData as any[]).some(g => String(g.id) === String(gid) && updated.includes(String(g.diretoria_id)));
+                                    const isTargetDir = updated.includes(String(gid));
+                                    return isFromValidDir || isTargetDir;
+                                  });
+
+                                  const finalGerList = validGerList.length > 0 ? validGerList : (nextGerId ? [nextGerId] : []);
+
                                   return {
                                     ...prev,
                                     targetDiretoriaIds: updated,
                                     targetDiretoriaId: firstDir,
-                                    targetGerenciaId: nextGerId,
+                                    targetGerenciaId: finalGerList[0] || "",
+                                    targetGerenciaIds: finalGerList,
                                   };
                                 });
                               }}
@@ -4230,52 +4521,91 @@ const DiretoriaAprovacao = () => {
                         );
                       })}
                     </div>
-  
-                    {/* Gerência de destino quando selecionada apenas 1 diretoria */}
-                    {((transferDialog.targetDiretoriaIds || []).length === 1 || (!transferDialog.targetDiretoriaIds?.length && transferDialog.targetDiretoriaId)) && (
-                      <div className="mt-3">
-                        <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                          Para: Gerência de Destino
+
+                    {/* Para: Gerência(s) de Destino (escolha uma ou mais) */}
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground block">
+                          Para: Gerência(s) de Destino (escolha uma ou mais):
                         </label>
-                        <Select
-                          value={transferDialog.targetGerenciaId}
-                          onValueChange={(val) => setTransferDialog(prev => ({ ...prev, targetGerenciaId: val }))}
-                          disabled={transferDialog.loading}
-                        >
-                          <SelectTrigger className="w-full bg-background font-medium">
-                            <SelectValue placeholder="Selecione a gerência de destino" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(() => {
-                              const curTargetDirId = (transferDialog.targetDiretoriaIds && transferDialog.targetDiretoriaIds[0]) || transferDialog.targetDiretoriaId || diretoria?.id;
-                              const curTargetDirObj = (diretorias as any[]).find(d => String(d.id) === String(curTargetDirId));
-                              return (
-                                <>
-                                  {curTargetDirObj && (
-                                    <SelectItem value={curTargetDirObj.id}>
-                                      {curTargetDirObj.sigla} - Diretoria ({curTargetDirObj.nome || curTargetDirObj.sigla})
-                                    </SelectItem>
-                                  )}
-                                  {gerenciasDisponiveisParaDestino
-                                    .filter((g: any) => String(g.id) !== String(curTargetDirObj?.id))
-                                    .map((g: any) => (
-                                      <SelectItem key={g.id} value={g.id}>
-                                        {g.sigla} - {g.nome}
-                                      </SelectItem>
-                                    ))}
-                                </>
-                              );
-                            })()}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allGerIds = opcoesGerenciasDisponiveis.map(g => g.id);
+                              setTransferDialog(prev => ({
+                                ...prev,
+                                targetGerenciaIds: allGerIds,
+                                targetGerenciaId: allGerIds[0] || "",
+                              }));
+                            }}
+                            className="text-[11px] font-semibold text-blue-600 hover:underline"
+                          >
+                            Todas
+                          </button>
+                          <span className="text-[11px] text-muted-foreground">|</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTransferDialog(prev => ({
+                                ...prev,
+                                targetGerenciaIds: [],
+                                targetGerenciaId: "",
+                              }));
+                            }}
+                            className="text-[11px] text-muted-foreground hover:underline"
+                          >
+                            Limpar
+                          </button>
+                        </div>
                       </div>
-                    )}
-  
-                    {((transferDialog.targetDiretoriaIds || []).length > 1) && (
-                      <p className="text-[11px] text-muted-foreground mt-2 bg-blue-50/50 p-2 rounded border border-blue-200/60">
-                        ℹ️ O envio será direcionado às gerências principais de cada uma das {(transferDialog.targetDiretoriaIds || []).length} diretorias selecionadas.
-                      </p>
-                    )}
+
+                      {opcoesGerenciasDisponiveis.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic p-2.5 border rounded-lg bg-muted/20">
+                          Selecione ao menos uma diretoria de destino acima para visualizar as gerências.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-2 rounded-lg border bg-background max-h-40 overflow-y-auto">
+                          {opcoesGerenciasDisponiveis.map((g) => {
+                            const selectedList = transferDialog.targetGerenciaIds || (transferDialog.targetGerenciaId ? [transferDialog.targetGerenciaId] : []);
+                            const isSelected = selectedList.includes(g.id);
+                            return (
+                              <label
+                                key={g.id}
+                                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer text-xs border transition-colors ${
+                                  isSelected
+                                    ? "bg-blue-50/80 border-blue-400 text-blue-900 font-semibold"
+                                    : "border-transparent hover:bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setTransferDialog(prev => {
+                                      const current = prev.targetGerenciaIds || (prev.targetGerenciaId ? [prev.targetGerenciaId] : []);
+                                      const updated = checked
+                                        ? [...new Set([...current, g.id])]
+                                        : current.filter(id => id !== g.id);
+                                      return {
+                                        ...prev,
+                                        targetGerenciaIds: updated,
+                                        targetGerenciaId: updated[0] || "",
+                                      };
+                                    });
+                                  }}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 flex-shrink-0"
+                                />
+                                <span className="truncate" title={g.label}>
+                                  {g.label}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -4819,7 +5149,10 @@ const DiretoriaAprovacao = () => {
                       if (isDirFilter || servico.gerencia === siglaUpper || servico.unidadeDemandante === siglaUpper) {
                         return siglaUpper;
                       }
-                      return gerenciaMap[servico.gerencia] || servico.gerencia || siglaUpper;
+                      return (gerenciaMap[servico.gerencia] && gerenciaMap[servico.gerencia] !== "N/A" ? gerenciaMap[servico.gerencia] : undefined) ||
+                        (servico.gerencia && servico.gerencia !== "N/A" ? servico.gerencia : undefined) ||
+                        diretoriaMap[(servico as any).diretoria_id]?.sigla ||
+                        siglaUpper;
                     })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-center font-mono">
@@ -5308,6 +5641,17 @@ const DiretoriaAprovacao = () => {
                     </SelectContent>
                   </Select>
                 </div>
+                {countTransferidosServicos > 0 && (
+                  <Button
+                    variant={showOnlyTransferidosServicos ? "default" : "outline"}
+                    size="sm"
+                    className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                    onClick={() => setShowOnlyTransferidosServicos(!showOnlyTransferidosServicos)}
+                    title="Filtrar apenas serviços transferidos"
+                  >
+                    🔄 {showOnlyTransferidosServicos ? "Mostrando apenas transferidos" : `Transferidos (${countTransferidosServicos})`}
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -6170,7 +6514,13 @@ const DiretoriaAprovacao = () => {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Gerência:</span>
-            <Select value={selectedGerencia} onValueChange={setSelectedGerencia}>
+            <Select 
+              value={selectedGerencia} 
+              onValueChange={(val) => {
+                setSelectedGerencia(val);
+                setSelectedCategoria("todas");
+              }}
+            >
               <SelectTrigger className="w-50">
                 <SelectValue />
               </SelectTrigger>
@@ -6186,15 +6536,18 @@ const DiretoriaAprovacao = () => {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Categoria:</span>
-            <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
+            <Select 
+              value={selectedCategoria || "todas"} 
+              onValueChange={setSelectedCategoria}
+            >
               <SelectTrigger className="w-50">
-                <SelectValue />
+                <SelectValue placeholder="Todas as Categorias" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="todas">Todas ({items.length})</SelectItem>
-                {categorias.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c} ({items.filter(i => i.categoria === c).length})
+                <SelectItem value="todas">Todas ({categoriasRecebidosDisponiveis.total})</SelectItem>
+                {categoriasRecebidosDisponiveis.lista.map((c) => (
+                  <SelectItem key={c.nome} value={c.nome}>
+                    {c.nome} ({c.count})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -6225,6 +6578,17 @@ const DiretoriaAprovacao = () => {
             >
               {showOnlyComQuantidade ? "Mostrando apenas itens com quantidade" : "Filtrar itens com quantidade"}
             </Button>
+            {countTransferidos > 0 && (
+              <Button
+                variant={showOnlyTransferidos ? "default" : "outline"}
+                size="sm"
+                className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                onClick={() => setShowOnlyTransferidos(!showOnlyTransferidos)}
+                title="Filtrar apenas itens transferidos"
+              >
+                🔄 {showOnlyTransferidos ? "Mostrando apenas transferidos" : `Transferidos (${countTransferidos})`}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -6512,9 +6876,25 @@ const DiretoriaAprovacao = () => {
                             disabled={isItemReadOnly(item) || !item.id}
                           />
                         </td>
-                        <td className="p-3 text-sm font-mono">{item.codigo}</td>
+                        <td className="p-3 text-sm font-mono">
+                          {item.codigo && Number(item.codigo) > 0 ? (
+                            item.codigo
+                          ) : (
+                            <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium font-sans inline-block">
+                              Não identificado
+                            </span>
+                          )}
+                        </td>
                         <td className="p-3 text-sm max-w-sm" title={item.descricao}>
-                          <p className="font-medium line-clamp-2">{item.descricao}</p>
+                          <p className="font-medium line-clamp-2">
+                            {item.descricao && item.descricao.trim().toLowerCase() !== "material não especificado" && item.descricao.trim().toLowerCase() !== "não identificado" ? (
+                              item.descricao
+                            ) : (
+                              <span className="text-muted-foreground italic font-normal">
+                                Não identificado
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-muted-foreground">{item.categoria}</p>
                           {item.observacao && /\[Transferido [^\]]+\]/.test(item.observacao) && (
                             <div className="mt-1">
@@ -6524,7 +6904,15 @@ const DiretoriaAprovacao = () => {
                             </div>
                           )}
                         </td>
-                        <td className="p-3 text-sm font-medium">{gerenciaMap[item.gerencia] || item.gerencia}</td>
+                        <td className="p-3 text-sm font-medium">
+                          {(item.gerencia_id && gerenciaMap[item.gerencia_id] && gerenciaMap[item.gerencia_id] !== "N/A" ? gerenciaMap[item.gerencia_id] : undefined) ||
+                           (item.gerencia_id && globalGerenciaMap[item.gerencia_id]?.sigla && globalGerenciaMap[item.gerencia_id]?.sigla !== "N/A" ? globalGerenciaMap[item.gerencia_id]?.sigla : undefined) ||
+                           (item.gerencia && gerenciaMap[item.gerencia] && gerenciaMap[item.gerencia] !== "N/A" ? gerenciaMap[item.gerencia] : undefined) ||
+                           (item.gerencia && item.gerencia !== "N/A" ? item.gerencia : undefined) ||
+                           (item.gerencia_id && diretoriaMap[item.gerencia_id]?.sigla) ||
+                           (item.diretoria_id && diretoriaMap[item.diretoria_id]?.sigla) ||
+                           siglaUpper}
+                        </td>
                         <td className="p-3">
                           <Badge variant={getStatusBadgeVariant(item.status || "rascunho") as any}>
                             {getStatusLabel(item.status || "rascunho")}

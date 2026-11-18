@@ -319,11 +319,25 @@ export function PlanTable({ items, totalItems, readOnly = false, onUpdateQtdEsti
                     </TableCell>
                   )}
                   <TableCell className="font-medium text-primary">
-                    {item.codigo}
+                    {item.codigo && Number(item.codigo) > 0 ? (
+                      item.codigo
+                    ) : (
+                      <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium font-sans inline-block">
+                        Não identificado
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div>
-                      <p className="font-medium text-foreground">{item.descricao}</p>
+                      <p className="font-medium text-foreground">
+                        {item.descricao && item.descricao.trim().toLowerCase() !== "material não especificado" && item.descricao.trim().toLowerCase() !== "não identificado" ? (
+                          item.descricao
+                        ) : (
+                          <span className="text-muted-foreground italic font-normal">
+                            Não identificado
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-primary">{item.categoria}</p>
                       {item.diretoriaOrcamentariaSigla && (
                         <p className="text-xs text-amber-700 mt-1">

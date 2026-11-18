@@ -1,14 +1,13 @@
 // deno-lint-ignore-file no-explicit-any
 // AdminServicosControl.tsx - Versão CORRIGIDA SEM ANY
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2, Undo2 } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 import { formatContratoMask } from "@/lib/utils";
-import { DesfazerTransferenciaDialog } from "@/components/common/DesfazerTransferenciaDialog.tsx";
 
 import { Button } from "@/components/ui/button.tsx";
 import { SmartPagination } from "@/components/common/SmartPagination.tsx";
@@ -356,7 +355,6 @@ export function AdminServicosControl() {
   });
 
   const [filtroContratoAdminTransfer, setFiltroContratoAdminTransfer] = useState("");
-  const [desfazerTransferOpen, setDesfazerTransferOpen] = useState(false);
 
   const contratosDisponiveis = useMemo(() => {
     const set = new Set<string>();
@@ -374,26 +372,6 @@ export function AdminServicosControl() {
     const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === transferDialog.targetDiretoriaId);
     return gers.length > 0 ? gers : todasGerencias;
   }, [transferDialog.targetDiretoriaId, todasGerencias]);
-
-  const handleOpenContratoTransfer = () => {
-    const firstDir = (diretorias as Diretoria[])[0]?.id || "";
-    const secondDir = (diretorias as Diretoria[])[1]?.id || firstDir;
-    const gers = (todasGerencias as Gerencia[]).filter(g => g.diretoria_id === secondDir);
-    setFiltroContratoAdminTransfer("");
-    setTransferDialog({
-      open: true,
-      modo: "contrato",
-      selectedContrato: contratosDisponiveis[0] || "",
-      selectedContratos: contratosDisponiveis[0] ? [contratosDisponiveis[0]] : [],
-      item: null,
-      sourceDiretoriaId: firstDir,
-      targetDiretoriaId: secondDir,
-      targetDiretoriaIds: secondDir ? [secondDir] : [],
-      targetGerenciaId: gers[0]?.id || "",
-      incluirCustoFinanceiro: true,
-      loading: false,
-    });
-  };
 
   const handleOpenBulkTransfer = () => {
     const firstDir = (diretorias as Diretoria[])[0]?.id || "";
@@ -988,24 +966,6 @@ export function AdminServicosControl() {
                 disabled={filteredServicos.length === 0}
               >
                 <FileDown className="h-4 w-4" />PDF
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
-                onClick={handleOpenContratoTransfer}
-                title="Transferir um Contrato inteiro e seu custo financeiro para uma Diretoria"
-              >
-                <ArrowRightLeft className="h-4 w-4" />Transferir Contrato
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
-                onClick={() => setDesfazerTransferOpen(true)}
-                title="Desfazer envio/transferência de contratos ou serviços"
-              >
-                <Undo2 className="h-4 w-4" />Desfazer Transferência
               </Button>
             </div>
             {selectedIds.length > 0 && (
@@ -2195,16 +2155,6 @@ export function AdminServicosControl() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <DesfazerTransferenciaDialog
-        open={desfazerTransferOpen}
-        onOpenChange={setDesfazerTransferOpen}
-        tipo="servicos"
-        onSuccess={() => {
-          refetchServicos();
-          queryClient.invalidateQueries({ queryKey: ["servicos"] });
-        }}
-      />
     </div>
   );
 }

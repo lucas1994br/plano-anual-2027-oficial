@@ -84,20 +84,20 @@ export const DesfazerTransferenciaDialog: React.FC<DesfazerTransferenciaDialogPr
           incluirCustoFinanceiro: item.incluirCustoFinanceiro,
           origemSigla: item.sourceDiretoriaSigla,
           solicitacaoIds: item.detalhes?.solicitacao_ids,
+          itensOrigemInfo: item.detalhes?.itens_origem_info,
         });
 
-        await queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-        await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
-        await queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
-        await queryClient.invalidateQueries({ queryKey: ["catalogo"] });
-        if (item.sourceDiretoriaId) {
-          await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", item.sourceDiretoriaId] });
-        }
-        if (item.targetDiretoriaIds) {
-          for (const dId of item.targetDiretoriaIds) {
-            await queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dId] });
-          }
-        }
+        // Dispara atualização dos caches em segundo plano sem bloquear a UI
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] }),
+          item.sourceDiretoriaId
+            ? queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", item.sourceDiretoriaId] })
+            : Promise.resolve(),
+          ...(item.targetDiretoriaIds || []).map((dId) =>
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria", dId] })
+          ),
+        ]);
       } else {
         res = await desfazerTransferenciaServicos({
           logId: item.id,
@@ -107,20 +107,23 @@ export const DesfazerTransferenciaDialog: React.FC<DesfazerTransferenciaDialogPr
           incluirCustoFinanceiro: item.incluirCustoFinanceiro,
           origemSigla: item.sourceDiretoriaSigla,
           servicoIds: item.detalhes?.servico_ids,
+          servicosOrigemInfo: item.detalhes?.servicos_origem_info,
         });
 
-        await queryClient.invalidateQueries({ queryKey: ["servicos"] });
-        await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
-        await queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
-        if (item.sourceDiretoriaId) {
-          await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", item.sourceDiretoriaId] });
-        }
-        if (item.targetDiretoriaIds) {
-          for (const dId of item.targetDiretoriaIds) {
-            await queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dId] });
-          }
-        }
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["servicos"] }),
+          queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] }),
+          item.sourceDiretoriaId
+            ? queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", item.sourceDiretoriaId] })
+            : Promise.resolve(),
+          ...(item.targetDiretoriaIds || []).map((dId) =>
+            queryClient.invalidateQueries({ queryKey: ["servicos-diretoria", dId] })
+          ),
+        ]);
       }
+
+      // Atualização otimista imediata: remove o item desfeito da lista
+      setHistorico(prev => prev.filter(h => h.id !== item.id));
 
       if (res.count > 0) {
         toast.success(
@@ -132,14 +135,11 @@ export const DesfazerTransferenciaDialog: React.FC<DesfazerTransferenciaDialogPr
         );
       }
 
-      // Atualização otimista imediata: remove o item desfeito da lista
-      setHistorico(prev => prev.filter(h => h.id !== item.id));
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["logs-atividades"] }),
+        queryClient.invalidateQueries({ queryKey: ["logs"] }),
+      ]);
 
-      await queryClient.invalidateQueries({ queryKey: ["logs-atividades"] });
-      await queryClient.invalidateQueries({ queryKey: ["logs"] });
-
-      // Recarrega lista atualizada do backend e sincroniza a tela
-      await carregarHistorico();
       if (onSuccess) {
         onSuccess();
       }

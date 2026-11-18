@@ -53,26 +53,40 @@ export function formatCurrency(value: any): string {
 // Cache em memória do catálogo de materiais para hidratação defensiva instantânea
 const memoryCatalogById = new Map<string, any>();
 const memoryCatalogByCode = new Map<number, any>();
+let memoryCatalogList: any[] | null = null;
+let memoryCatalogTimestamp = 0;
 
 // Cache em memória de gerências para garantir sigla sempre resolvida (ex: 'GSAD', 'GESL', 'DG' em vez de UUID)
 const memoryGerenciasById = new Map<string, string>();
+let memoryGerenciasList: Record<string, unknown>[] | null = null;
+let memoryGerenciasTimestamp = 0;
 
-export function updateGerenciasCache(gerencias: any[]) {
+export function updateGerenciasCache(gerencias: any[], isFullList = false) {
   if (!Array.isArray(gerencias)) return;
   gerencias.forEach(g => {
     if (g && g.id && g.sigla) {
       memoryGerenciasById.set(String(g.id).trim().toLowerCase(), String(g.sigla).trim());
     }
   });
+  if (isFullList && gerencias.length > 0) {
+    memoryGerenciasList = gerencias;
+    memoryGerenciasTimestamp = Date.now();
+  }
 }
 
-export function updateCatalogCache(items: any[]) {
+export function updateCatalogCache(items: any[], isFullList = false) {
   if (!Array.isArray(items)) return;
   items.forEach(it => {
     if (it.id) memoryCatalogById.set(String(it.id).trim().toLowerCase(), it);
     const c = Number(it.codigo);
     if (!isNaN(c) && c > 0) memoryCatalogByCode.set(c, it);
   });
+  if (isFullList && items.length > 0) {
+    memoryCatalogList = items;
+    memoryCatalogTimestamp = Date.now();
+  } else {
+    memoryCatalogList = null;
+  }
 }
 
 export function removeFromCatalogCache(id?: string, codigo?: number) {
@@ -80,6 +94,7 @@ export function removeFromCatalogCache(id?: string, codigo?: number) {
   if (codigo !== undefined && codigo !== null && !isNaN(Number(codigo))) {
     memoryCatalogByCode.delete(Number(codigo));
   }
+  memoryCatalogList = null;
 }
 
 function mapDbToPlanItem(s: any): PlanItem {
@@ -511,6 +526,13 @@ export async function getDiretorias(): Promise<DiretoriaRow[]> {
 export async function getGerenciasByDiretoria(
   diretoriaId: string
 ): Promise<Record<string, unknown>[]> {
+  if (memoryGerenciasList && memoryGerenciasList.length > 0 && Date.now() - memoryGerenciasTimestamp < 120000) {
+    const matched = memoryGerenciasList.filter(
+      (g: any) => String(g.diretoria_id) === String(diretoriaId) && g.ativa !== false && g.ativa !== "false"
+    );
+    if (matched.length > 0) return matched;
+  }
+
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias(diretoriaId);
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
@@ -533,11 +555,15 @@ export async function getGerenciasByDiretoria(
 }
 
 export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
+  if (memoryGerenciasList && memoryGerenciasList.length > 0 && Date.now() - memoryGerenciasTimestamp < 120000) {
+    return memoryGerenciasList;
+  }
+
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias();
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
     const deduplicated = deduplicateGerencias(filtered);
-    updateGerenciasCache(deduplicated);
+    updateGerenciasCache(deduplicated, true);
     return deduplicated;
   }
 
@@ -548,16 +574,20 @@ export async function getAllGerencias(): Promise<Record<string, unknown>[]> {
 
   if (error) throw error;
   const deduplicated = deduplicateGerencias(data || []);
-  updateGerenciasCache(deduplicated);
+  updateGerenciasCache(deduplicated, true);
   return deduplicated;
 }
 
 export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
+  if (memoryGerenciasList && memoryGerenciasList.length > 0 && Date.now() - memoryGerenciasTimestamp < 120000) {
+    return memoryGerenciasList;
+  }
+
   if (gs.isGoogleSheetsActive()) {
     const data = await gs.gsGetGerencias();
     const filtered = (data || []).filter((g: any) => g.ativa !== false && g.ativa !== "false");
     const deduplicated = deduplicateGerencias(filtered);
-    updateGerenciasCache(deduplicated);
+    updateGerenciasCache(deduplicated, true);
     return deduplicated;
   }
 
@@ -568,7 +598,7 @@ export async function getTodasGerencias(): Promise<Record<string, unknown>[]> {
 
   if (error) throw error;
   const deduplicated = deduplicateGerencias(data || []);
-  updateGerenciasCache(deduplicated);
+  updateGerenciasCache(deduplicated, true);
   return deduplicated;
 }
 
@@ -927,16 +957,30 @@ export async function getSolicitacoesByDiretoria(
   periodoId: string
 ): Promise<PlanItem[]> {
   if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetSolicitacoes({ diretoria_id: diretoriaId, periodo_id: periodoId });
+    const [, rows] = await Promise.all([
+      memoryGerenciasById.size === 0 ? getTodasGerencias().catch(() => []) : Promise.resolve([]),
+      gs.gsGetSolicitacoes({ diretoria_id: diretoriaId, periodo_id: periodoId }),
+    ]);
     return deduplicateById((rows || []).map(mapDbToPlanItem));
   }
 
-  const data = await fetchAllPages<any>((from, to) =>
-    supabase
+  const todasGerencias = await getTodasGerencias().catch(() => []);
+  const gerenciasDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(diretoriaId));
+  const gerenciaIds = Array.from(new Set(gerenciasDaDir.map((g: any) => String(g.id)).filter(Boolean)));
+
+  const data = await fetchAllPages<any>((from, to) => {
+    let q = supabase
       .from("solicitacoes")
       .select("*, item:itens_catalogo!solicitacoes_item_id_fkey(codigo, descricao, categoria, unidade, valor_unitario), gerencias!fk_solicitacoes_gerencia(sigla, nome), diretorias!fk_solicitacoes_diretoria(sigla, nome)")
-      .eq("diretoria_id", diretoriaId)
-      .eq("periodo_id", periodoId)
+      .eq("periodo_id", periodoId);
+
+    if (gerenciaIds.length > 0) {
+      q = q.or(`diretoria_id.eq.${diretoriaId},gerencia_id.in.(${gerenciaIds.join(",")})`);
+    } else {
+      q = q.eq("diretoria_id", diretoriaId);
+    }
+
+    return q
       .in("status", [
         "rascunho",
         "enviado",
@@ -947,8 +991,8 @@ export async function getSolicitacoesByDiretoria(
         "concluido",
       ])
       .order("id")
-      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>
-  );
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<PlanItem[]>>;
+  });
 
   return deduplicateById(data.map((s: any) => ({
     id: s.id,
@@ -1642,12 +1686,16 @@ export async function validateAccessCode(
 // ============ ITENS CATÁLOGO ============
 
 export async function getItensCatalogo(): Promise<unknown[]> {
+  if (memoryCatalogList && memoryCatalogList.length > 0 && Date.now() - memoryCatalogTimestamp < 120000) {
+    return memoryCatalogList;
+  }
+
   if (gs.isGoogleSheetsActive()) {
     try {
       const items = await gs.gsGetItensCatalogo();
       if (Array.isArray(items) && items.length > 0) {
         const uniqueItems = deduplicateItensCatalogo(items);
-        updateCatalogCache(uniqueItems);
+        updateCatalogCache(uniqueItems, true);
         return uniqueItems;
       }
     } catch (_err) {
@@ -1665,7 +1713,7 @@ export async function getItensCatalogo(): Promise<unknown[]> {
       );
       if (Array.isArray(data) && data.length > 0) {
         const uniqueData = deduplicateItensCatalogo(data as any[]);
-        updateCatalogCache(uniqueData);
+        updateCatalogCache(uniqueData, true);
         return uniqueData;
       }
     } catch (errDb) {
@@ -1687,7 +1735,7 @@ export async function getItensCatalogo(): Promise<unknown[]> {
             valor_unitario: 0,
           }));
           const uniqueFallback = deduplicateItensCatalogo(fallbackItems);
-          updateCatalogCache(uniqueFallback);
+          updateCatalogCache(uniqueFallback, true);
           return uniqueFallback;
         }
       }
@@ -1707,7 +1755,7 @@ export async function getItensCatalogo(): Promise<unknown[]> {
     );
     if (Array.isArray(data)) {
       const uniqueData = deduplicateItensCatalogo(data as any[]);
-      updateCatalogCache(uniqueData);
+      updateCatalogCache(uniqueData, true);
       return uniqueData;
     }
     return [];
@@ -2564,21 +2612,35 @@ export async function getServicosByDiretoria(
   periodoId: string
 ): Promise<ServicoItem[]> {
   if (gs.isGoogleSheetsActive()) {
-    const rows = await gs.gsGetServicos({ diretoria_id: diretoriaId, periodo_id: periodoId });
+    const [, rows] = await Promise.all([
+      memoryGerenciasById.size === 0 ? getTodasGerencias().catch(() => []) : Promise.resolve([]),
+      gs.gsGetServicos({ diretoria_id: diretoriaId, periodo_id: periodoId }),
+    ]);
     return deduplicateById((rows || []).map(mapDbToServicoItem));
   }
 
-  const data = await fetchAllPages<any>((from, to) =>
-    supabase
+  const todasGerencias = await getTodasGerencias().catch(() => []);
+  const gerenciasDaDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(diretoriaId));
+  const gerenciaIds = Array.from(new Set(gerenciasDaDir.map((g: any) => String(g.id)).filter(Boolean)));
+
+  const data = await fetchAllPages<any>((from, to) => {
+    let q = supabase
       .from("servicos")
       .select(
         "*, gerencias!fk_servicos_gerencia(sigla, nome), diretorias!fk_servicos_diretoria(sigla, nome)"
       )
-      .eq("diretoria_id", diretoriaId)
-      .eq("periodo_id", periodoId)
+      .eq("periodo_id", periodoId);
+
+    if (gerenciaIds.length > 0) {
+      q = q.or(`diretoria_id.eq.${diretoriaId},gerencia_id.in.(${gerenciaIds.join(",")})`);
+    } else {
+      q = q.eq("diretoria_id", diretoriaId);
+    }
+
+    return q
       .order("item")
-      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>
-  );
+      .range(from, to) as unknown as Promise<PostgrestSingleResponse<any[]>>;
+  });
   return deduplicateById(data.map(mapDbToServicoItem));
 }
 
@@ -4629,38 +4691,56 @@ export async function transferirSolicitacoesParaGerenciaBulk(
   targetGerenciaId: string,
   targetDiretoriaId?: string,
   origemSigla?: string,
-  novoStatus: SolicitacaoStatus = "rascunho"
+  novoStatus: SolicitacaoStatus = "rascunho",
+  skipLog: boolean = false
 ): Promise<void> {
   if (ids.length === 0) return;
 
   let finalTargetDirId = targetDiretoriaId || "";
   let finalTargetGerId = targetGerenciaId || "";
+  let gerencias: Record<string, unknown>[] = [];
 
   try {
-    const gerencias = await getTodasGerencias();
-    const todasDiretorias = await getDiretorias();
+    const [gers, todasDiretorias] = await Promise.all([
+      getTodasGerencias(),
+      getDiretorias(),
+    ]);
+    gerencias = gers || [];
 
-    // Se o destino for a própria Diretoria (ID ou Sigla)
-    const dirMatched = (todasDiretorias || []).find((d: any) =>
-      String(d.id) === String(finalTargetGerId) ||
-      String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
-    );
+    // Se NÃO foi informada a diretoria de destino explicitamente, tenta inferir pela gerência/sigla
+    if (!finalTargetDirId) {
+      const dirMatched = (todasDiretorias || []).find((d: any) =>
+        String(d.id) === String(finalTargetGerId) ||
+        String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
+      );
 
-    if (dirMatched) {
-      finalTargetDirId = String(dirMatched.id);
-      const gerDaDir = (gerencias || []).find((g: any) =>
-        String(g.diretoria_id) === String(dirMatched.id) &&
-        (String(g.sigla).toUpperCase() === String(dirMatched.sigla).toUpperCase() || String(g.nome).toLowerCase().includes("diretoria"))
-      ) || (gerencias || []).find((g: any) => String(g.diretoria_id) === String(dirMatched.id));
-      if (gerDaDir?.id) {
-        finalTargetGerId = String(gerDaDir.id);
+      if (dirMatched) {
+        finalTargetDirId = String(dirMatched.id);
+      } else {
+        const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+        if (targetGer?.diretoria_id) {
+          finalTargetDirId = String(targetGer.diretoria_id);
+        }
       }
     }
 
-    if (!finalTargetDirId) {
-      const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
-      if (targetGer?.diretoria_id) {
-        finalTargetDirId = String(targetGer.diretoria_id);
+    // Com a diretoria de destino garantida, certificar que a gerência pertence a essa diretoria
+    if (finalTargetDirId) {
+      const gersDaDir = (gerencias || []).filter((g: any) => String(g.diretoria_id) === String(finalTargetDirId));
+      const targetDirObj = (todasDiretorias || []).find((d: any) => String(d.id) === String(finalTargetDirId));
+      const gerPertence = gersDaDir.some((g: any) => String(g.id) === String(finalTargetGerId));
+
+      if (!gerPertence) {
+        const gerPrincipal = gersDaDir.find((g: any) =>
+          (targetDirObj?.sigla && String(g.sigla).toUpperCase() === String(targetDirObj.sigla).toUpperCase()) ||
+          String(g.nome).toLowerCase().includes("diretoria") ||
+          String(g.nome).toLowerCase().includes("presidência") ||
+          String(g.sigla).toUpperCase().includes("PRG")
+        ) || gersDaDir[0];
+
+        if (gerPrincipal?.id) {
+          finalTargetGerId = String(gerPrincipal.id);
+        }
       }
     }
   } catch (e) {
@@ -4670,20 +4750,37 @@ export async function transferirSolicitacoesParaGerenciaBulk(
   const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
 
   if (gs.isGoogleSheetsActive()) {
-    const gerencias = await gs.gsGetGerencias();
     const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
-    const targetDirId = finalTargetDirId || targetGer?.diretoria_id || "";
-    await gs.gsTransferirSolicitacoesParaGerenciaBulk(ids, finalTargetGerId, targetDirId);
+    const targetDirId = finalTargetDirId || String(targetGer?.diretoria_id || "");
+    const now = new Date().toISOString();
+    const ops: Promise<any>[] = [];
+
     if (novoStatus && novoStatus !== "rascunho") {
-      await gs.gsUpdateSolicitacaoStatusBulk(ids, novoStatus);
+      const bulkItems = ids.map((id: string) => ({
+        id,
+        gerencia_id: finalTargetGerId,
+        diretoria_id: targetDirId,
+        status: novoStatus,
+        updated_at: now,
+      }));
+      ops.push(gs.gsUpdateSolicitacoesBulkData(bulkItems));
+    } else {
+      ops.push(gs.gsTransferirSolicitacoesParaGerenciaBulk(ids, finalTargetGerId, targetDirId));
     }
-    await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
-      acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: finalTargetGerId,
-      diretoria_destino_id: targetDirId,
-      origem_sigla: origemSigla,
-      status: novoStatus,
-    });
+
+    if (!skipLog) {
+      ops.push(
+        registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
+          acao: "transferir_para_gerencia_bulk",
+          gerencia_destino_id: finalTargetGerId,
+          diretoria_destino_id: targetDirId,
+          origem_sigla: origemSigla,
+          status: novoStatus,
+        })
+      );
+    }
+
+    await Promise.all(ops);
     return;
   }
 
@@ -4739,13 +4836,15 @@ export async function transferirSolicitacoesParaGerenciaBulk(
     }
   }
 
-  await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
-    acao: "transferir_para_gerencia_bulk",
-    gerencia_destino_id: finalTargetGerId,
-    diretoria_destino_id: finalTargetDirId,
-    origem_sigla: origemSigla,
-    status: novoStatus,
-  });
+  if (!skipLog) {
+    await registrarLogAtividadeBulk("TRANSFERIR", "solicitacoes", ids, {
+      acao: "transferir_para_gerencia_bulk",
+      gerencia_destino_id: finalTargetGerId,
+      diretoria_destino_id: finalTargetDirId,
+      origem_sigla: origemSigla,
+      status: novoStatus,
+    });
+  }
 }
 
 export async function transferirServicosParaGerenciaBulk(
@@ -4753,37 +4852,56 @@ export async function transferirServicosParaGerenciaBulk(
   targetGerenciaId: string,
   targetDiretoriaId?: string,
   origemSigla?: string,
-  novoStatus: SolicitacaoStatus = "rascunho"
+  novoStatus: SolicitacaoStatus = "rascunho",
+  skipLog: boolean = false
 ): Promise<void> {
   if (ids.length === 0) return;
 
   let finalTargetDirId = targetDiretoriaId || "";
   let finalTargetGerId = targetGerenciaId || "";
+  let gerencias: Record<string, unknown>[] = [];
 
   try {
-    const gerencias = await getTodasGerencias();
-    const todasDiretorias = await getDiretorias();
+    const [gers, todasDiretorias] = await Promise.all([
+      getTodasGerencias(),
+      getDiretorias(),
+    ]);
+    gerencias = gers || [];
 
-    const dirMatched = (todasDiretorias || []).find((d: any) =>
-      String(d.id) === String(finalTargetGerId) ||
-      String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
-    );
+    // Se NÃO foi informada a diretoria de destino explicitamente, tenta inferir pela gerência/sigla
+    if (!finalTargetDirId) {
+      const dirMatched = (todasDiretorias || []).find((d: any) =>
+        String(d.id) === String(finalTargetGerId) ||
+        String(d.sigla).toUpperCase() === String(finalTargetGerId).toUpperCase()
+      );
 
-    if (dirMatched) {
-      finalTargetDirId = String(dirMatched.id);
-      const gerDaDir = (gerencias || []).find((g: any) =>
-        String(g.diretoria_id) === String(dirMatched.id) &&
-        (String(g.sigla).toUpperCase() === String(dirMatched.sigla).toUpperCase() || String(g.nome).toLowerCase().includes("diretoria"))
-      ) || (gerencias || []).find((g: any) => String(g.diretoria_id) === String(dirMatched.id));
-      if (gerDaDir?.id) {
-        finalTargetGerId = String(gerDaDir.id);
+      if (dirMatched) {
+        finalTargetDirId = String(dirMatched.id);
+      } else {
+        const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
+        if (targetGer?.diretoria_id) {
+          finalTargetDirId = String(targetGer.diretoria_id);
+        }
       }
     }
 
-    if (!finalTargetDirId) {
-      const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
-      if (targetGer?.diretoria_id) {
-        finalTargetDirId = String(targetGer.diretoria_id);
+    // Com a diretoria de destino garantida, certificar que a gerência pertence a essa diretoria
+    if (finalTargetDirId) {
+      const gersDaDir = (gerencias || []).filter((g: any) => String(g.diretoria_id) === String(finalTargetDirId));
+      const targetDirObj = (todasDiretorias || []).find((d: any) => String(d.id) === String(finalTargetDirId));
+      const gerPertence = gersDaDir.some((g: any) => String(g.id) === String(finalTargetGerId));
+
+      if (!gerPertence) {
+        const gerPrincipal = gersDaDir.find((g: any) =>
+          (targetDirObj?.sigla && String(g.sigla).toUpperCase() === String(targetDirObj.sigla).toUpperCase()) ||
+          String(g.nome).toLowerCase().includes("diretoria") ||
+          String(g.nome).toLowerCase().includes("presidência") ||
+          String(g.sigla).toUpperCase().includes("PRG")
+        ) || gersDaDir[0];
+
+        if (gerPrincipal?.id) {
+          finalTargetGerId = String(gerPrincipal.id);
+        }
       }
     }
   } catch (e) {
@@ -4793,20 +4911,37 @@ export async function transferirServicosParaGerenciaBulk(
   const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
 
   if (gs.isGoogleSheetsActive()) {
-    const gerencias = await gs.gsGetGerencias();
     const targetGer = (gerencias || []).find((g: any) => String(g.id) === String(finalTargetGerId));
-    const targetDirId = finalTargetDirId || targetGer?.diretoria_id || "";
-    await gs.gsTransferirServicosParaGerenciaBulk(ids, finalTargetGerId, targetDirId);
+    const targetDirId = finalTargetDirId || String(targetGer?.diretoria_id || "");
+    const now = new Date().toISOString();
+    const ops: Promise<any>[] = [];
+
     if (novoStatus && novoStatus !== "rascunho") {
-      await gs.gsUpdateServicoStatusBulk(ids, novoStatus);
+      const bulkItems = ids.map((id: string) => ({
+        id,
+        gerencia_id: finalTargetGerId,
+        diretoria_id: targetDirId,
+        status: novoStatus,
+        updated_at: now,
+      }));
+      ops.push(gs.gsUpdateServicosBulkData(bulkItems));
+    } else {
+      ops.push(gs.gsTransferirServicosParaGerenciaBulk(ids, finalTargetGerId, targetDirId));
     }
-    await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
-      acao: "transferir_para_gerencia_bulk",
-      gerencia_destino_id: finalTargetGerId,
-      diretoria_destino_id: targetDirId,
-      origem_sigla: origemSigla,
-      status: novoStatus,
-    });
+
+    if (!skipLog) {
+      ops.push(
+        registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
+          acao: "transferir_para_gerencia_bulk",
+          gerencia_destino_id: finalTargetGerId,
+          diretoria_destino_id: targetDirId,
+          origem_sigla: origemSigla,
+          status: novoStatus,
+        })
+      );
+    }
+
+    await Promise.all(ops);
     return;
   }
 
@@ -4862,12 +4997,14 @@ export async function transferirServicosParaGerenciaBulk(
     }
   }
 
-  await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
-    acao: "transferir_para_gerencia_bulk",
-    gerencia_destino_id: targetGerenciaId,
-    diretoria_destino_id: finalTargetDirId,
-    origem_sigla: origemSigla,
-  });
+  if (!skipLog) {
+    await registrarLogAtividadeBulk("TRANSFERIR", "servicos", ids, {
+      acao: "transferir_para_gerencia_bulk",
+      gerencia_destino_id: targetGerenciaId,
+      diretoria_destino_id: finalTargetDirId,
+      origem_sigla: origemSigla,
+    });
+  }
 }
 
 export async function transferirCategoriaAquisicao(params: {
@@ -4877,10 +5014,12 @@ export async function transferirCategoriaAquisicao(params: {
   targetDiretoriaId?: string;
   targetDiretoriaIds?: string[];
   targetGerenciaId?: string;
+  targetGerenciaIds?: string[];
   periodoId?: string;
   origemSigla?: string;
   incluirCustoFinanceiro?: boolean;
-}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[] }> {
+  knownSolicitacoes?: any[];
+}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[]; transferredIds?: string[] }> {
   const {
     categoria,
     categorias,
@@ -4888,9 +5027,11 @@ export async function transferirCategoriaAquisicao(params: {
     targetDiretoriaId,
     targetDiretoriaIds,
     targetGerenciaId,
+    targetGerenciaIds,
     periodoId,
     origemSigla,
     incluirCustoFinanceiro = true,
+    knownSolicitacoes,
   } = params;
 
   const rawCategorias = categorias && categorias.length > 0
@@ -4909,12 +5050,27 @@ export async function transferirCategoriaAquisicao(params: {
     throw new Error("Ao menos uma categoria e ao menos uma diretoria de destino são obrigatórios.");
   }
 
-  const todasGerencias = await getTodasGerencias();
+  const [todasGerencias, todasDiretorias] = await Promise.all([
+    getTodasGerencias(),
+    getDiretorias(),
+  ]);
   const firstDirId = String(finalDirIds[0]);
   const gersDaFirstDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(firstDirId));
-  const firstGerId = String((finalDirIds.length === 1 && targetGerenciaId)
-    ? targetGerenciaId
-    : gersDaFirstDir[0]?.id || (todasGerencias[0]?.id || ""));
+  const targetDirObj = (todasDiretorias || []).find((d: any) => String(d.id) === String(firstDirId));
+
+  const candidateGerId = String((targetGerenciaId || (targetGerenciaIds && targetGerenciaIds[0])) || "");
+  const candidateBelongs = gersDaFirstDir.some((g: any) => String(g.id) === candidateGerId);
+
+  const gerPrincipal = gersDaFirstDir.find((g: any) =>
+    (targetDirObj?.sigla && String(g.sigla).toUpperCase() === String(targetDirObj.sigla).toUpperCase()) ||
+    String(g.nome).toLowerCase().includes("diretoria") ||
+    String(g.nome).toLowerCase().includes("presidência") ||
+    String(g.sigla).toUpperCase().includes("PRG")
+  ) || gersDaFirstDir[0];
+
+  const firstGerId = candidateBelongs
+    ? candidateGerId
+    : String(gerPrincipal?.id || candidateGerId || "");
 
   const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
   const tagSemCusto = origemSigla
@@ -4928,12 +5084,17 @@ export async function transferirCategoriaAquisicao(params: {
     let allSols: any[] = [];
     let itensCatalogo: any[] = [];
     try {
+      const hasKnownSols = Array.isArray(knownSolicitacoes) && knownSolicitacoes.length > 0;
       const [solsResult, itensResult] = await Promise.all([
-        gs.gsGetSolicitacoes(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {}),
-        gs.gsGetItensCatalogo().catch(() => []),
+        hasKnownSols
+          ? Promise.resolve(knownSolicitacoes!)
+          : gs.gsGetSolicitacoes(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {}),
+        memoryCatalogList && memoryCatalogList.length > 0
+          ? Promise.resolve(memoryCatalogList)
+          : getItensCatalogo().catch(() => []),
       ]);
       allSols = solsResult || [];
-      itensCatalogo = itensResult || [];
+      itensCatalogo = (itensResult as any[]) || [];
     } catch (e) {
       console.warn("Erro ao buscar dados no Sheets:", e);
     }
@@ -4947,6 +5108,10 @@ export async function transferirCategoriaAquisicao(params: {
     });
 
     const solsFiltradas = (allSols || []).filter((s: any) => {
+      const qtd = Number(s.qtd_estimada ?? s.qtdEstimada ?? 0);
+      // Ignora rascunhos não configurados com quantidade zerada
+      if (s.status === "rascunho" && qtd <= 0) return false;
+
       const catDireta = String(s.categoria || "").trim().toLowerCase();
       if (catDireta && finalCatsLower.has(catDireta)) return true;
 
@@ -4960,41 +5125,60 @@ export async function transferirCategoriaAquisicao(params: {
     });
 
     const idsOrigem = solsFiltradas.map((s: any) => s.id).filter(Boolean);
+    const itensOrigemInfo = solsFiltradas.map((s: any) => ({
+      id: String(s.id),
+      gerencia_id: String(s.gerencia_id || ""),
+      diretoria_id: String(s.diretoria_id || sourceDiretoriaId || ""),
+      status: String(s.status || ""),
+      qtd_estimada: Number(s.qtd_estimada ?? s.qtdEstimada ?? 0),
+    }));
     const itensCatCount = (itensCatalogo || []).filter((i: any) => finalCatsLower.has(String(i.categoria || "").trim().toLowerCase())).length;
     const totalItens = idsOrigem.length > 0 ? idsOrigem.length : (itensCatCount > 0 ? itensCatCount : finalCategorias.length);
 
     const totalValor = solsFiltradas.reduce((acc: number, s: any) => {
-      const q = Number(s.qtd_estimada) || 0;
-      const v = Number(s.valor_unitario) || 0;
+      const q = Number(s.qtd_estimada ?? s.qtdEstimada ?? 0) || 0;
+      const v = Number(s.valor_unitario ?? s.valorUnitario ?? 0) || 0;
       return acc + (q * v);
     }, 0);
 
+    const now = new Date().toISOString();
+    const ops: Promise<any>[] = [];
+
     if (incluirCustoFinanceiro && idsOrigem.length > 0 && firstGerId) {
-      await gs.gsTransferirSolicitacoesParaGerenciaBulk(idsOrigem, firstGerId, firstDirId);
-      // Status vai para "aprovado" para contabilizar no custo financeiro e ir para a aba de Aprovados da Diretoria
-      await gs.gsUpdateSolicitacaoStatusBulk(idsOrigem, "aprovado");
+      const bulkItems = idsOrigem.map((id: string) => ({
+        id,
+        gerencia_id: firstGerId,
+        diretoria_id: firstDirId,
+        status: "aprovado",
+        updated_at: now,
+      }));
+      ops.push(gs.gsUpdateSolicitacoesBulkData(bulkItems));
     }
 
-    try {
-      await registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCategorias.join(", "), {
+    ops.push(
+      registrarLogAtividade("TRANSFERIR", "solicitacoes", finalCategorias.join(", "), {
         acao: "transferir_categoria_aquisicao",
         categorias: finalCategorias,
         solicitacao_ids: idsOrigem,
+        itens_origem_info: itensOrigemInfo,
         count: totalItens,
         totalValor: incluirCustoFinanceiro ? totalValor : 0,
         sourceDiretoriaId,
         targetDiretoriaIds: finalDirIds,
         origemSigla,
         incluirCustoFinanceiro,
-      });
-    } catch (logErr) {
-      console.warn("Falha ao registrar log no Sheets:", logErr);
-    }
+      }).catch((logErr) => {
+        console.warn("Falha ao registrar log no Sheets:", logErr);
+      })
+    );
+
+    await Promise.all(ops);
 
     return {
       count: totalItens,
       totalValor: incluirCustoFinanceiro ? totalValor : 0,
       diretoriasDestino: finalDirIds,
+      transferredIds: idsOrigem,
     };
   }
 
@@ -5025,11 +5209,20 @@ export async function transferirCategoriaAquisicao(params: {
   let totalValorTransferido = 0;
   let totalItensAfetados = (solicitacoesData || []).length;
   let idsOrigem: string[] = [];
+  let itensOrigemInfoSupabase: any[] = [];
 
   if (incluirCustoFinanceiro) {
     // CONDIÇÃO 1: Transferir itens/serviços e o custo financeiro para a(s) diretoria(s) selecionada(s)
-    idsOrigem = (solicitacoesData || []).map((s: any) => s.id).filter(Boolean);
-    const valorOriginal = (solicitacoesData || []).reduce((acc: number, s: any) => {
+    const solsValidas = (solicitacoesData || []).filter((s: any) => !(s.status === "rascunho" && Number(s.qtd_estimada || 0) <= 0));
+    idsOrigem = solsValidas.map((s: any) => s.id).filter(Boolean);
+    itensOrigemInfoSupabase = solsValidas.map((s: any) => ({
+      id: String(s.id),
+      gerencia_id: String(s.gerencia_id || ""),
+      diretoria_id: String(s.diretoria_id || sourceDiretoriaId || ""),
+      status: String(s.status || ""),
+      qtd_estimada: Number(s.qtd_estimada || 0),
+    }));
+    const valorOriginal = solsValidas.reduce((acc: number, s: any) => {
       const q = Number(s.qtd_estimada) || 0;
       const v = Number(s.valor_unitario) || 0;
       return acc + (q * v);
@@ -5039,7 +5232,7 @@ export async function transferirCategoriaAquisicao(params: {
     totalItensAfetados = idsOrigem.length;
 
     if (idsOrigem.length > 0 && firstGerId) {
-      await transferirSolicitacoesParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado");
+      await transferirSolicitacoesParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado", true);
     }
 
     // Para as demais diretorias de destino: clona com quantidades e valores com status "aprovado"
@@ -5142,6 +5335,7 @@ export async function transferirCategoriaAquisicao(params: {
       acao: "transferir_categoria_aquisicao",
       categorias: finalCategorias,
       solicitacao_ids: idsOrigem,
+      itens_origem_info: itensOrigemInfoSupabase,
       count: totalItensAfetados,
       totalValor: totalValorTransferido,
       sourceDiretoriaId,
@@ -5163,10 +5357,12 @@ export async function transferirContratoServicos(params: {
   targetDiretoriaId?: string;
   targetDiretoriaIds?: string[];
   targetGerenciaId?: string;
+  targetGerenciaIds?: string[];
   periodoId?: string;
   origemSigla?: string;
   incluirCustoFinanceiro?: boolean;
-}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[] }> {
+  knownServicos?: any[];
+}): Promise<{ count: number; totalValor: number; diretoriasDestino: string[]; transferredIds?: string[] }> {
   const {
     contrato,
     contratos,
@@ -5174,9 +5370,11 @@ export async function transferirContratoServicos(params: {
     targetDiretoriaId,
     targetDiretoriaIds,
     targetGerenciaId,
+    targetGerenciaIds,
     periodoId,
     origemSigla,
     incluirCustoFinanceiro = true,
+    knownServicos,
   } = params;
 
   const rawContratos = contratos && contratos.length > 0
@@ -5195,12 +5393,27 @@ export async function transferirContratoServicos(params: {
     throw new Error("Ao menos um contrato e ao menos uma diretoria de destino são obrigatórios.");
   }
 
-  const todasGerencias = await getTodasGerencias();
+  const [todasGerencias, todasDiretorias] = await Promise.all([
+    getTodasGerencias(),
+    getDiretorias(),
+  ]);
   const firstDirId = String(finalDirIds[0]);
   const gersDaFirstDir = (todasGerencias || []).filter((g: any) => String(g.diretoria_id) === String(firstDirId));
-  const firstGerId = String((finalDirIds.length === 1 && targetGerenciaId)
-    ? targetGerenciaId
-    : gersDaFirstDir[0]?.id || (todasGerencias[0]?.id || ""));
+  const targetDirObj = (todasDiretorias || []).find((d: any) => String(d.id) === String(firstDirId));
+
+  const candidateGerId = String((targetGerenciaId || (targetGerenciaIds && targetGerenciaIds[0])) || "");
+  const candidateBelongs = gersDaFirstDir.some((g: any) => String(g.id) === candidateGerId);
+
+  const gerPrincipal = gersDaFirstDir.find((g: any) =>
+    (targetDirObj?.sigla && String(g.sigla).toUpperCase() === String(targetDirObj.sigla).toUpperCase()) ||
+    String(g.nome).toLowerCase().includes("diretoria") ||
+    String(g.nome).toLowerCase().includes("presidência") ||
+    String(g.sigla).toUpperCase().includes("PRG")
+  ) || gersDaFirstDir[0];
+
+  const firstGerId = candidateBelongs
+    ? candidateGerId
+    : String(gerPrincipal?.id || candidateGerId || "");
 
   const tagOrigem = origemSigla ? `[Transferido da Diretoria ${origemSigla}]` : "";
   const tagSemCusto = origemSigla
@@ -5211,48 +5424,72 @@ export async function transferirContratoServicos(params: {
   if (gs.isGoogleSheetsActive()) {
     let allServicos: any[] = [];
     try {
-      allServicos = await gs.gsGetServicos(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {});
+      if (Array.isArray(knownServicos) && knownServicos.length > 0) {
+        allServicos = knownServicos;
+      } else {
+        allServicos = await gs.gsGetServicos(sourceDiretoriaId ? { diretoria_id: sourceDiretoriaId } : {});
+      }
     } catch (e) {
       console.warn("Erro ao buscar serviços no Sheets:", e);
     }
 
     const finalContratosSet = new Set(finalContratos.map(c => String(c).trim()));
     const servicosFiltrados = (allServicos || []).filter((s: any) =>
-      finalContratosSet.has(String(s.contrato || "").trim())
+      finalContratosSet.has(String(s.contrato || s.numero_termo || "").trim())
     );
 
     const idsOrigem = servicosFiltrados.map((s: any) => s.id).filter(Boolean);
+    const servicosOrigemInfo = servicosFiltrados.map((s: any) => ({
+      id: String(s.id),
+      gerencia_id: String(s.gerencia_id || ""),
+      diretoria_id: String(s.diretoria_id || sourceDiretoriaId || ""),
+      status: String(s.status || ""),
+      estimativa_valor: Number(s.estimativa_valor ?? s.estimativaValor ?? s.dotacao_orcamentaria ?? s.dotacaoOrcamentaria ?? 0),
+    }));
     const totalServicos = idsOrigem.length > 0 ? idsOrigem.length : finalContratos.length;
     const totalValor = servicosFiltrados.reduce((acc: number, s: any) => {
-      const val = Number(s.estimativa_valor) || Number(s.dotacao_orcamentaria) || 0;
+      const val = Number(s.estimativa_valor ?? s.estimativaValor ?? s.dotacao_orcamentaria ?? s.dotacaoOrcamentaria ?? 0) || 0;
       return acc + val;
     }, 0);
 
+    const now = new Date().toISOString();
+    const ops: Promise<any>[] = [];
+
     if (incluirCustoFinanceiro && idsOrigem.length > 0 && firstGerId) {
-      await gs.gsTransferirServicosParaGerenciaBulk(idsOrigem, firstGerId, firstDirId);
-      await gs.gsUpdateServicoStatusBulk(idsOrigem, "aprovado");
+      const bulkItems = idsOrigem.map((id: string) => ({
+        id,
+        gerencia_id: firstGerId,
+        diretoria_id: firstDirId,
+        status: "aprovado",
+        updated_at: now,
+      }));
+      ops.push(gs.gsUpdateServicosBulkData(bulkItems));
     }
 
-    try {
-      await registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
+    ops.push(
+      registrarLogAtividade("TRANSFERIR", "servicos", finalContratos.join(", "), {
         acao: "transferir_contrato_servicos",
         contratos: finalContratos,
         servico_ids: idsOrigem,
+        servicos_origem_info: servicosOrigemInfo,
         count: totalServicos,
         totalValor: incluirCustoFinanceiro ? totalValor : 0,
         sourceDiretoriaId,
         targetDiretoriaIds: finalDirIds,
         origemSigla,
         incluirCustoFinanceiro,
-      });
-    } catch (logErr) {
-      console.warn("Falha ao registrar log de serviços no Sheets:", logErr);
-    }
+      }).catch((logErr) => {
+        console.warn("Falha ao registrar log de serviços no Sheets:", logErr);
+      })
+    );
+
+    await Promise.all(ops);
 
     return {
       count: totalServicos,
       totalValor: incluirCustoFinanceiro ? totalValor : 0,
       diretoriasDestino: finalDirIds,
+      transferredIds: idsOrigem,
     };
   }
 
@@ -5283,9 +5520,17 @@ export async function transferirContratoServicos(params: {
   let totalValorTransferido = 0;
   const totalServicosAfetados = (servicosData || []).length;
   let idsOrigem: string[] = [];
+  let servicosOrigemInfoSupabase: any[] = [];
 
   if (incluirCustoFinanceiro) {
     idsOrigem = (servicosData || []).map((s: any) => s.id).filter(Boolean);
+    servicosOrigemInfoSupabase = (servicosData || []).map((s: any) => ({
+      id: String(s.id),
+      gerencia_id: String(s.gerencia_id || ""),
+      diretoria_id: String(s.diretoria_id || sourceDiretoriaId || ""),
+      status: String(s.status || ""),
+      estimativa_valor: Number(s.estimativa_valor || 0),
+    }));
     const valorOriginal = (servicosData || []).reduce((acc: number, s: any) => {
       const val = Number(s.estimativa_valor) || Number(s.dotacao_orcamentaria) || 0;
       return acc + val;
@@ -5294,7 +5539,7 @@ export async function transferirContratoServicos(params: {
     totalValorTransferido = valorOriginal;
 
     if (idsOrigem.length > 0 && firstGerId) {
-      await transferirServicosParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado");
+      await transferirServicosParaGerenciaBulk(idsOrigem, firstGerId, firstDirId, origemSigla, "aprovado", true);
     }
 
     // Para as demais diretorias de destino: clona os serviços com valores
@@ -5353,6 +5598,7 @@ export async function transferirContratoServicos(params: {
     acao: "transferir_contrato_servicos",
     contratos: finalContratos,
     servico_ids: idsOrigem,
+    servicos_origem_info: servicosOrigemInfoSupabase,
     count: totalServicosAfetados,
     totalValor: totalValorTransferido,
     sourceDiretoriaId,
@@ -5389,11 +5635,17 @@ export async function getHistoricoTransferencias(params: {
   const tabela = tipo === "aquisicao" ? "solicitacoes" : "servicos";
 
   let logs: any[] = [];
+  let todasDiretorias: any[] = [];
   try {
-    const todosLogs = await getLogsAtividades();
+    const [todosLogs, dirsResult] = await Promise.all([
+      getLogsAtividades(),
+      getDiretorias().catch(() => []),
+    ]);
+    todasDiretorias = dirsResult || [];
 
-    // 1. Coleta IDs de logs de transferência que já foram desfeitos
+    // 1. Coleta IDs de logs de transferência que já foram desfeitos e timestamp do último DESFAZER por item
     const logsDesfeitosIds = new Set<string>();
+    const itemUltimoDesfazerTs = new Map<string, number>();
 
     (todosLogs || []).forEach((l: any) => {
       if (l.acao === "DESFAZER") {
@@ -5405,6 +5657,22 @@ export async function getHistoricoTransferencias(params: {
           det = l.detalhes;
         }
         if (det.log_original_id) logsDesfeitosIds.add(String(det.log_original_id));
+
+        const desfazerTs = l.created_at ? new Date(l.created_at).getTime() : 0;
+        if (Array.isArray(det.solicitacao_ids)) {
+          det.solicitacao_ids.forEach((id: any) => {
+            const key = String(id);
+            const prev = itemUltimoDesfazerTs.get(key) || 0;
+            if (desfazerTs > prev) itemUltimoDesfazerTs.set(key, desfazerTs);
+          });
+        }
+        if (Array.isArray(det.servico_ids)) {
+          det.servico_ids.forEach((id: any) => {
+            const key = String(id);
+            const prev = itemUltimoDesfazerTs.get(key) || 0;
+            if (desfazerTs > prev) itemUltimoDesfazerTs.set(key, desfazerTs);
+          });
+        }
       }
     });
 
@@ -5420,17 +5688,54 @@ export async function getHistoricoTransferencias(params: {
 
     // 3. Filtra apenas transferências ativas que NÃO foram desfeitas e não foram deletadas
     logs = (todosLogs || []).filter(
-      (l: any) =>
-        l.tabela_afetada === tabela &&
-        l.acao === "TRANSFERIR" &&
-        !l.is_deleted &&
-        !logsDesfeitosIds.has(String(l.id))
+      (l: any) => {
+        if (l.tabela_afetada !== tabela) return false;
+        if (l.acao !== "TRANSFERIR") return false;
+        const isDeleted =
+          l.is_deleted === true ||
+          String(l.is_deleted).toLowerCase() === "true" ||
+          Boolean(l.deleted_at && String(l.deleted_at).trim() !== "");
+        if (isDeleted) return false;
+        if (logsDesfeitosIds.has(String(l.id))) return false;
+
+        let det: any = {};
+        if (typeof l.detalhes === "string") {
+          try { det = JSON.parse(l.detalhes); } catch { det = {}; }
+        } else if (typeof l.detalhes === "object" && l.detalhes) {
+          det = l.detalhes;
+        }
+
+        const transferTs = l.created_at ? new Date(l.created_at).getTime() : 0;
+
+        // Só oculta se o item foi desfeito APÓS o momento desta transferência
+        if (l.registro_id) {
+          const lastUndone = itemUltimoDesfazerTs.get(String(l.registro_id)) || 0;
+          if (lastUndone > 0 && lastUndone >= transferTs) return false;
+        }
+
+        // Só oculta o lote se TODOS os IDs dos itens deste lote foram desfeitos APÓS o momento desta transferência
+        const itemIds = det.solicitacao_ids || det.servico_ids;
+        if (
+          Array.isArray(itemIds) &&
+          itemIds.length > 0 &&
+          itemIds.every((id: any) => {
+            const lastUndone = itemUltimoDesfazerTs.get(String(id)) || 0;
+            return lastUndone > 0 && lastUndone >= transferTs;
+          })
+        ) {
+          return false;
+        }
+
+        return true;
+      }
     );
   } catch (e) {
     console.warn("Erro ao buscar logs de transferências:", e);
   }
 
-  const todasDiretorias = await getDiretorias();
+  if (todasDiretorias.length === 0) {
+    todasDiretorias = await getDiretorias().catch(() => []);
+  }
   const dirMap = new Map<string, string>();
   (todasDiretorias || []).forEach((d: any) => {
     if (d.id) dirMap.set(String(d.id), d.sigla || d.nome || String(d.id));
@@ -5448,6 +5753,32 @@ export async function getHistoricoTransferencias(params: {
       }
     } else if (typeof log.detalhes === "object" && log.detalhes) {
       det = log.detalhes;
+    }
+
+    // Se for log técnico de "transferir_para_gerencia_bulk", verifica se já existe outro log ativo de categoria/contrato
+    // correspondente ou se já cobriu os mesmos itens para evitar duplicatas visuais residuais
+    if (det.acao === "transferir_para_gerencia_bulk") {
+      const temLogEquivalente = logs.some((outro: any) => {
+        if (String(outro.id) === String(log.id)) return false;
+        let odet: any = {};
+        try {
+          odet = typeof outro.detalhes === "string" ? JSON.parse(outro.detalhes) : (outro.detalhes || {});
+        } catch {
+          odet = {};
+        }
+        if (odet.acao === "transferir_categoria_aquisicao" || odet.acao === "transferir_contrato_servicos") {
+          const mesmoDestino = (Array.isArray(odet.targetDiretoriaIds) && det.diretoria_destino_id && odet.targetDiretoriaIds.includes(String(det.diretoria_destino_id)));
+          const mesmosItens = Array.isArray(odet.solicitacao_ids) && (
+            (log.registro_id && odet.solicitacao_ids.includes(String(log.registro_id))) ||
+            (Array.isArray(det.solicitacao_ids) && det.solicitacao_ids.some((id: any) => odet.solicitacao_ids.includes(String(id))))
+          );
+          if (mesmoDestino || mesmosItens) return true;
+        }
+        return false;
+      });
+      if (temLogEquivalente) {
+        continue;
+      }
     }
 
     const sourceId = det.sourceDiretoriaId ? String(det.sourceDiretoriaId) : undefined;
@@ -5520,6 +5851,7 @@ export async function desfazerTransferenciaAquisicao(params: {
   incluirCustoFinanceiro?: boolean;
   origemSigla?: string;
   solicitacaoIds?: string[];
+  itensOrigemInfo?: any[];
 }): Promise<{ count: number; restoredToDiretoria: string }> {
   const { logId } = params;
   let {
@@ -5530,6 +5862,8 @@ export async function desfazerTransferenciaAquisicao(params: {
     origemSigla,
     solicitacaoIds,
   } = params;
+
+  let logItensOrigemInfo: any[] = Array.isArray(params.itensOrigemInfo) ? params.itensOrigemInfo : [];
 
   if (logId) {
     if (typeof window !== "undefined") {
@@ -5544,36 +5878,54 @@ export async function desfazerTransferenciaAquisicao(params: {
       }
     }
 
-    try {
-      await deleteLogAtividade(logId);
-    } catch (e) {
-      console.warn("Aviso ao marcar log original como excluído:", e);
-    }
+    // Só busca o log no servidor se faltar informação essencial (ex: solicitacaoIds ou sourceDiretoriaId)
+    const precisaBuscarLog =
+      !solicitacaoIds ||
+      solicitacaoIds.length === 0 ||
+      !sourceDiretoriaId ||
+      (incluirCustoFinanceiro && logItensOrigemInfo.length === 0);
 
-    try {
-      const logs = await getLogsAtividades();
-      const logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
-      if (logRow) {
-        let det: any = {};
-        if (typeof logRow.detalhes === "string") {
-          try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
-        } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
-          det = logRow.detalhes;
+    if (precisaBuscarLog) {
+      try {
+        const logs = await getLogsAtividades();
+        let logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
+        if (!logRow) {
+          const lixeira = await getLixeiraLogsAtividades().catch(() => []);
+          logRow = (lixeira || []).find((l: any) => String(l.id) === String(logId));
         }
+        if (logRow) {
+          let det: any = {};
+          if (typeof logRow.detalhes === "string") {
+            try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
+          } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
+            det = logRow.detalhes;
+          }
 
-        if (!categorias && det.categorias) categorias = det.categorias;
-        if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
-        if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
-        if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
-        if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
-        if (!solicitacaoIds && det.solicitacao_ids) solicitacaoIds = det.solicitacao_ids;
+          if (!categorias && det.categorias) categorias = det.categorias;
+          if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
+          if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
+          if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
+          if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
+          if (!solicitacaoIds && det.solicitacao_ids) solicitacaoIds = det.solicitacao_ids;
+          if (logItensOrigemInfo.length === 0 && Array.isArray(det.itens_origem_info)) {
+            logItensOrigemInfo = det.itens_origem_info;
+          }
+        }
+      } catch (e) {
+        console.warn("Erro ao buscar log original:", e);
       }
-    } catch (e) {
-      console.warn("Erro ao buscar log original:", e);
     }
   }
 
-  const todasDiretorias = await getDiretorias();
+  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+    ? targetDiretoriaIds
+    : [];
+
+  const [todasDiretorias, todasGerencias] = await Promise.all([
+    getDiretorias(),
+    getTodasGerencias(),
+  ]);
+
   if (!sourceDiretoriaId && origemSigla) {
     const dFound = (todasDiretorias || []).find((d: any) =>
       String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase()
@@ -5591,7 +5943,6 @@ export async function desfazerTransferenciaAquisicao(params: {
   );
   const finalSourceDirId = dirOrigemObj?.id ? String(dirOrigemObj.id) : String(sourceDiretoriaId || "");
 
-  const todasGerencias = await getTodasGerencias();
   const gersOrigem = (todasGerencias || []).filter((g: any) =>
     String(g.diretoria_id) === String(finalSourceDirId) ||
     (dirOrigemObj?.id && String(g.diretoria_id) === String(dirOrigemObj.id))
@@ -5601,39 +5952,90 @@ export async function desfazerTransferenciaAquisicao(params: {
   let totalRestaurados = 0;
   const idsParaReverterSet = new Set<string>();
 
-  // 1. Se recebemos solicitacaoIds explícitos no log ou parâmetros
+  // 1. Se recebemos solicitacaoIds explícitos no log ou parâmetros:
+  // Usa ESTRITAMENTE esses IDs para não varrer itens alheios nem duplicar rascunhos!
   if (solicitacaoIds && solicitacaoIds.length > 0) {
     solicitacaoIds.forEach(id => idsParaReverterSet.add(String(id)));
   }
 
-  // 2. Se não temos solicitacaoIds ou para complementar, busca nas diretorias de destino
-  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
-    ? targetDiretoriaIds
-    : [];
+  // 2. Se NÃO temos solicitacaoIds (somente em logs legados antigos):
+  // Faz busca cuidadosa nas diretorias de destino, exigindo a tag explícita de transferência
+  if (idsParaReverterSet.size === 0) {
+    const norm = (str: string) =>
+      String(str || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
 
-  const catsLower = new Set((categorias || []).map(c => String(c).trim().toLowerCase()));
+    const catsNormSet = new Set((categorias || []).map(norm));
 
-  if (idsParaReverterSet.size === 0 && targetDirIds.length > 0) {
-    for (const tDirId of targetDirIds) {
-      try {
-        const { data: solsDest } = await supabase
-          .from("solicitacoes")
-          .select("id, categoria, observacao")
-          .eq("diretoria_id", tDirId);
+    // Mapa de itens do catálogo para cruzamento de categorias
+    const itensCat = await getItensCatalogo().catch(() => []);
+    const catPorItemId = new Map<string, string>();
+    const catPorCodigo = new Map<number, string>();
+    (itensCat || []).forEach((c: any) => {
+      const cNorm = norm(c.categoria || "");
+      if (c.id) catPorItemId.set(String(c.id).toLowerCase(), cNorm);
+      const codeNum = Number(c.codigo);
+      if (!isNaN(codeNum) && codeNum > 0) catPorCodigo.set(codeNum, cNorm);
+    });
 
-        (solsDest || []).forEach((s: any) => {
-          const sCat = String(s.categoria || "").trim().toLowerCase();
+    const matchCategoriaItem = (s: any) => {
+      if (catsNormSet.size === 0) return false;
+      const catDireta = norm(s.categoria);
+      if (catDireta && catsNormSet.has(catDireta)) return true;
+      if (s.item_id && catPorItemId.has(String(s.item_id).toLowerCase())) {
+        const c = catPorItemId.get(String(s.item_id).toLowerCase());
+        if (c && catsNormSet.has(c)) return true;
+      }
+      const codeNum = Number(s.codigo);
+      if (!isNaN(codeNum) && codeNum > 0 && catPorCodigo.has(codeNum)) {
+        const c = catPorCodigo.get(codeNum);
+        if (c && catsNormSet.has(c)) return true;
+      }
+      return false;
+    };
+
+    if (gs.isGoogleSheetsActive() && targetDirIds.length > 0) {
+      const destLists = await Promise.all(
+        targetDirIds.map(tDirId => gs.gsGetSolicitacoes({ diretoria_id: tDirId }).catch(() => []))
+      );
+      destLists.forEach((destSols: any[]) => {
+        (destSols || []).forEach((s: any) => {
+          const matchCat = matchCategoriaItem(s);
           const sObs = String(s.observacao || "");
-          const matchCat = sCat && catsLower.has(sCat);
           const matchObs = sObs.includes("[Transferido da Diretoria") ||
             (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
+          const hasQtd = Number(s.qtd_estimada || 0) > 0;
 
-          if (matchCat || matchObs) {
+          if (matchObs && (hasQtd || matchCat)) {
             idsParaReverterSet.add(String(s.id));
           }
         });
-      } catch (e) {
-        console.warn("Aviso ao buscar solicitacoes do destino no Supabase:", e);
+      });
+    } else if (targetDirIds.length > 0) {
+      for (const tDirId of targetDirIds) {
+        try {
+          const { data: solsDest } = await supabase
+            .from("solicitacoes")
+            .select("id, item_id, codigo, categoria, observacao, qtd_estimada")
+            .eq("diretoria_id", tDirId);
+
+          (solsDest || []).forEach((s: any) => {
+            const matchCat = matchCategoriaItem(s);
+            const sObs = String(s.observacao || "");
+            const matchObs = sObs.includes("[Transferido da Diretoria") ||
+              (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
+            const hasQtd = Number(s.qtd_estimada || 0) > 0;
+
+            if (matchObs && (hasQtd || matchCat)) {
+              idsParaReverterSet.add(String(s.id));
+            }
+          });
+        } catch (e) {
+          console.warn("Aviso ao buscar solicitacoes do destino no Supabase:", e);
+        }
       }
     }
   }
@@ -5642,71 +6044,152 @@ export async function desfazerTransferenciaAquisicao(params: {
 
   // SUPORTE AO GOOGLE SHEETS
   if (gs.isGoogleSheetsActive()) {
-    try {
-      let idsSheets = idsParaReverter;
+    const ops: Promise<any>[] = [];
 
-      if (idsSheets.length === 0 && targetDirIds.length > 0) {
-        for (const tDirId of targetDirIds) {
-          try {
-            const destSols = await gs.gsGetSolicitacoes({ diretoria_id: tDirId });
-            (destSols || []).forEach((s: any) => {
-              const sCat = String(s.categoria || "").trim().toLowerCase();
-              const sObs = String(s.observacao || "");
-              const matchCat = sCat && catsLower.has(sCat);
-              const matchObs = sObs.includes("[Transferido da Diretoria");
-              if (matchCat || matchObs) {
-                idsParaReverterSet.add(String(s.id));
-              }
-            });
-          } catch (e) {
-            console.warn("Aviso ao buscar solicitacoes no Sheets por diretoria:", e);
-          }
+    if (idsParaReverter.length > 0) {
+      if (incluirCustoFinanceiro) {
+        const now = new Date().toISOString();
+        if (logItensOrigemInfo && logItensOrigemInfo.length > 0) {
+          const infoMap = new Map(logItensOrigemInfo.map((i: any) => [String(i.id), i]));
+          const bulkUpdates = idsParaReverter.map((sId: string) => {
+            const info = infoMap.get(String(sId));
+            return {
+              id: sId,
+              gerencia_id: info?.gerencia_id || gerenciaOrigemId,
+              diretoria_id: info?.diretoria_id || finalSourceDirId,
+              status: info?.status || "aprovado",
+              updated_at: now,
+            };
+          });
+          ops.push(gs.gsUpdateSolicitacoesBulkData(bulkUpdates));
+        } else {
+          const bulkUpdates = idsParaReverter.map((sId: string) => ({
+            id: sId,
+            gerencia_id: gerenciaOrigemId,
+            diretoria_id: finalSourceDirId,
+            status: "aprovado",
+            updated_at: now,
+          }));
+          ops.push(gs.gsUpdateSolicitacoesBulkData(bulkUpdates));
         }
-        idsSheets = Array.from(idsParaReverterSet).filter(Boolean);
+      } else {
+        ops.push(gs.gsDeleteSolicitacoesBulk(idsParaReverter));
       }
+      totalRestaurados = idsParaReverter.length;
+    }
 
-      if (idsSheets.length > 0) {
-        for (let i = 0; i < idsSheets.length; i += 100) {
-          const chunk = idsSheets.slice(i, i + 100);
-          if (incluirCustoFinanceiro) {
-            await gs.gsTransferirSolicitacoesParaGerenciaBulk(chunk, gerenciaOrigemId, finalSourceDirId);
-            await gs.gsUpdateSolicitacaoStatusBulk(chunk, "rascunho");
-          } else {
-            for (const sId of chunk) {
-              await gs.gsDeleteSolicitacao(sId).catch(() => {});
+    if (logId) {
+      ops.push(
+        deleteLogAtividade(logId).catch((e) => {
+          console.warn("Aviso ao marcar log original como excluído:", e);
+        })
+      );
+    }
+
+    ops.push(
+      registrarLogAtividade("DESFAZER", "solicitacoes", logId || "manual", {
+        acao: "desfazer_transferencia_aquisicao",
+        log_original_id: logId,
+        categorias,
+        solicitacao_ids: idsParaReverter,
+        sourceDiretoriaId: finalSourceDirId,
+        targetDiretoriaIds,
+        count: totalRestaurados,
+      }).catch((e) => {
+        console.warn("Erro ao registrar log de desfazer:", e);
+      })
+    );
+
+    await Promise.all(ops);
+
+    // Limpeza assíncrona em segundo plano de eventuais logs acompanhantes (não bloqueia a UI)
+    if (idsParaReverter.length > 0) {
+      void (async () => {
+        try {
+          const allLogs = await getLogsAtividades();
+          const idsSet = new Set(idsParaReverter.map(String));
+          const companionIds: string[] = [];
+          for (const l of (allLogs || [])) {
+            if (String(l.id) === String(logId)) continue;
+            if (l.acao === "TRANSFERIR" && !l.is_deleted && !l.deleted_at) {
+              if (l.registro_id && idsSet.has(String(l.registro_id))) {
+                companionIds.push(String(l.id));
+              } else {
+                let d: any = {};
+                try {
+                  d = typeof l.detalhes === "string" ? JSON.parse(l.detalhes) : (l.detalhes || {});
+                } catch {
+                  d = {};
+                }
+                if (Array.isArray(d.solicitacao_ids) && d.solicitacao_ids.some((sId: any) => idsSet.has(String(sId)))) {
+                  companionIds.push(String(l.id));
+                }
+              }
             }
           }
+          if (companionIds.length > 0) {
+            await deleteLogsAtividadeBulk(companionIds).catch(() => {});
+          }
+        } catch {
+          // ignore background cleanup error
         }
-        totalRestaurados = Math.max(totalRestaurados, idsSheets.length);
-      }
-    } catch (sheetsErr) {
-      console.warn("Aviso ao desfazer no Google Sheets:", sheetsErr);
+      })();
     }
+
+    return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
   }
 
   // SUPORTE AO SUPABASE
   if (idsParaReverter.length > 0) {
-    for (let i = 0; i < idsParaReverter.length; i += 100) {
-      const chunk = idsParaReverter.slice(i, i + 100);
-      try {
-        if (incluirCustoFinanceiro) {
-          await supabase
-            .from("solicitacoes")
-            .update({
-              diretoria_id: finalSourceDirId,
-              gerencia_id: gerenciaOrigemId || undefined,
-              status: "rascunho",
-              updated_at: new Date().toISOString(),
-            })
-            .in("id", chunk);
-        } else {
+    if (incluirCustoFinanceiro) {
+      if (logItensOrigemInfo && logItensOrigemInfo.length > 0) {
+        const infoMap = new Map(logItensOrigemInfo.map((i: any) => [String(i.id), i]));
+        await Promise.all(
+          idsParaReverter.map(async (sId) => {
+            const info = infoMap.get(String(sId));
+            try {
+              await supabase
+                .from("solicitacoes")
+                .update({
+                  diretoria_id: info?.diretoria_id || finalSourceDirId,
+                  gerencia_id: info?.gerencia_id || gerenciaOrigemId,
+                  status: info?.status || "aprovado",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", sId);
+            } catch (e) {
+              console.warn("Aviso ao restaurar item individual no Supabase:", e);
+            }
+          })
+        );
+      } else {
+        for (let i = 0; i < idsParaReverter.length; i += 100) {
+          const chunk = idsParaReverter.slice(i, i + 100);
+          try {
+            await supabase
+              .from("solicitacoes")
+              .update({
+                diretoria_id: finalSourceDirId,
+                status: "aprovado",
+                updated_at: new Date().toISOString(),
+              })
+              .in("id", chunk);
+          } catch (errSupabase) {
+            console.warn("Erro ao atualizar lote de solicitacoes no Supabase:", errSupabase);
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < idsParaReverter.length; i += 100) {
+        const chunk = idsParaReverter.slice(i, i + 100);
+        try {
           await supabase
             .from("solicitacoes")
             .delete()
             .in("id", chunk);
+        } catch (errSupabase) {
+          console.warn("Erro ao deletar lote de solicitacoes sem custo no Supabase:", errSupabase);
         }
-      } catch (errSupabase) {
-        console.warn("Erro ao atualizar lote de solicitacoes no Supabase:", errSupabase);
       }
     }
     totalRestaurados = Math.max(totalRestaurados, idsParaReverter.length);
@@ -5728,18 +6211,20 @@ export async function desfazerTransferenciaAquisicao(params: {
     }
   }
 
-  try {
-    await registrarLogAtividade("DESFAZER", "solicitacoes", logId || "manual", {
+  await Promise.all([
+    logId
+      ? deleteLogAtividade(logId).catch((e) => console.warn("Aviso ao marcar log original como excluído:", e))
+      : Promise.resolve(),
+    registrarLogAtividade("DESFAZER", "solicitacoes", logId || "manual", {
       acao: "desfazer_transferencia_aquisicao",
       log_original_id: logId,
       categorias,
+      solicitacao_ids: idsParaReverter,
       sourceDiretoriaId: finalSourceDirId,
       targetDiretoriaIds,
       count: totalRestaurados,
-    });
-  } catch (e) {
-    console.warn("Erro ao registrar log de desfazer:", e);
-  }
+    }).catch((e) => console.warn("Erro ao registrar log de desfazer:", e)),
+  ]);
 
   return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
 }
@@ -5752,6 +6237,7 @@ export async function desfazerTransferenciaServicos(params: {
   incluirCustoFinanceiro?: boolean;
   origemSigla?: string;
   servicoIds?: string[];
+  servicosOrigemInfo?: any[];
 }): Promise<{ count: number; restoredToDiretoria: string }> {
   const { logId } = params;
   let {
@@ -5762,6 +6248,8 @@ export async function desfazerTransferenciaServicos(params: {
     origemSigla,
     servicoIds,
   } = params;
+
+  let logServicosOrigemInfo: any[] = Array.isArray(params.servicosOrigemInfo) ? params.servicosOrigemInfo : [];
 
   if (logId) {
     if (typeof window !== "undefined") {
@@ -5776,36 +6264,53 @@ export async function desfazerTransferenciaServicos(params: {
       }
     }
 
-    try {
-      await deleteLogAtividade(logId);
-    } catch (e) {
-      console.warn("Aviso ao marcar log original de serviços como excluído:", e);
-    }
+    const precisaBuscarLog =
+      !servicoIds ||
+      servicoIds.length === 0 ||
+      !sourceDiretoriaId ||
+      (incluirCustoFinanceiro && logServicosOrigemInfo.length === 0);
 
-    try {
-      const logs = await getLogsAtividades();
-      const logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
-      if (logRow) {
-        let det: any = {};
-        if (typeof logRow.detalhes === "string") {
-          try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
-        } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
-          det = logRow.detalhes;
+    if (precisaBuscarLog) {
+      try {
+        const logs = await getLogsAtividades();
+        let logRow = (logs || []).find((l: any) => String(l.id) === String(logId));
+        if (!logRow) {
+          const lixeira = await getLixeiraLogsAtividades().catch(() => []);
+          logRow = (lixeira || []).find((l: any) => String(l.id) === String(logId));
         }
+        if (logRow) {
+          let det: any = {};
+          if (typeof logRow.detalhes === "string") {
+            try { det = JSON.parse(logRow.detalhes); } catch { det = {}; }
+          } else if (typeof logRow.detalhes === "object" && logRow.detalhes) {
+            det = logRow.detalhes;
+          }
 
-        if (!contratos && det.contratos) contratos = det.contratos;
-        if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
-        if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
-        if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
-        if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
-        if (!servicoIds && det.servico_ids) servicoIds = det.servico_ids;
+          if (!contratos && det.contratos) contratos = det.contratos;
+          if (!sourceDiretoriaId && det.sourceDiretoriaId) sourceDiretoriaId = det.sourceDiretoriaId;
+          if (!targetDiretoriaIds && det.targetDiretoriaIds) targetDiretoriaIds = det.targetDiretoriaIds;
+          if (!origemSigla && (det.origemSigla || det.sourceDiretoriaSigla)) origemSigla = det.origemSigla || det.sourceDiretoriaSigla;
+          if (det.incluirCustoFinanceiro !== undefined) incluirCustoFinanceiro = det.incluirCustoFinanceiro;
+          if (!servicoIds && det.servico_ids) servicoIds = det.servico_ids;
+          if (logServicosOrigemInfo.length === 0 && Array.isArray(det.servicos_origem_info)) {
+            logServicosOrigemInfo = det.servicos_origem_info;
+          }
+        }
+      } catch (e) {
+        console.warn("Erro ao buscar log original de serviços:", e);
       }
-    } catch (e) {
-      console.warn("Erro ao buscar log original de serviços:", e);
     }
   }
 
-  const todasDiretorias = await getDiretorias();
+  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
+    ? targetDiretoriaIds
+    : [];
+
+  const [todasDiretorias, todasGerencias] = await Promise.all([
+    getDiretorias(),
+    getTodasGerencias(),
+  ]);
+
   if (!sourceDiretoriaId && origemSigla) {
     const dFound = (todasDiretorias || []).find((d: any) =>
       String(d.sigla).toUpperCase() === String(origemSigla).toUpperCase()
@@ -5823,7 +6328,6 @@ export async function desfazerTransferenciaServicos(params: {
   );
   const finalSourceDirId = dirOrigemObj?.id ? String(dirOrigemObj.id) : String(sourceDiretoriaId || "");
 
-  const todasGerencias = await getTodasGerencias();
   const gersOrigem = (todasGerencias || []).filter((g: any) =>
     String(g.diretoria_id) === String(finalSourceDirId) ||
     (dirOrigemObj?.id && String(g.diretoria_id) === String(dirOrigemObj.id))
@@ -5833,39 +6337,55 @@ export async function desfazerTransferenciaServicos(params: {
   let totalRestaurados = 0;
   const idsParaReverterSet = new Set<string>();
 
-  // 1. Se recebemos servicoIds explícitos no log ou parâmetros
+  // 1. Se recebemos servicoIds explícitos no log ou parâmetros:
+  // Usa ESTRITAMENTE esses IDs para não varrer contratos alheios!
   if (servicoIds && servicoIds.length > 0) {
     servicoIds.forEach(id => idsParaReverterSet.add(String(id)));
   }
 
-  // 2. Se não temos servicoIds ou para complementar, busca nas diretorias de destino
-  const targetDirIds = (targetDiretoriaIds && targetDiretoriaIds.length > 0)
-    ? targetDiretoriaIds
-    : [];
+  // 2. Se NÃO temos servicoIds (somente em logs legados antigos):
+  // Faz busca cuidadosa no destino exigindo a tag explícita de transferência
+  if (idsParaReverterSet.size === 0) {
+    const contratosSet = new Set((contratos || []).map(c => String(c).trim().toLowerCase()));
 
-  const contratosSet = new Set((contratos || []).map(c => String(c).trim().toLowerCase()));
-
-  if (idsParaReverterSet.size === 0 && targetDirIds.length > 0) {
-    for (const tDirId of targetDirIds) {
-      try {
-        const { data: servsDest } = await supabase
-          .from("servicos")
-          .select("id, contrato, observacao")
-          .eq("diretoria_id", tDirId);
-
-        (servsDest || []).forEach((s: any) => {
+    if (gs.isGoogleSheetsActive() && targetDirIds.length > 0) {
+      const destLists = await Promise.all(
+        targetDirIds.map(tDirId => gs.gsGetServicos({ diretoria_id: tDirId }).catch(() => []))
+      );
+      destLists.forEach((destServs: any[]) => {
+        (destServs || []).forEach((s: any) => {
           const sContrato = String(s.contrato || "").trim().toLowerCase();
           const sObs = String(s.observacao || "");
           const matchContrato = sContrato && contratosSet.has(sContrato);
           const matchObs = sObs.includes("[Transferido da Diretoria") ||
             (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
-
-          if (matchContrato || matchObs) {
+          if (matchObs && matchContrato) {
             idsParaReverterSet.add(String(s.id));
           }
         });
-      } catch (e) {
-        console.warn("Aviso ao buscar servicos do destino no Supabase:", e);
+      });
+    } else if (targetDirIds.length > 0) {
+      for (const tDirId of targetDirIds) {
+        try {
+          const { data: servsDest } = await supabase
+            .from("servicos")
+            .select("id, contrato, observacao")
+            .eq("diretoria_id", tDirId);
+
+          (servsDest || []).forEach((s: any) => {
+            const sContrato = String(s.contrato || "").trim().toLowerCase();
+            const sObs = String(s.observacao || "");
+            const matchContrato = sContrato && contratosSet.has(sContrato);
+            const matchObs = sObs.includes("[Transferido da Diretoria") ||
+              (origemSigla ? sObs.includes(`[Transferido da Diretoria ${origemSigla}]`) : false);
+
+            if (matchObs && matchContrato) {
+              idsParaReverterSet.add(String(s.id));
+            }
+          });
+        } catch (e) {
+          console.warn("Aviso ao buscar servicos do destino no Supabase:", e);
+        }
       }
     }
   }
@@ -5874,71 +6394,151 @@ export async function desfazerTransferenciaServicos(params: {
 
   // SUPORTE AO GOOGLE SHEETS
   if (gs.isGoogleSheetsActive()) {
-    try {
-      let idsSheets = idsParaReverter;
+    const ops: Promise<any>[] = [];
 
-      if (idsSheets.length === 0 && targetDirIds.length > 0) {
-        for (const tDirId of targetDirIds) {
-          try {
-            const destServs = await gs.gsGetServicos({ diretoria_id: tDirId });
-            (destServs || []).forEach((s: any) => {
-              const sContrato = String(s.contrato || "").trim().toLowerCase();
-              const sObs = String(s.observacao || "");
-              const matchContrato = sContrato && contratosSet.has(sContrato);
-              const matchObs = sObs.includes("[Transferido da Diretoria");
-              if (matchContrato || matchObs) {
-                idsParaReverterSet.add(String(s.id));
-              }
-            });
-          } catch (e) {
-            console.warn("Aviso ao buscar servicos no Sheets por diretoria:", e);
-          }
+    if (idsParaReverter.length > 0) {
+      if (incluirCustoFinanceiro) {
+        const now = new Date().toISOString();
+        if (logServicosOrigemInfo && logServicosOrigemInfo.length > 0) {
+          const infoMap = new Map(logServicosOrigemInfo.map((i: any) => [String(i.id), i]));
+          const bulkUpdates = idsParaReverter.map((sId: string) => {
+            const info = infoMap.get(String(sId));
+            return {
+              id: sId,
+              gerencia_id: info?.gerencia_id || gerenciaOrigemId,
+              diretoria_id: info?.diretoria_id || finalSourceDirId,
+              status: info?.status || "aprovado",
+              updated_at: now,
+            };
+          });
+          ops.push(gs.gsUpdateServicosBulkData(bulkUpdates));
+        } else {
+          const bulkUpdates = idsParaReverter.map((sId: string) => ({
+            id: sId,
+            gerencia_id: gerenciaOrigemId,
+            diretoria_id: finalSourceDirId,
+            status: "aprovado",
+            updated_at: now,
+          }));
+          ops.push(gs.gsUpdateServicosBulkData(bulkUpdates));
         }
-        idsSheets = Array.from(idsParaReverterSet).filter(Boolean);
+      } else {
+        ops.push(gs.gsDeleteServicosBulk(idsParaReverter));
       }
+      totalRestaurados = idsParaReverter.length;
+    }
 
-      if (idsSheets.length > 0) {
-        for (let i = 0; i < idsSheets.length; i += 100) {
-          const chunk = idsSheets.slice(i, i + 100);
-          if (incluirCustoFinanceiro) {
-            await gs.gsTransferirServicosParaGerenciaBulk(chunk, gerenciaOrigemId, finalSourceDirId);
-            await gs.gsUpdateServicoStatusBulk(chunk, "rascunho");
-          } else {
-            for (const sId of chunk) {
-              await gs.gsDeleteServico(sId).catch(() => {});
+    if (logId) {
+      ops.push(
+        deleteLogAtividade(logId).catch((e) => {
+          console.warn("Aviso ao marcar log original de serviços como excluído:", e);
+        })
+      );
+    }
+
+    ops.push(
+      registrarLogAtividade("DESFAZER", "servicos", logId || "manual", {
+        acao: "desfazer_transferencia_servicos",
+        log_original_id: logId,
+        contratos,
+        servico_ids: idsParaReverter,
+        sourceDiretoriaId: finalSourceDirId,
+        targetDiretoriaIds,
+        count: totalRestaurados,
+      }).catch((e) => {
+        console.warn("Erro ao registrar log de desfazer servicos:", e);
+      })
+    );
+
+    await Promise.all(ops);
+
+    if (idsParaReverter.length > 0) {
+      void (async () => {
+        try {
+          const allLogs = await getLogsAtividades();
+          const idsSet = new Set(idsParaReverter.map(String));
+          const companionIds: string[] = [];
+          for (const l of (allLogs || [])) {
+            if (String(l.id) === String(logId)) continue;
+            if (l.acao === "TRANSFERIR" && !l.is_deleted && !l.deleted_at) {
+              if (l.registro_id && idsSet.has(String(l.registro_id))) {
+                companionIds.push(String(l.id));
+              } else {
+                let d: any = {};
+                try {
+                  d = typeof l.detalhes === "string" ? JSON.parse(l.detalhes) : (l.detalhes || {});
+                } catch {
+                  d = {};
+                }
+                if (Array.isArray(d.servico_ids) && d.servico_ids.some((sId: any) => idsSet.has(String(sId)))) {
+                  companionIds.push(String(l.id));
+                }
+              }
             }
           }
+          if (companionIds.length > 0) {
+            await deleteLogsAtividadeBulk(companionIds).catch(() => {});
+          }
+        } catch {
+          // ignore background cleanup error
         }
-        totalRestaurados = Math.max(totalRestaurados, idsSheets.length);
-      }
-    } catch (e) {
-      console.warn("Aviso ao desfazer servicos no Google Sheets:", e);
+      })();
     }
+
+    return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
   }
 
   // SUPORTE AO SUPABASE
   if (idsParaReverter.length > 0) {
-    for (let i = 0; i < idsParaReverter.length; i += 100) {
-      const chunk = idsParaReverter.slice(i, i + 100);
-      try {
-        if (incluirCustoFinanceiro) {
-          await supabase
-            .from("servicos")
-            .update({
-              diretoria_id: finalSourceDirId,
-              gerencia_id: gerenciaOrigemId || undefined,
-              status: "rascunho",
-              updated_at: new Date().toISOString(),
-            })
-            .in("id", chunk);
-        } else {
+    if (incluirCustoFinanceiro) {
+      if (logServicosOrigemInfo && logServicosOrigemInfo.length > 0) {
+        const infoMap = new Map(logServicosOrigemInfo.map((i: any) => [String(i.id), i]));
+        await Promise.all(
+          idsParaReverter.map(async (sId) => {
+            const info = infoMap.get(String(sId));
+            try {
+              await supabase
+                .from("servicos")
+                .update({
+                  diretoria_id: info?.diretoria_id || finalSourceDirId,
+                  gerencia_id: info?.gerencia_id || gerenciaOrigemId,
+                  status: info?.status || "aprovado",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", sId);
+            } catch (e) {
+              console.warn("Aviso ao restaurar servico individual no Supabase:", e);
+            }
+          })
+        );
+      } else {
+        for (let i = 0; i < idsParaReverter.length; i += 100) {
+          const chunk = idsParaReverter.slice(i, i + 100);
+          try {
+            await supabase
+              .from("servicos")
+              .update({
+                diretoria_id: finalSourceDirId,
+                status: "aprovado",
+                updated_at: new Date().toISOString(),
+              })
+              .in("id", chunk);
+          } catch (errSupabase) {
+            console.warn("Erro ao atualizar lote de servicos no Supabase:", errSupabase);
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < idsParaReverter.length; i += 100) {
+        const chunk = idsParaReverter.slice(i, i + 100);
+        try {
           await supabase
             .from("servicos")
             .delete()
             .in("id", chunk);
+        } catch (errSupabase) {
+          console.warn("Erro ao deletar lote de servicos sem custo no Supabase:", errSupabase);
         }
-      } catch (errSupabase) {
-        console.warn("Erro ao atualizar lote de servicos no Supabase:", errSupabase);
       }
     }
     totalRestaurados = Math.max(totalRestaurados, idsParaReverter.length);
@@ -5960,18 +6560,20 @@ export async function desfazerTransferenciaServicos(params: {
     }
   }
 
-  try {
-    await registrarLogAtividade("DESFAZER", "servicos", logId || "manual", {
+  await Promise.all([
+    logId
+      ? deleteLogAtividade(logId).catch((e) => console.warn("Aviso ao marcar log original de serviços como excluído:", e))
+      : Promise.resolve(),
+    registrarLogAtividade("DESFAZER", "servicos", logId || "manual", {
       acao: "desfazer_transferencia_servicos",
       log_original_id: logId,
       contratos,
+      servico_ids: idsParaReverter,
       sourceDiretoriaId: finalSourceDirId,
       targetDiretoriaIds,
       count: totalRestaurados,
-    });
-  } catch (e) {
-    console.warn("Erro ao registrar log de desfazer servicos:", e);
-  }
+    }).catch((e) => console.warn("Erro ao registrar log de desfazer servicos:", e)),
+  ]);
 
   return { count: totalRestaurados, restoredToDiretoria: finalSourceDirId };
 }

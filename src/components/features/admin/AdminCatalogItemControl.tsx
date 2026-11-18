@@ -1,10 +1,9 @@
 import { useState, useMemo } from "react";
-import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2, Undo2 } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Search, FileDown, FileSpreadsheet, ArrowRightLeft, Loader2 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { DesfazerTransferenciaDialog } from "@/components/common/DesfazerTransferenciaDialog.tsx";
 
 import { Button } from "@/components/ui/button.tsx";
 import { Card } from "@/components/ui/card.tsx";
@@ -167,7 +166,6 @@ export function AdminCatalogItemControl() {
   });
 
   const [filtroCategoriaAdminTransfer, setFiltroCategoriaAdminTransfer] = useState("");
-  const [desfazerTransferOpen, setDesfazerTransferOpen] = useState(false);
 
   // Deduplica itens por código único para proteger contra duplicações na planilha/banco
   const uniqueItens = useMemo(() => {
@@ -228,26 +226,6 @@ export function AdminCatalogItemControl() {
     const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === transferDialog.targetDiretoriaId);
     return gers.length > 0 ? gers : (todasGerencias as any[]);
   }, [transferDialog.targetDiretoriaId, todasGerencias]);
-
-  const handleOpenCategoriaTransfer = () => {
-    const firstDir = (diretorias as any[])[0]?.id || "";
-    const secondDir = (diretorias as any[])[1]?.id || firstDir;
-    const gers = (todasGerencias as any[]).filter(g => g.diretoria_id === secondDir);
-    setFiltroCategoriaAdminTransfer("");
-    setTransferDialog({
-      open: true,
-      modo: "categoria",
-      selectedCategoria: categoriasCatalogo[0] || "",
-      selectedCategorias: categoriasCatalogo[0] ? [categoriasCatalogo[0]] : [],
-      item: null,
-      sourceDiretoriaId: firstDir,
-      targetDiretoriaId: secondDir,
-      targetDiretoriaIds: secondDir ? [secondDir] : [],
-      targetGerenciaId: gers[0]?.id || "",
-      incluirCustoFinanceiro: true,
-      loading: false,
-    });
-  };
 
   const handleOpenBulkTransfer = () => {
     const firstDir = (diretorias as any[])[0]?.id || "";
@@ -729,24 +707,6 @@ export function AdminCatalogItemControl() {
                 disabled={filteredItens.length === 0}
               >
                 <FileDown className="h-4 w-4" />PDF
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
-                onClick={handleOpenCategoriaTransfer}
-                title="Transferir uma Categoria inteira para uma Diretoria"
-              >
-                <ArrowRightLeft className="h-4 w-4" />Transferir Categoria
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40"
-                onClick={() => setDesfazerTransferOpen(true)}
-                title="Desfazer envio/transferência de categorias ou itens"
-              >
-                <Undo2 className="h-4 w-4" />Desfazer Transferência
               </Button>
             </div>
             {selectedIds.length > 0 && (
@@ -1647,17 +1607,6 @@ export function AdminCatalogItemControl() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <DesfazerTransferenciaDialog
-        open={desfazerTransferOpen}
-        onOpenChange={setDesfazerTransferOpen}
-        tipo="aquisicao"
-        onSuccess={() => {
-          refetchItens();
-          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-          queryClient.invalidateQueries({ queryKey: ["itens_catalogo"] });
-        }}
-      />
     </div>
   );
 }
