@@ -2106,29 +2106,50 @@ export async function updateServicoCatalogoAdmin(
     diretoria_id: string;
     gerencia_id: string;
     item?: number;
+    ativo?: boolean;
+    _old_item?: number;
   }
 ): Promise<unknown> {
+  const oldItemNum = updates._old_item !== undefined ? Number(updates._old_item) : undefined;
+  const cleanUpdates: Record<string, any> = { ...updates };
+  delete cleanUpdates.id;
+  delete cleanUpdates._old_item;
+
   if (gs.isGoogleSheetsActive()) {
-    const updated = await gs.gsUpdateServicoCatalogo(servicoId, updates);
+    const updated = await gs.gsUpdateServicoCatalogo(servicoId, cleanUpdates);
 
     // Sincroniza também as linhas correspondentes na tabela 'servicos' para que os painéis de gerência e diretoria acompanhem
     try {
       const itemNum = updates.item !== undefined ? Number(updates.item) : undefined;
-      if (itemNum) {
+      if (itemNum || oldItemNum || servicoId) {
         const rows = await gs.gsGetServicos();
-        const matching = (rows || []).filter((r: any) => Number(r.item) === itemNum || r.item_id === servicoId);
+        const matching = (rows || []).filter(
+          (r: any) =>
+            (itemNum && Number(r.item) === itemNum) ||
+            (oldItemNum && Number(r.item) === oldItemNum) ||
+            String(r.servico_catalogo_id || "") === String(servicoId) ||
+            String(r.item_id || "") === String(servicoId)
+        );
         if (matching.length > 0) {
+          const resolvedGerSigla = updates.gerencia_id
+            ? memoryGerenciasById.get(String(updates.gerencia_id).trim().toLowerCase())
+            : undefined;
           const bulkUpdates = matching.map((r: any) => ({
             id: r.id,
+            ...(itemNum !== undefined && !isNaN(itemNum) ? { item: itemNum } : {}),
             tipo_contratacao: updates.tipo_contratacao !== undefined ? updates.tipo_contratacao : r.tipo_contratacao,
             objeto: updates.objeto !== undefined ? updates.objeto : r.objeto,
             justificativa: (r.status === "rascunho" && updates.justificativa) ? updates.justificativa : r.justificativa,
             grau_prioridade: updates.grau_prioridade !== undefined ? updates.grau_prioridade : r.grau_prioridade,
             estimativa_valor: updates.estimativa_valor !== undefined ? updates.estimativa_valor : r.estimativa_valor,
+            dotacao_orcamentaria: updates.estimativa_valor !== undefined ? updates.estimativa_valor : r.dotacao_orcamentaria,
             contrato: updates.contrato !== undefined ? updates.contrato : r.contrato,
             contratada: updates.contratada !== undefined ? updates.contratada : r.contratada,
             vinculacao: updates.vinculacao !== undefined ? updates.vinculacao : r.vinculacao,
             dependencia_descricao: updates.dependencia_descricao !== undefined ? updates.dependencia_descricao : r.dependencia_descricao,
+            diretoria_id: updates.diretoria_id !== undefined && updates.diretoria_id !== "" ? updates.diretoria_id : r.diretoria_id,
+            gerencia_id: updates.gerencia_id !== undefined && updates.gerencia_id !== "" ? updates.gerencia_id : r.gerencia_id,
+            ...(resolvedGerSigla ? { unidade_demandante: resolvedGerSigla } : {}),
           }));
           await gs.gsUpdateServicosBulkData(bulkUpdates);
         }
@@ -2146,7 +2167,7 @@ export async function updateServicoCatalogoAdmin(
       }
     }
 
-    await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, updates);
+    await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, cleanUpdates);
     return { success: true, data: updated };
   }
 
@@ -2162,7 +2183,7 @@ export async function updateServicoCatalogoAdmin(
       body: {
         accessCode: adminAccessCode,
         servicoId,
-        updates,
+        updates: cleanUpdates,
       },
     }
   );
@@ -2179,7 +2200,7 @@ export async function updateServicoCatalogoAdmin(
     }
   }
 
-  await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, { acao: "updateServicoCatalogoAdmin", updates });
+  await registrarLogAtividade("EDITAR", "servicos_catalogo", servicoId, { acao: "updateServicoCatalogoAdmin", updates: cleanUpdates });
 
   return data;
 }
@@ -2251,15 +2272,10 @@ export async function updateServicosCatalogoBulkAdmin(
     justificativa?: string | null;
     dependencia_descricao?: string | null;
     ativo?: boolean;
+    _old_item?: number;
   }>
 ): Promise<unknown> {
   if (!items || items.length === 0) return { success: true };
-
-  items.forEach(s => {
-    if (!s.id && s.item) {
-      s.id = String(s.item);
-    }
-  });
 
   if (gs.isGoogleSheetsActive()) {
     // Para atualização individual ou pequenos lotes (até 20 itens),
@@ -2275,7 +2291,12 @@ export async function updateServicosCatalogoBulkAdmin(
     }
 
     try {
-      const res = await gs.gsUpdateServicosCatalogoBulk(items);
+      const cleanItems = items.map(s => {
+        const copy: Record<string, any> = { ...s };
+        delete copy._old_item;
+        return copy;
+      });
+      const res = await gs.gsUpdateServicosCatalogoBulk(cleanItems);
       await registrarLogAtividadeBulk("EDITAR", "servicos_catalogo", items.map(i => i.id || String(i.item)), { acao: "updateServicosCatalogoBulkAdmin", count: items.length });
       return res;
     } catch (bulkErr) {

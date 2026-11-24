@@ -90,11 +90,31 @@ export function AdminImportCsv() {
   ];
 
   const servicosHeaders = [
-    "item", "contrato", "contratada", "objeto", "tipo", "prioridade", "vinculação", "diretoria", "status"
+    "Item",
+    "Contrato",
+    "Contratada",
+    "Objeto",
+    "Tipo",
+    "Prioridade",
+    "Estimativa Valor",
+    "Vinculação",
+    "Diretoria",
+    "Gerência",
+    "Status"
   ];
 
   const servicosNovosHeaders = [
-    "item", "contrato", "contratada", "objeto", "tipo", "prioridade", "vinculação", "diretoria", "status"
+    "Item",
+    "Contrato",
+    "Contratada",
+    "Objeto",
+    "Tipo",
+    "Prioridade",
+    "Estimativa Valor",
+    "Vinculação",
+    "Diretoria",
+    "Gerência",
+    "Status"
   ];
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -313,13 +333,13 @@ export function AdminImportCsv() {
 
           if (rawItem === undefined || rawItem === null || String(rawItem).trim() === "") {
             if (!rawId) {
-              errors.push({ row: rowNum, col: "item", message: "Item numérico do serviço é obrigatório" });
+              errors.push({ row: rowNum, col: "Item", message: "Item numérico do serviço é obrigatório" });
               hasError = true;
             }
           } else {
-            const num = parseNumber(rawItem, "item", rowNum);
+            const num = parseNumber(rawItem, "Item", rowNum);
             if (num <= 0 && !rawId) {
-              errors.push({ row: rowNum, col: "item", message: "Item numérico inválido" });
+              errors.push({ row: rowNum, col: "Item", message: "Item numérico inválido" });
               hasError = true;
             } else {
               processedRow.item = num;
@@ -336,21 +356,23 @@ export function AdminImportCsv() {
             processedRow.tipo = String(rawTipo).trim();
           }
 
-          const rawContrato = findVal(["contrato", "num_contrato", "numero_contrato"]);
+          const rawContrato = findVal(["contrato", "num_contrato", "numero_contrato", "numero_termo"]);
           if (rawContrato !== undefined) {
-            processedRow.contrato = String(rawContrato).trim() || null;
+            const cleanContrato = String(rawContrato).trim();
+            processedRow.contrato = (cleanContrato && cleanContrato !== "-") ? cleanContrato : null;
           }
 
           const rawContratada = findVal(["contratada", "empresa", "fornecedor"]);
           if (rawContratada !== undefined) {
-            processedRow.contratada = String(rawContratada).trim() || null;
+            const cleanContratada = String(rawContratada).trim();
+            processedRow.contratada = (cleanContratada && cleanContratada !== "-") ? cleanContratada : null;
           }
 
           const rawDir = findVal(["diretoria", "sigla_diretoria", "dir"]);
-          if (rawDir && String(rawDir).trim() !== "") {
+          if (rawDir !== undefined && String(rawDir).trim() !== "" && String(rawDir).trim() !== "-") {
             const diretoriaSigla = String(rawDir).toUpperCase().trim();
             if (!diretoriasMap[diretoriaSigla]) {
-              errors.push({ row: rowNum, col: "diretoria", message: `Diretoria '${diretoriaSigla}' não encontrada` });
+              errors.push({ row: rowNum, col: "Diretoria", message: `Diretoria '${diretoriaSigla}' não encontrada` });
               hasError = true;
             } else {
               processedRow._diretoria_id = diretoriasMap[diretoriaSigla];
@@ -358,12 +380,44 @@ export function AdminImportCsv() {
             }
           }
 
+          const rawGer = findVal(["gerencia", "sigla_gerencia", "ger", "unidade_demandante"]);
+          if (rawGer !== undefined && String(rawGer).trim() !== "" && String(rawGer).trim() !== "-") {
+            const gerSigla = String(rawGer).toUpperCase().trim();
+            const matchedGer =
+              gerenciasList.find(
+                (g) =>
+                  g.sigla?.toUpperCase().trim() === gerSigla &&
+                  (!processedRow._diretoria_id || String(g.diretoria_id) === String(processedRow._diretoria_id))
+              ) ||
+              gerenciasList.find((g) => g.sigla?.toUpperCase().trim() === gerSigla) ||
+              gerenciasList.find((g) => String(g.id) === String(rawGer).trim()) ||
+              (diretoriasMap[gerSigla]
+                ? gerenciasList.find((g) => String(g.diretoria_id) === String(diretoriasMap[gerSigla]))
+                : undefined);
+
+            if (!matchedGer) {
+              errors.push({ row: rowNum, col: "Gerência", message: `Gerência '${gerSigla}' não encontrada` });
+              hasError = true;
+            } else {
+              processedRow._gerencia_id = matchedGer.id;
+              processedRow.gerencia_id = matchedGer.id;
+              processedRow._gerencia_sigla = matchedGer.sigla;
+              if (!processedRow._diretoria_id && matchedGer.diretoria_id) {
+                processedRow._diretoria_id = matchedGer.diretoria_id;
+                processedRow.diretoria_id = matchedGer.diretoria_id;
+              }
+            }
+          }
+
           const prioridadeVal = findVal(["prioridade", "grau_prioridade", "grau_de_prioridade"])?.toString().trim();
-          if (prioridadeVal) {
-            const normPrio = prioridadeVal.charAt(0).toUpperCase() + prioridadeVal.slice(1).toLowerCase();
-            const mappedPrio = normPrio === "Medio" ? "Médio" : normPrio;
-            if (!["Baixo", "Médio", "Alto"].includes(mappedPrio)) {
-              errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
+          if (prioridadeVal && prioridadeVal !== "-") {
+            const lowerPrio = prioridadeVal.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            let mappedPrio = "";
+            if (lowerPrio === "baixo" || lowerPrio === "baixa") mappedPrio = "Baixo";
+            else if (lowerPrio === "medio" || lowerPrio === "media") mappedPrio = "Médio";
+            else if (lowerPrio === "alto" || lowerPrio === "alta") mappedPrio = "Alto";
+            if (!mappedPrio) {
+              errors.push({ row: rowNum, col: "Prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
               hasError = true;
             } else {
               processedRow.prioridade = mappedPrio;
@@ -371,23 +425,24 @@ export function AdminImportCsv() {
           }
 
           const rawVinc = findVal(["vinculacao", "vinculacao_pac", "vinculado"]);
-          if (rawVinc !== undefined && String(rawVinc).trim() !== "") {
-            const normVinc = String(rawVinc).trim().toLowerCase();
+          if (rawVinc !== undefined && String(rawVinc).trim() !== "" && String(rawVinc).trim() !== "-") {
+            const normVinc = String(rawVinc).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             const mappedVinc = (normVinc === "sim" || normVinc === "s" || normVinc === "true") ? "Sim" : "Não";
             processedRow.vinculacao = mappedVinc;
             processedRow.vinculação = mappedVinc;
           }
 
           const rawStatus = findVal(["status", "ativo", "situacao"]);
-          if (rawStatus !== undefined && String(rawStatus).trim() !== "") {
+          if (rawStatus !== undefined && String(rawStatus).trim() !== "" && String(rawStatus).trim() !== "-") {
             const strStatus = String(rawStatus).toLowerCase().trim();
-            processedRow._ativo = strStatus !== "inativo" && strStatus !== "false" && strStatus !== "desativado";
+            processedRow._ativo = !["inativo", "false", "desativado", "0", "nao", "não"].includes(strStatus);
             processedRow.ativo = processedRow._ativo;
+            processedRow.status = processedRow._ativo ? "Ativo" : "Inativo";
           }
 
-          const rawEstimativa = findVal(["estimativa_valor", "valor_estimado", "valor", "estimativa"]);
-          if (rawEstimativa !== undefined && String(rawEstimativa).trim() !== "") {
-            processedRow.estimativa_valor = parseNumber(rawEstimativa, "estimativa_valor", rowNum);
+          const rawEstimativa = findVal(["estimativa_valor", "valor_estimado", "valor", "estimativa", "estimativa_de_valor", "dotacao_orcamentaria"]);
+          if (rawEstimativa !== undefined && String(rawEstimativa).trim() !== "" && String(rawEstimativa).trim() !== "-") {
+            processedRow.estimativa_valor = parseNumber(rawEstimativa, "Estimativa Valor", rowNum);
           }
 
           const rawJust = findVal(["justificativa", "motivo"]);
@@ -407,73 +462,190 @@ export function AdminImportCsv() {
     }
 
     // ========================================================
-    // CASO 3: OPERAÇÃO CREATE (Lógica original 100% preservada)
+    // CASO 3: OPERAÇÃO CREATE
     // ========================================================
-    const requiredHeaders = 
-      type === "aquisicao" 
-        ? aquisicaoHeaders 
-        : type === "servicos_novos"
-        ? ["item", "objeto", "prioridade", "vinculação", "diretoria"]
-        : servicosHeaders;
-    
-    const missingHeaders = requiredHeaders.filter(h => !normalizedHeaders.includes(h));
-    if (missingHeaders.length > 0) {
-      errors.push({
-        row: 0,
-        col: "Cabeçalho",
-        message: `Cabeçalhos ausentes: ${missingHeaders.join(", ")}`
-      });
-      setData({ headers, rows: [], errors });
-      setIsProcessing(false);
-      return;
+    const normUploadedHeaders = headers.map(normalizeHeader);
+    if (type === "aquisicao") {
+      const missingHeaders = aquisicaoHeaders.filter(h => !normUploadedHeaders.includes(normalizeHeader(h)));
+      if (missingHeaders.length > 0) {
+        errors.push({
+          row: 0,
+          col: "Cabeçalho",
+          message: `Cabeçalhos ausentes: ${missingHeaders.join(", ")}`
+        });
+        setData({ headers, rows: [], errors });
+        setIsProcessing(false);
+        return;
+      }
+    } else {
+      const requiredServiceCols = [
+        { label: "Item", keys: ["item", "n_item", "numero_item", "num_item"] },
+        { label: "Objeto", keys: ["objeto", "descricao", "servico"] },
+        { label: "Diretoria", keys: ["diretoria", "sigla_diretoria", "dir", "gerencia", "sigla_gerencia"] },
+      ];
+      const missingLabels = requiredServiceCols
+        .filter(col => !col.keys.some(k => normUploadedHeaders.includes(k)))
+        .map(col => col.label);
+
+      if (missingLabels.length > 0) {
+        errors.push({
+          row: 0,
+          col: "Cabeçalho",
+          message: `Cabeçalhos obrigatórios ausentes: ${missingLabels.join(", ")}`
+        });
+        setData({ headers, rows: [], errors });
+        setIsProcessing(false);
+        return;
+      }
     }
 
     rawRows.forEach((row: any, index: number) => {
       const rowNum = index + 2; 
       let hasError = false;
-      const processedRow = { ...row };
+      const processedRow: any = { ...row };
+      const rowKeys = Object.keys(row);
 
-      if (type === "servicos" || type === "servicos_novos") {
-        const diretoriaSigla = row.diretoria?.toString().toUpperCase().trim();
-        if (!diretoriaSigla) {
-          errors.push({ row: rowNum, col: "diretoria", message: "Sigla da diretoria não informada" });
-          hasError = true;
-        } else if (!diretoriasMap[diretoriaSigla]) {
-          errors.push({ row: rowNum, col: "diretoria", message: `Diretoria '${diretoriaSigla}' não encontrada` });
+      const findVal = (possibleKeys: string[]) => {
+        for (const key of rowKeys) {
+          const normK = normalizeHeader(key);
+          if (possibleKeys.includes(normK)) {
+            return row[key];
+          }
+        }
+        return undefined;
+      };
+
+      if (type === "aquisicao") {
+        const rawCodigo = findVal(["codigo", "cod", "codigo_do_item", "cod_item"]);
+        const rawDesc = findVal(["descricao", "descricao_do_item", "material", "objeto"]);
+        const rawCat = findVal(["categoria", "grupo", "classe"]);
+        const rawUn = findVal(["unidade", "un", "und"]);
+        const rawValUnit = findVal(["valor_unitario", "valorunitario", "valor", "preco"]);
+
+        if (rawCodigo !== undefined) processedRow.codigo = parseNumber(rawCodigo, "codigo", rowNum);
+        if (rawDesc !== undefined) processedRow.descricao = String(rawDesc).trim();
+        if (rawCat !== undefined) processedRow.categoria = String(rawCat).trim();
+        if (rawUn !== undefined) processedRow.unidade = String(rawUn).trim();
+        if (rawValUnit !== undefined) processedRow.valor_unitario = parseNumber(rawValUnit, "valor_unitario", rowNum);
+      } else if (type === "servicos" || type === "servicos_novos") {
+        const rawItem = findVal(["item", "n_item", "numero_item", "num_item", "numero", "cod"]);
+        if (rawItem === undefined || rawItem === null || String(rawItem).trim() === "") {
+          errors.push({ row: rowNum, col: "Item", message: "Item numérico obrigatório" });
           hasError = true;
         } else {
-          processedRow._diretoria_id = diretoriasMap[diretoriaSigla];
+          processedRow.item = parseNumber(rawItem, "Item", rowNum);
         }
 
-        if (!row.item) { errors.push({ row: rowNum, col: "item", message: "Item numérico obrigatório" }); hasError = true; }
-        
-        processedRow.item = parseNumber(row.item, "item", rowNum);
-        
-        const prioridadeVal = row.prioridade?.toString().trim();
-        if (prioridadeVal && !["Baixo", "Médio", "Alto"].includes(prioridadeVal)) {
-          errors.push({ row: rowNum, col: "prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
+        const rawContrato = findVal(["contrato", "num_contrato", "numero_contrato", "numero_termo"]);
+        const cleanContrato = rawContrato !== undefined ? String(rawContrato).trim() : "";
+        processedRow.contrato = (cleanContrato && cleanContrato !== "-") ? cleanContrato : null;
+
+        const rawContratada = findVal(["contratada", "empresa", "fornecedor"]);
+        const cleanContratada = rawContratada !== undefined ? String(rawContratada).trim() : "";
+        processedRow.contratada = (cleanContratada && cleanContratada !== "-") ? cleanContratada : null;
+
+        const rawObjeto = findVal(["objeto", "descricao", "servico", "especificacao"]);
+        if (!rawObjeto || !String(rawObjeto).trim()) {
+          errors.push({ row: rowNum, col: "Objeto", message: "Objeto do serviço é obrigatório" });
           hasError = true;
-        } else if (!prioridadeVal) {
+        } else {
+          processedRow.objeto = String(rawObjeto).trim();
+        }
+
+        const rawTipo = findVal(["tipo", "tipo_contratacao", "tipo_de_contratacao"]);
+        const cleanTipo = rawTipo !== undefined ? String(rawTipo).trim() : "";
+        processedRow.tipo = (cleanTipo && cleanTipo !== "-") ? cleanTipo : (type === "servicos_novos" ? "Novo" : "Renovação");
+
+        const prioridadeVal = findVal(["prioridade", "grau_prioridade", "grau_de_prioridade"])?.toString().trim();
+        if (prioridadeVal && prioridadeVal !== "-") {
+          const lowerPrio = prioridadeVal.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          let mappedPrio = "";
+          if (lowerPrio === "baixo" || lowerPrio === "baixa") mappedPrio = "Baixo";
+          else if (lowerPrio === "medio" || lowerPrio === "media") mappedPrio = "Médio";
+          else if (lowerPrio === "alto" || lowerPrio === "alta") mappedPrio = "Alto";
+          if (!mappedPrio) {
+            errors.push({ row: rowNum, col: "Prioridade", message: "Deve ser: Baixo, Médio ou Alto" });
+            hasError = true;
+          } else {
+            processedRow.prioridade = mappedPrio;
+          }
+        } else {
           processedRow.prioridade = "Médio";
         }
 
-        const vinculacaoVal = row.vinculação?.toString().trim() || row.vinculacao?.toString().trim();
-        if (vinculacaoVal && !["Sim", "Não"].includes(vinculacaoVal)) {
-          errors.push({ row: rowNum, col: "vinculação", message: "Deve ser: Sim ou Não" });
-          hasError = true;
-        } else if (!vinculacaoVal) {
+        const rawEstimativa = findVal(["estimativa_valor", "valor_estimado", "valor", "estimativa", "estimativa_de_valor", "dotacao_orcamentaria"]);
+        if (rawEstimativa !== undefined && String(rawEstimativa).trim() !== "" && String(rawEstimativa).trim() !== "-") {
+          processedRow.estimativa_valor = parseNumber(rawEstimativa, "Estimativa Valor", rowNum);
+        } else {
+          processedRow.estimativa_valor = 0;
+        }
+
+        const vinculacaoVal = findVal(["vinculacao", "vinculacao_pac", "vinculado"])?.toString().trim();
+        if (vinculacaoVal && vinculacaoVal !== "-") {
+          const normVinc = vinculacaoVal.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (!["sim", "s", "true", "nao", "n", "false"].includes(normVinc)) {
+            errors.push({ row: rowNum, col: "Vinculação", message: "Deve ser: Sim ou Não" });
+            hasError = true;
+          } else {
+            const mappedVinc = ["sim", "s", "true"].includes(normVinc) ? "Sim" : "Não";
+            processedRow.vinculação = mappedVinc;
+            processedRow.vinculacao = mappedVinc;
+          }
+        } else {
           processedRow.vinculação = "Não";
+          processedRow.vinculacao = "Não";
         }
 
-        if (!row.objeto || !row.objeto.toString().trim()) {
-          errors.push({ row: rowNum, col: "objeto", message: "Objeto do serviço é obrigatório" });
+        const rawDir = findVal(["diretoria", "sigla_diretoria", "dir"]);
+        const diretoriaSigla = rawDir ? String(rawDir).toUpperCase().trim() : "";
+        if (diretoriaSigla && diretoriaSigla !== "-") {
+          if (!diretoriasMap[diretoriaSigla]) {
+            errors.push({ row: rowNum, col: "Diretoria", message: `Diretoria '${diretoriaSigla}' não encontrada` });
+            hasError = true;
+          } else {
+            processedRow._diretoria_id = diretoriasMap[diretoriaSigla];
+            processedRow.diretoria_id = diretoriasMap[diretoriaSigla];
+          }
+        }
+
+        const rawGer = findVal(["gerencia", "sigla_gerencia", "ger", "unidade_demandante"]);
+        if (rawGer !== undefined && String(rawGer).trim() !== "" && String(rawGer).trim() !== "-") {
+          const gerSigla = String(rawGer).toUpperCase().trim();
+          const matchedGer =
+            gerenciasList.find(
+              (g) =>
+                g.sigla?.toUpperCase().trim() === gerSigla &&
+                (!processedRow._diretoria_id || String(g.diretoria_id) === String(processedRow._diretoria_id))
+            ) ||
+            gerenciasList.find((g) => g.sigla?.toUpperCase().trim() === gerSigla) ||
+            gerenciasList.find((g) => String(g.id) === String(rawGer).trim()) ||
+            (diretoriasMap[gerSigla]
+              ? gerenciasList.find((g) => String(g.diretoria_id) === String(diretoriasMap[gerSigla]))
+              : undefined);
+
+          if (!matchedGer) {
+            errors.push({ row: rowNum, col: "Gerência", message: `Gerência '${gerSigla}' não encontrada` });
+            hasError = true;
+          } else {
+            processedRow._gerencia_id = matchedGer.id;
+            processedRow.gerencia_id = matchedGer.id;
+            processedRow._gerencia_sigla = matchedGer.sigla;
+            if (!processedRow._diretoria_id && matchedGer.diretoria_id) {
+              processedRow._diretoria_id = matchedGer.diretoria_id;
+              processedRow.diretoria_id = matchedGer.diretoria_id;
+            }
+          }
+        }
+
+        if (!processedRow._diretoria_id && !hasError) {
+          errors.push({ row: rowNum, col: "Diretoria", message: "Sigla da diretoria não informada" });
           hasError = true;
         }
 
-        processedRow._ativo = row.status?.toString().toLowerCase().trim() !== "inativo";
-        if (type === "servicos_novos") {
-          processedRow.tipo = row.tipo?.toString().trim() || "Novo";
-        }
+        const rawStatus = findVal(["status", "ativo", "situacao"]);
+        const strStatus = rawStatus !== undefined ? String(rawStatus).toLowerCase().trim() : "ativo";
+        processedRow._ativo = !["inativo", "false", "desativado", "0", "nao", "não"].includes(strStatus);
+        processedRow.ativo = processedRow._ativo;
       }
 
       if (!hasError) {
@@ -682,9 +854,12 @@ export function AdminImportCsv() {
 
           await updateItensCatalogoBulkAdmin(payload);
 
-          queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
-          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-          queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] }),
+            queryClient.refetchQueries({ queryKey: ["itens-catalogo"] }),
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+            queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] }),
+          ]);
 
           toast({
             title: "Atualização em massa concluída!",
@@ -699,53 +874,203 @@ export function AdminImportCsv() {
           } catch (e) {
             console.warn("Could not fetch servicos catalog for update mapping:", e);
           }
-          const idMap = new Map<number, string>();
+
+          const byItem = new Map<number, any>();
+          const byId = new Map<string, any>();
+          const byContratoAndObjeto = new Map<string, any>();
+          const byContrato = new Map<string, any[]>();
+          const byObjetoAndContratada = new Map<string, any[]>();
+
           existingServicos.forEach((s: any) => {
             const itNum = parseInt(s.item, 10);
-            if (!isNaN(itNum) && s.id) {
-              idMap.set(itNum, String(s.id));
+            if (!isNaN(itNum)) {
+              byItem.set(itNum, s);
+            }
+            if (s.id) {
+              byId.set(String(s.id).trim().toLowerCase(), s);
+            }
+            const cStr = String(s.contrato || "").trim().toLowerCase();
+            const oStr = String(s.objeto || "").trim().toLowerCase();
+            const ctdStr = String(s.contratada || "").trim().toLowerCase();
+
+            if (cStr && cStr !== "-") {
+              if (oStr) {
+                byContratoAndObjeto.set(`${cStr}||${oStr}`, s);
+              }
+              const arr = byContrato.get(cStr) || [];
+              arr.push(s);
+              byContrato.set(cStr, arr);
+            }
+            if (oStr && ctdStr && ctdStr !== "-") {
+              const key = `${oStr}||${ctdStr}`;
+              const arr = byObjetoAndContratada.get(key) || [];
+              arr.push(s);
+              byObjetoAndContratada.set(key, arr);
             }
           });
 
-          const payload = data.rows.map(row => {
+          const payloadToUpdate: any[] = [];
+          const rowsToInsert: any[] = [];
+
+          data.rows.forEach(row => {
             const itemNum = parseInt(row.item, 10);
-            const s: any = {
-              item: itemNum
-            };
-            const resolvedId = row.id || idMap.get(itemNum) || (itemNum ? String(itemNum) : undefined);
-            if (resolvedId) s.id = String(resolvedId).trim();
+            const rowIdStr = row.id ? String(row.id).trim().toLowerCase() : "";
+            const rowContrato = String(row.contrato || "").trim().toLowerCase();
+            const rowObjeto = String(row.objeto || "").trim().toLowerCase();
+            const rowContratada = String(row.contratada || "").trim().toLowerCase();
 
-            if (row.tipo !== undefined && row.tipo !== "") s.tipo_contratacao = String(row.tipo).trim();
-            else if (isNovos) s.tipo_contratacao = "Novo";
-            if (row.objeto !== undefined && row.objeto !== "") s.objeto = String(row.objeto).trim();
-            if (row.contrato !== undefined) s.contrato = row.contrato ? String(row.contrato).trim() : null;
-            if (row.contratada !== undefined) s.contratada = row.contratada ? String(row.contratada).trim() : null;
-            if (row.prioridade !== undefined && row.prioridade !== "") s.grau_prioridade = String(row.prioridade).trim();
-            if (row.vinculação !== undefined && row.vinculação !== "") s.vinculacao = String(row.vinculação).trim();
-            if (row.vinculacao !== undefined && row.vinculacao !== "") s.vinculacao = String(row.vinculacao).trim();
-            if (row._diretoria_id) s.diretoria_id = row._diretoria_id;
-            else if (row.diretoria_id) s.diretoria_id = row.diretoria_id;
-            if (row.status !== undefined && row.status !== "") {
-              s.ativo = String(row.status).toLowerCase().trim() !== "inativo";
-            } else if (row.ativo !== undefined) {
-              s.ativo = Boolean(row.ativo);
+            let matchedExisting: any =
+              (rowIdStr ? byId.get(rowIdStr) : undefined) ||
+              (!isNaN(itemNum) ? byItem.get(itemNum) : undefined);
+
+            // Fallback caso o usuário tenha alterado o número do Item na planilha de atualização
+            if (!matchedExisting) {
+              if (rowContrato && rowContrato !== "-" && rowObjeto) {
+                matchedExisting = byContratoAndObjeto.get(`${rowContrato}||${rowObjeto}`);
+              }
+              if (!matchedExisting && rowContrato && rowContrato !== "-") {
+                const candidates = byContrato.get(rowContrato) || [];
+                if (candidates.length === 1) {
+                  matchedExisting = candidates[0];
+                }
+              }
+              if (!matchedExisting && rowObjeto && rowContratada && rowContratada !== "-") {
+                const candidates = byObjetoAndContratada.get(`${rowObjeto}||${rowContratada}`) || [];
+                if (candidates.length === 1) {
+                  matchedExisting = candidates[0];
+                }
+              }
             }
-            if (row.estimativa_valor !== undefined && row.estimativa_valor !== "") {
-              s.estimativa_valor = Number(row.estimativa_valor) || 0;
+
+            if (matchedExisting && matchedExisting.id) {
+              const s: any = {
+                id: String(matchedExisting.id).trim(),
+                item: !isNaN(itemNum) && itemNum > 0 ? itemNum : parseInt(matchedExisting.item, 10)
+              };
+              const oldIt = parseInt(matchedExisting.item, 10);
+              if (!isNaN(oldIt) && oldIt !== s.item) {
+                s._old_item = oldIt;
+              }
+
+              if (row.tipo !== undefined && row.tipo !== "") s.tipo_contratacao = String(row.tipo).trim();
+              else if (matchedExisting.tipo_contratacao) s.tipo_contratacao = matchedExisting.tipo_contratacao;
+              else if (isNovos) s.tipo_contratacao = "Novo";
+
+              if (row.objeto !== undefined && row.objeto !== "") s.objeto = String(row.objeto).trim();
+              if (row.contrato !== undefined) s.contrato = row.contrato ? String(row.contrato).trim() : null;
+              if (row.contratada !== undefined) s.contratada = row.contratada ? String(row.contratada).trim() : null;
+              if (row.prioridade !== undefined && row.prioridade !== "") s.grau_prioridade = String(row.prioridade).trim();
+              if (row.vinculação !== undefined && row.vinculação !== "") s.vinculacao = String(row.vinculação).trim();
+              if (row.vinculacao !== undefined && row.vinculacao !== "") s.vinculacao = String(row.vinculacao).trim();
+              if (row._diretoria_id) s.diretoria_id = row._diretoria_id;
+              else if (row.diretoria_id) s.diretoria_id = row.diretoria_id;
+              if (row._gerencia_id) s.gerencia_id = row._gerencia_id;
+              else if (row.gerencia_id) s.gerencia_id = row.gerencia_id;
+              if (row._ativo !== undefined) {
+                s.ativo = Boolean(row._ativo);
+              } else if (row.status !== undefined && row.status !== "") {
+                s.ativo = String(row.status).toLowerCase().trim() !== "inativo";
+              } else if (row.ativo !== undefined) {
+                s.ativo = Boolean(row.ativo);
+              }
+              if (row.estimativa_valor !== undefined && row.estimativa_valor !== "") {
+                s.estimativa_valor = Number(row.estimativa_valor) || 0;
+              }
+              if (row.justificativa !== undefined) s.justificativa = row.justificativa ? String(row.justificativa).trim() : null;
+
+              payloadToUpdate.push(s);
+            } else {
+              // Se o item ainda não existir no catálogo, faz upsert (insere no catálogo e em serviços)
+              rowsToInsert.push(row);
             }
-            if (row.justificativa !== undefined) s.justificativa = row.justificativa ? String(row.justificativa).trim() : null;
-            return s;
           });
 
-          await updateServicosCatalogoBulkAdmin(payload);
+          if (payloadToUpdate.length > 0) {
+            await updateServicosCatalogoBulkAdmin(payloadToUpdate);
+          }
 
-          queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
-          queryClient.invalidateQueries({ queryKey: ["servicos"] });
-          queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+          if (rowsToInsert.length > 0) {
+            const catalogoPayload = rowsToInsert.map(row => ({
+              item: row.item,
+              tipo_contratacao: row.tipo || (isNovos ? "Novo" : "Renovação"),
+              objeto: row.objeto || "Serviço",
+              justificativa: row.justificativa || null,
+              grau_prioridade: row.prioridade || "Médio",
+              estimativa_valor: row.estimativa_valor !== undefined && row.estimativa_valor !== "" ? Number(row.estimativa_valor) || 0 : 0,
+              vinculacao: row.vinculacao || row.vinculação || "Não",
+              contrato: row.contrato || null,
+              contratada: row.contratada || null,
+              dependencia_descricao: null,
+              diretoria_id: row._diretoria_id || row.diretoria_id || null,
+              gerencia_id: row._gerencia_id || row.gerencia_id || null,
+              ativo: row._ativo !== undefined ? Boolean(row._ativo) : true
+            }));
+
+            if (isGoogleSheetsActive()) {
+              await gsBulkInsert("servicos_catalogo", catalogoPayload);
+            } else {
+              const { error: catalogoError } = await supabase.from("servicos_catalogo").insert(catalogoPayload);
+              if (catalogoError) throw catalogoError;
+            }
+
+            const servicosPayload: any[] = [];
+            rowsToInsert.forEach(row => {
+              const valEstimado = row.estimativa_valor !== undefined && row.estimativa_valor !== "" ? Number(row.estimativa_valor) || 0 : 0;
+              const targetGerencias = row._gerencia_id
+                ? gerenciasList.filter(g => String(g.id) === String(row._gerencia_id))
+                : row._diretoria_id
+                ? gerenciasList.filter(g => String(g.diretoria_id) === String(row._diretoria_id))
+                : gerenciasList;
+              const gersToDistribute = targetGerencias.length > 0 ? targetGerencias : gerenciasList;
+
+              gersToDistribute.forEach(g => {
+                servicosPayload.push({
+                  periodo_id: activePeriodId,
+                  diretoria_id: row._diretoria_id || g.diretoria_id,
+                  gerencia_id: g.id,
+                  item: row.item,
+                  tipo_contratacao: row.tipo || (isNovos ? "Novo" : "Renovação"),
+                  unidade_demandante: g.sigla || "N/A",
+                  objeto: row.objeto || "Serviço",
+                  justificativa: row.justificativa || null,
+                  previsao_inicio: null,
+                  estimativa_valor: valEstimado,
+                  dotacao_orcamentaria: valEstimado,
+                  grau_prioridade: row.prioridade || "Médio",
+                  vinculacao: row.vinculacao || row.vinculação || "Não",
+                  dependencia_descricao: null,
+                  contrato: row.contrato || null,
+                  contratada: row.contratada || null,
+                  observacao: null,
+                  status: "rascunho"
+                });
+              });
+            });
+
+            if (isGoogleSheetsActive()) {
+              for (let i = 0; i < servicosPayload.length; i += 500) {
+                const chunk = servicosPayload.slice(i, i + 500);
+                await gsBulkInsert("servicos", chunk);
+              }
+            } else {
+              for (let i = 0; i < servicosPayload.length; i += 500) {
+                const chunk = servicosPayload.slice(i, i + 500);
+                const { error: servicosError } = await supabase.from("servicos").insert(chunk);
+                if (servicosError) throw servicosError;
+              }
+            }
+          }
+
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] }),
+            queryClient.refetchQueries({ queryKey: ["servicos-catalogo"] }),
+            queryClient.invalidateQueries({ queryKey: ["servicos"] }),
+            queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] }),
+          ]);
 
           toast({
             title: "Atualização em massa concluída!",
-            description: `${payload.length} serviços atualizados com sucesso no catálogo e sincronizados nos painéis da gerência e diretoria.`,
+            description: `${data.rows.length} serviços atualizados com sucesso no catálogo e sincronizados nos painéis da gerência e diretoria.`,
           });
         }
 
@@ -780,14 +1105,14 @@ export function AdminImportCsv() {
           objeto: row.objeto,
           justificativa: row.justificativa || null,
           grau_prioridade: row.prioridade || "Médio",
-          estimativa_valor: row.estimativa_valor ? Number(row.estimativa_valor) : 0,
-          vinculacao: row.vinculação || "Não",
+          estimativa_valor: row.estimativa_valor !== undefined && row.estimativa_valor !== "" ? Number(row.estimativa_valor) || 0 : 0,
+          vinculacao: row.vinculacao || row.vinculação || "Não",
           contrato: row.contrato || null,
           contratada: row.contratada || null,
           dependencia_descricao: null,
-          diretoria_id: row._diretoria_id,
-          gerencia_id: null,
-          ativo: row._ativo
+          diretoria_id: row._diretoria_id || row.diretoria_id || null,
+          gerencia_id: row._gerencia_id || row.gerencia_id || null,
+          ativo: row._ativo !== undefined ? Boolean(row._ativo) : true
         }));
 
         if (isGoogleSheetsActive()) {
@@ -799,10 +1124,18 @@ export function AdminImportCsv() {
 
         const servicosPayload: any[] = [];
         data.rows.forEach(row => {
-          gerenciasList.forEach(g => {
+          const valEstimado = row.estimativa_valor !== undefined && row.estimativa_valor !== "" ? Number(row.estimativa_valor) || 0 : 0;
+          const targetGerencias = row._gerencia_id
+            ? gerenciasList.filter(g => String(g.id) === String(row._gerencia_id))
+            : row._diretoria_id
+            ? gerenciasList.filter(g => String(g.diretoria_id) === String(row._diretoria_id))
+            : gerenciasList;
+          const gersToDistribute = targetGerencias.length > 0 ? targetGerencias : gerenciasList;
+
+          gersToDistribute.forEach(g => {
             servicosPayload.push({
               periodo_id: activePeriodId,
-              diretoria_id: g.diretoria_id,
+              diretoria_id: row._diretoria_id || g.diretoria_id,
               gerencia_id: g.id,
               item: row.item,
               tipo_contratacao: row.tipo || (isNovos ? "Novo" : "Renovação"),
@@ -810,10 +1143,10 @@ export function AdminImportCsv() {
               objeto: row.objeto,
               justificativa: row.justificativa || null,
               previsao_inicio: null,
-              estimativa_valor: 0,
-              dotacao_orcamentaria: 0,
+              estimativa_valor: valEstimado,
+              dotacao_orcamentaria: valEstimado,
               grau_prioridade: row.prioridade || "Médio",
-              vinculacao: row.vinculação || "Não",
+              vinculacao: row.vinculacao || row.vinculação || "Não",
               dependencia_descricao: null,
               contrato: row.contrato || null,
               contratada: row.contratada || null,
@@ -838,13 +1171,19 @@ export function AdminImportCsv() {
       }
       
       if (importType === "aquisicao") {
-        queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] });
-        queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-        queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["itens-catalogo"] }),
+          queryClient.refetchQueries({ queryKey: ["itens-catalogo"] }),
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes"] }),
+          queryClient.invalidateQueries({ queryKey: ["solicitacoes-diretoria"] }),
+        ]);
       } else {
-        queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] });
-        queryClient.invalidateQueries({ queryKey: ["servicos"] });
-        queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["servicos-catalogo"] }),
+          queryClient.refetchQueries({ queryKey: ["servicos-catalogo"] }),
+          queryClient.invalidateQueries({ queryKey: ["servicos"] }),
+          queryClient.invalidateQueries({ queryKey: ["servicos-diretoria"] }),
+        ]);
       }
 
       toast({
